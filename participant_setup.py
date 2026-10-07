@@ -25,6 +25,13 @@ from timeline_key import (
 PARTICIPANT_PATTERN = re.compile(r"^(?:participant_)?(\d+)$")
 
 
+def derive_rng(seed: int, label: str) -> random.Random:
+    """Create a deterministic RNG stream isolated by a descriptive label."""
+    if not label:
+        raise ValueError('RNG stream label must not be empty.')
+    return random.Random(f'{seed}:{label}')
+
+
 def next_participant_id(data_dir: Path) -> str:
     """Return the lowest unused participant number, formatted with at least 2 digits."""
     data_dir = Path(data_dir)
@@ -130,7 +137,7 @@ def create_participant_plan(data_dir: Path, participant_id: str) -> tuple[Path, 
     block_order = ['animate', 'inanimate'] if number % 2 else ['inanimate', 'animate']
 
     # Keep the assignment and all generated timelines in the same parity-based order.
-    slotting_rng = random.Random(seed)
+    slotting_rng = derive_rng(seed, 'split_slotting')
     # The split itself consumes the same deterministic stream used by the key builder.
     assignment = split_pool(slotting_rng)
     assignment = {block: assignment[block] for block in block_order}
@@ -140,7 +147,7 @@ def create_participant_plan(data_dir: Path, participant_id: str) -> tuple[Path, 
     saved_assignment = read_stimulus_assignment(participant_dir / 'stimulus_assignment.csv')
     saved_slotting = read_slotting_key(participant_dir / 'slotting_key.csv')
     timeline, required, stats = build_timeline(
-        saved_slotting, random.Random(seed), saved_assignment, config.WINDOW_SIZE,
+        saved_slotting, derive_rng(seed, 'timeline'), saved_assignment, config.WINDOW_SIZE,
     )
     validation_report(saved_slotting, required, timeline, stats)
     timeline_path = write_timeline(participant_dir / 'timeline_key.csv', timeline)
@@ -157,7 +164,7 @@ def create_participant_plan(data_dir: Path, participant_id: str) -> tuple[Path, 
         'participant_number': number,
         'seed': seed,
         'seed_bits': 64,
-        'rng_strategy': 'Python random.Random(master_seed); stimulus split and slotting share one stream; timeline uses a fresh stream initialized from the master seed.',
+        'rng_strategy': 'Independent Python random.Random streams derived from the master seed using labels split_slotting and timeline.',
         'block_order': block_order,
         'generated_utc': datetime.now(timezone.utc).isoformat(),
         'git_commit': git_commit,

@@ -18,6 +18,7 @@ from config import (
     WINDOW_SIZE,
 )
 from slotting_key import build_slotting_key
+from participant_setup import derive_rng
 from stimulus_split import split_pool
 from timeline_key import PlacementFailure, _maximum_visual_events, build_timeline
 
@@ -226,7 +227,7 @@ def _layout_analysis(timelines, placement_stats, start_seed, n):
 
 def _seed_inputs(seed, count_ranges=None):
     """Recreate the persisted slotting inputs using the production seed flow."""
-    key_rng = random.Random(seed)
+    key_rng = derive_rng(seed, 'split_slotting')
     assignment = split_pool(key_rng)
     ranges = dict(count_ranges or {})
     source_rows = build_slotting_key(
@@ -344,7 +345,7 @@ def _audit_timeline(timeline, required, assignment, count_ranges=None):
 
 def _run_seed(seed, diagnostics=None, count_ranges=None):
     slotting_rows, assignment = _seed_inputs(seed, count_ranges)
-    timeline_rng = random.Random(seed)
+    timeline_rng = derive_rng(seed, 'timeline')
     timeline, required, stats = build_timeline(
         slotting_rows, timeline_rng, assignment, WINDOW_SIZE,
         diagnostics=diagnostics,
