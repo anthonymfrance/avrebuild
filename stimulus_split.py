@@ -59,10 +59,25 @@ def split_pool(rng):
 
 
 ASSIGNMENT_FIELDS = ('block', 'role', 'item', 'item_index')
+ROLES = frozenset({'PT', 'NPT', 'PD', 'NPD'})
+
+
+def validate_stimulus_assignment(assignment):
+    """Require complete, non-overlapping immutable role pools per block."""
+    if not assignment:
+        raise ValueError('Stimulus assignment is empty.')
+    for block, roles in assignment.items():
+        if set(roles) != ROLES:
+            raise ValueError(f'{block}: stimulus assignment must contain PT, NPT, PD, and NPD.')
+        items = [item for pool in roles.values() for item in pool]
+        if any(not item for item in items) or len(items) != len(set(items)):
+            raise ValueError(f'{block}: each stimulus item must appear in exactly one nonempty role pool.')
+    return True
 
 
 def write_stimulus_assignment(path, assignment):
     """Persist the assignment once so later stages consume the same pools."""
+    validate_stimulus_assignment(assignment)
     path = Path(path)
     created = False
     try:
@@ -94,24 +109,26 @@ def read_stimulus_assignment(path):
     assignment = {}
     for row in rows:
         block, role, item = row['block'], row['role'], row['item']
-        if not block or role not in {'PT', 'NPT', 'PD', 'NPD'} or not item:
+        if not block or role not in ROLES or not item:
             raise ValueError('Stimulus assignment contains an invalid block, role, or item.')
         index = int(row['item_index'])
         assignment.setdefault(block, {}).setdefault(role, []).append((index, item))
-    if not assignment or any(set(roles) != {'PT', 'NPT', 'PD', 'NPD'} for roles in assignment.values()):
+    if not assignment or any(set(roles) != ROLES for roles in assignment.values()):
         raise ValueError('Stimulus assignment must include PT, NPT, PD, and NPD pools for every block.')
     for roles in assignment.values():
         for role, indexed_items in roles.items():
             indexed_items.sort()
             indices = [index for index, _ in indexed_items]
             items = [item for _, item in indexed_items]
-            if indices != list(range(1, len(items) + 1)) or len(items) != len(set(items)):
+            if indices != list(range(1, len(items) + 1)):
                 raise ValueError(f'{role} assignment indices must be consecutive and items unique.')
             roles[role] = tuple(items)
-    return MappingProxyType({
+    assignment = MappingProxyType({
         block: MappingProxyType(dict(roles))
         for block, roles in assignment.items()
     })
+    validate_stimulus_assignment(assignment)
+    return assignment
 
 
 def pt_sequence(pts, rng):

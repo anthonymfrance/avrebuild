@@ -12,6 +12,7 @@ from config import (
     CORNERS,
     FADE_IN_DUR,
     FADE_OUT_DUR,
+    IMAGE_SIZE,
     MAX_BACKTRACK_ATTEMPTS,
     MAX_PLACEMENT_ATTEMPTS,
     MAX_TIMELINE_ATTEMPTS,
@@ -32,12 +33,12 @@ from config import (
     TRIAL_PD_RANGE,
     TRIAL_PT_RANGE,
 )
-from stimulus_split import read_stimulus_assignment
+from stimulus_split import read_stimulus_assignment, validate_stimulus_assignment
 
 
 FIELDS = [
-    'block', 'trial', 'event_index', 'event_id', 'source_event_id', 'role',
-    'stimulus', 'slot_number', 'corner', 'onset', 'duration', 'event_type',
+    'block', 'trial', 'event_index', 'order_in_trial', 'event_id', 'source_event_id', 'role',
+    'stimulus', 'slot_number', 'corner', 'x', 'y', 'onset', 'duration', 'event_type',
     'soa', 'response_window',
 ]
 VISUAL_DURATION = FADE_IN_DUR + PEAK_HOLD_DUR + FADE_OUT_DUR
@@ -50,6 +51,10 @@ RANGES = {
     'PD': TRIAL_PD_RANGE,
     'NPD': TRIAL_NPD_RANGE,
 }
+CORNER_SIGNS = {
+    'top_left': (-1, 1), 'top_right': (1, 1),
+    'bottom_left': (-1, -1), 'bottom_right': (1, -1),
+}
 
 
 class PlacementFailure(RuntimeError):
@@ -57,7 +62,7 @@ class PlacementFailure(RuntimeError):
 
 
 def read_slotting_key(path):
-    """Read PT/NPT items and keep their spatial assignments intact."""
+    """Read PT/NPT assignments; slot_number is an identity label, not time order."""
     with Path(path).open(newline='', encoding='utf-8') as file:
         rows = list(csv.DictReader(file))
     required = {'block', 'trial', 'role', 'slot_number', 'event_id', 'corner'}
@@ -86,7 +91,39 @@ def _trial_start(block_index, trial, trial_count):
     return (block_index * trial_count + trial - 1) * TRIAL_DURATION
 
 
+def _position_bounds(window_size, image_size):
+    """Return legal absolute center-coordinate bounds for one quadrant."""
+    if len(window_size) != 2 or len(image_size) != 2:
+        raise ValueError('Window and image sizes must each contain width and height.')
+    window_width, window_height = map(float, window_size)
+    image_width, image_height = map(float, image_size)
+    if not all(math.isfinite(value) and value > 0 for value in (
+        window_width, window_height, image_width, image_height
+    )):
+        raise ValueError('Window and image dimensions must be positive finite numbers.')
+    x_min, x_max = image_width / 2, window_width / 2 - image_width / 2
+    y_min, y_max = image_height / 2, window_height / 2 - image_height / 2
+    if x_max < x_min or y_max < y_min:
+        raise ValueError(
+            f'Image size {image_size} cannot fit within each quadrant of window {window_size}.'
+        )
+    return x_min, x_max, y_min, y_max
+
+
+def _jitter_position(corner, window_size, rng, image_size=IMAGE_SIZE):
+    """Sample an image center uniformly within its assigned screen quadrant."""
+    if corner not in CORNER_SIGNS:
+        raise ValueError(f'Unknown corner {corner!r}.')
+    x_min, x_max, y_min, y_max = _position_bounds(window_size, image_size)
+    x_sign, y_sign = CORNER_SIGNS[corner]
+    return (
+        x_sign * rng.uniform(x_min, x_max),
+        y_sign * rng.uniform(y_min, y_max),
+    )
+
+
 def _event(block, trial, role, stimulus, slot, event_id, corner, soa=None):
+    # slot_number identifies the source slot; it does not assign a temporal order.
     return {
         'block': block, 'trial': trial, 'role': role, 'stimulus': stimulus,
         'slot_number': slot, 'event_id': event_id, 'corner': corner, 'soa': soa,
@@ -134,7 +171,8 @@ def _required_events(slotting_rows, stimulus_assignment, rng, pt_soa_by_block, t
 
 
 def _conflict(event, onset, placed, trial_end):
-    if onset < event['trial_start'] or onset + VISUAL_DURATION > trial_end:
+    content_start = event['trial_start'] + TRIAL_BUFFER_DUR
+    if onset < content_start or onset + VISUAL_DURATION > trial_end:
         return 'trial content boundary'
     if event['role'] in {'PT', 'PD'}:
         audio_end = onset + event['soa'] + SOUND_DUR + RESPONSE_WINDOW
@@ -143,6 +181,8 @@ def _conflict(event, onset, placed, trial_end):
     visuals = [row for row in placed if row['event_type'] == 'visual']
     for other in visuals:
         gap = abs(onset - other['onset'])
+        if event['corner'] == other['corner'] and gap < VISUAL_DURATION:
+            return 'same-corner overlap'
         if gap < MIN_VISUAL_ONSET_GAP:
             return 'minimum visual onset gap'
         if event['stimulus'] == other['stimulus'] and gap < MIN_SAME_ITEM_GAP:
@@ -158,7 +198,9 @@ def _conflict(event, onset, placed, trial_end):
 
 
 def _solve_trial(events, trial_start, stats):
+    stats['attempt_backtracks'] = 0
     trial_end = trial_start + TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
+    # Role and slot labels prioritize placement; slot_number does not assign time.
     ordered = sorted(events, key=lambda e: (ROLE_PRIORITY[e['role']], e['slot_number'], e['event_id']))
     placed = []
 
@@ -202,12 +244,20 @@ def _solve_trial(events, trial_start, stats):
             if solve(index + 1):
                 return True
             if stats['attempt_backtracks'] >= MAX_BACKTRACK_ATTEMPTS:
+                stats['max_trial_backtracks'] = max(
+                    stats['max_trial_backtracks'], stats['attempt_backtracks']
+                )
+                corner_count = sum(
+                    row['event_type'] == 'visual' and row['corner'] == event['corner']
+                    for row in placed
+                )
                 placed.pop()
                 if sound:
                     placed.pop()
                 raise PlacementFailure(
                     f"{event['block']} trial {event['trial']} event {event['event_id']}: "
                     f"required={len(ordered)}, placed={sum(r['event_type'] == 'visual' for r in placed)}, "
+                    f'corner={event["corner"]}, corner_events_placed={corner_count}, '
                     f'constraint={last_conflict}; backtrack limit={MAX_BACKTRACK_ATTEMPTS} reached.'
                 )
             stats['backtracks'] += 1
@@ -219,18 +269,27 @@ def _solve_trial(events, trial_start, stats):
             f"{event['block']} trial {event['trial']} role {event['role']} "
             f"event {event['event_id']} item {event['stimulus']}: "
             f"required={len(ordered)}, placed={sum(r['event_type'] == 'visual' for r in placed)}, "
+            f"corner={event['corner']}, corner_events_placed="
+            f"{sum(r['event_type'] == 'visual' and r['corner'] == event['corner'] for r in placed)}, "
             f'constraint={last_conflict}, placement attempts={attempts}, '
             f'backtracks={stats["attempt_backtracks"]}.'
         )
         return False
 
     if not solve(0):
+        stats['max_trial_backtracks'] = max(
+            stats['max_trial_backtracks'], stats['attempt_backtracks']
+        )
         raise PlacementFailure(stats['last_failure'])
+    stats['max_trial_backtracks'] = max(
+        stats['max_trial_backtracks'], stats['attempt_backtracks']
+    )
     return placed
 
 
-def validate_timeline(slotting_rows, required_events, timeline, stimulus_assignment):
+def validate_timeline(slotting_rows, required_events, timeline, stimulus_assignment, window_size):
     """Check exact per-trial counts, source preservation, and configured timing."""
+    x_min, x_max, y_min, y_max = _position_bounds(window_size, IMAGE_SIZE)
     ids = [row['event_id'] for row in timeline]
     if len(ids) != len(set(ids)):
         raise ValueError('Duplicate timeline event IDs.')
@@ -269,6 +328,25 @@ def validate_timeline(slotting_rows, required_events, timeline, stimulus_assignm
     blocks = list(dict.fromkeys(row['block'] for row in slotting_rows))
     trial_count = max(row['trial'] for row in slotting_rows)
     for row in timeline:
+        if row['event_type'] == 'sound':
+            if row['x'] != '' or row['y'] != '':
+                raise ValueError(f"{row['event_id']}: sound rows must have blank x and y.")
+        else:
+            x, y = row['x'], row['y']
+            if not isinstance(x, (int, float)) or not isinstance(y, (int, float)) or not (
+                math.isfinite(x) and math.isfinite(y)
+            ):
+                raise ValueError(f"{row['event_id']}: visual x and y must be finite numeric coordinates.")
+            if row['corner'] not in CORNER_SIGNS:
+                raise ValueError(f"{row['event_id']}: invalid corner {row['corner']!r}.")
+            x_sign, y_sign = CORNER_SIGNS[row['corner']]
+            if x_sign * x < x_min - 1e-9 or x_sign * x > x_max + 1e-9 or \
+                    y_sign * y < y_min - 1e-9 or y_sign * y > y_max + 1e-9:
+                raise ValueError(
+                    f"{row['block']} trial {row['trial']} {row['event_id']}: "
+                    f'position ({x}, {y}) is outside {row["corner"]} bounds '
+                    f'for window {window_size} and image {IMAGE_SIZE}.'
+                )
         start = _trial_start(blocks.index(row['block']), row['trial'], trial_count)
         lower = start + TRIAL_BUFFER_DUR
         upper = start + TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
@@ -284,6 +362,19 @@ def validate_timeline(slotting_rows, required_events, timeline, stimulus_assignm
     for block, rows in by_block.items():
         block_visuals = sorted((r for r in rows if r['event_type'] == 'visual'), key=lambda r: r['onset'])
         block_sounds = sorted((r for r in rows if r['event_type'] == 'sound'), key=lambda r: r['onset'])
+        corner_groups = defaultdict(list)
+        trial_visuals = defaultdict(list)
+        for visual in block_visuals:
+            corner_groups[(visual['trial'], visual['corner'])].append(visual)
+            trial_visuals[visual['trial']].append(visual)
+        for (trial, corner), corner_rows in corner_groups.items():
+            corner_rows.sort(key=lambda r: r['onset'])
+            for left, right in zip(corner_rows, corner_rows[1:]):
+                if right['onset'] - left['onset'] + 1e-9 < VISUAL_DURATION:
+                    raise ValueError(
+                        f'{block} trial {trial} corner {corner}: same-corner overlap '
+                        f'({len(corner_rows)} visual events in that corner).'
+                    )
         for left, right in zip(block_visuals, block_visuals[1:]):
             if right['onset'] - left['onset'] < MIN_VISUAL_ONSET_GAP:
                 raise ValueError(f'{block}: minimum visual onset gap violated.')
@@ -293,6 +384,12 @@ def validate_timeline(slotting_rows, required_events, timeline, stimulus_assignm
                     raise ValueError(f'{block}: minimum same-item gap violated.')
                 if left['role'] == right['role'] == 'PT' and right['onset'] - left['onset'] < BETWEEN_PT_STIMULUS_GAP:
                     raise ValueError(f'{block}: between-PT gap violated.')
+        if any(row['event_type'] == 'sound' and row['order_in_trial'] != '' for row in rows):
+            raise ValueError(f'{block}: sound rows must have empty order_in_trial.')
+        for trial, trial_rows in trial_visuals.items():
+            trial_rows.sort(key=lambda r: r['onset'])
+            if [row['order_in_trial'] for row in trial_rows] != list(range(1, len(trial_rows) + 1)):
+                raise ValueError(f'{block} trial {trial}: order_in_trial does not match onset order.')
         for left, right in zip(block_sounds, block_sounds[1:]):
             if right['onset'] - left['onset'] < SOUND_DUR + MIN_AUDIO_GAP:
                 raise ValueError(f'{block}: sound overlap or minimum audio gap violated.')
@@ -312,9 +409,16 @@ def validate_timeline(slotting_rows, required_events, timeline, stimulus_assignm
     return True
 
 
-def build_timeline(slotting_rows, rng, stimulus_assignment):
+def build_timeline(slotting_rows, rng, stimulus_assignment, window_size):
     """Construct a complete deterministic timeline or fail without writing."""
+    _position_bounds(window_size, IMAGE_SIZE)
+    validate_stimulus_assignment(stimulus_assignment)
     blocks = list(dict.fromkeys(row['block'] for row in slotting_rows))
+    if set(blocks) != set(stimulus_assignment):
+        raise ValueError(
+            f'Slotting blocks {sorted(blocks)} do not match stimulus assignment blocks '
+            f'{sorted(stimulus_assignment)}.'
+        )
     for block in blocks:
         if block not in stimulus_assignment or set(stimulus_assignment[block]) != {'PT', 'NPT', 'PD', 'NPD'}:
             raise ValueError(f'{block}: missing or incomplete persisted stimulus assignment.')
@@ -324,7 +428,10 @@ def build_timeline(slotting_rows, rng, stimulus_assignment):
     grouped = defaultdict(list)
     for row in slotting_rows:
         grouped[(row['block'], row['trial'])].append(row)
-    stats = {'rng': rng, 'placement_attempts': 0, 'backtracks': 0, 'attempt_backtracks': 0}
+    stats = {
+        'rng': rng, 'placement_attempts': 0, 'backtracks': 0,
+        'attempt_backtracks': 0, 'max_trial_backtracks': 0,
+    }
     pt_soa_by_block = {block: rng.uniform(PT_SOA_MIN, PT_SOA_MAX) for block in blocks}
     required = _required_events(slotting_rows, stimulus_assignment, rng, pt_soa_by_block, trial_count)
     required_by_trial = defaultdict(list)
@@ -332,7 +439,7 @@ def build_timeline(slotting_rows, rng, stimulus_assignment):
         required_by_trial[(event['block'], event['trial'])].append(event)
     last_failure = None
     for _ in range(MAX_TIMELINE_ATTEMPTS):
-        stats['attempt_backtracks'] = 0
+        stats['max_trial_backtracks'] = 0
         stats['last_failure'] = ''
         timeline = []
         try:
@@ -344,14 +451,24 @@ def build_timeline(slotting_rows, rng, stimulus_assignment):
             timeline.sort(key=lambda row: row['onset'])
             for index, row in enumerate(timeline, start=1):
                 row['event_index'] = index
-            validate_timeline(slotting_rows, required, timeline, stimulus_assignment)
-            stats.pop('attempt_backtracks')
+                row['order_in_trial'] = ''
+            order_counts = Counter()
+            for row in timeline:
+                if row['event_type'] == 'visual':
+                    key = (row['block'], row['trial'])
+                    order_counts[key] += 1
+                    row['order_in_trial'] = order_counts[key]
+                    row['x'], row['y'] = _jitter_position(row['corner'], window_size, rng)
+                else:
+                    row['x'] = row['y'] = ''
+            validate_timeline(slotting_rows, required, timeline, stimulus_assignment, window_size)
             return timeline, required, stats
         except PlacementFailure as exc:
             last_failure = exc
     raise PlacementFailure(
         f'Failed after {MAX_TIMELINE_ATTEMPTS} timeline attempts; '
-        f'{last_failure}; total placements={stats["placement_attempts"]}, backtracks={stats["backtracks"]}.'
+        f'{last_failure}; total placements={stats["placement_attempts"]}, '
+        f'backtracks={stats["backtracks"]}, max trial backtracks={stats["max_trial_backtracks"]}.'
     )
 
 
@@ -366,7 +483,8 @@ def validation_report(slotting_rows, required, timeline, stats):
         values = '/'.join(str(counts[(block, trial, role)]) for role in ROLE_ORDER)
         print(f'  {block} trial {trial}: {values}')
     print('Checks: exact counts PASS; slotting preservation PASS; role-pool membership PASS; timing constraints PASS; chronological order PASS.')
-    print(f'Solver: {stats["placement_attempts"]} candidate attempts, {stats["backtracks"]} backtracks.')
+    print(f'Solver: {stats["placement_attempts"]} candidate attempts, {stats["backtracks"]} total backtracks, '
+          f'max {stats["max_trial_backtracks"]} in one trial.')
     print('Final: PASS')
 
 
@@ -381,8 +499,8 @@ def write_timeline(path, timeline):
 
 
 def main():
-    if len(sys.argv) != 3:
-        raise SystemExit('Usage: python timeline_key.py <PID> <seed>')
+    if len(sys.argv) != 5:
+        raise SystemExit('Usage: python timeline_key.py <PID> <seed> <window_width> <window_height>')
     pid = sys.argv[1]
     if not pid or Path(pid).name != pid or pid in {'.', '..'}:
         raise SystemExit('PID must be a single folder name.')
@@ -390,6 +508,10 @@ def main():
         seed = int(sys.argv[2])
     except ValueError:
         raise SystemExit('Seed must be an integer.')
+    try:
+        window_size = (int(sys.argv[3]), int(sys.argv[4]))
+    except ValueError:
+        raise SystemExit('Window width and height must be integers in pixels.')
     output_dir = Path(__file__).resolve().parent / 'data' / pid
     try:
         source_seed = int((output_dir / 'seed.txt').read_text(encoding='utf-8').strip())
@@ -398,12 +520,15 @@ def main():
     if source_seed != seed:
         raise SystemExit(f'Supplied seed {seed} does not match slotting-key seed {source_seed}.')
 
-    slotting_rows = read_slotting_key(output_dir / 'slotting_key.csv')
-    stimulus_assignment = read_stimulus_assignment(output_dir / 'stimulus_assignment.csv')
-    rng = random.Random(seed)
-    timeline, required, stats = build_timeline(slotting_rows, rng, stimulus_assignment)
-    validation_report(slotting_rows, required, timeline, stats)
-    path = write_timeline(output_dir / 'timeline_key.csv', timeline)
+    try:
+        slotting_rows = read_slotting_key(output_dir / 'slotting_key.csv')
+        stimulus_assignment = read_stimulus_assignment(output_dir / 'stimulus_assignment.csv')
+        rng = random.Random(seed)
+        timeline, required, stats = build_timeline(slotting_rows, rng, stimulus_assignment, window_size)
+        validation_report(slotting_rows, required, timeline, stats)
+        path = write_timeline(output_dir / 'timeline_key.csv', timeline)
+    except (OSError, ValueError, PlacementFailure) as exc:
+        raise SystemExit(f'Participant {pid}: {exc}') from exc
     print(f'Wrote {len(timeline)} events to {path}.')
 
 

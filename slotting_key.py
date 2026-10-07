@@ -58,7 +58,7 @@ def corner_pile(total, rng):
 
 
 def build_slotting_key(rng, stimulus_assignment):
-    """Build PT rows followed by NPT rows for both blocks."""
+    """Build PT/NPT rows; slot_number is an identity label, not temporal order."""
     if len(CORNERS) < 2 or len(set(CORNERS)) != len(CORNERS):
         raise ValueError('CORNERS must contain at least two unique corner names.')
     if FAVORED_CORNER not in CORNERS:
@@ -159,6 +159,7 @@ def build_slotting_key(rng, stimulus_assignment):
                 })
                 block_npt_rows.append(row)
 
+        # CSV row order is for readability; slot_number is an identity label, not time.
         block_pt_rows.sort(key=lambda row: (row['trial'], row['slot_number']))
         block_npt_rows.sort(key=lambda row: (row['trial'], row['slot_number'], row['npt_item']))
         pt_rows.extend(block_pt_rows)
@@ -198,15 +199,6 @@ def write_slotting_key(pid, seed, rows, stimulus_assignment):
         raise
 
     return key_path
-
-
-
-#finds a corner for each PT, finds out each pt active per trial counts appearances per trial and total and then shuffles that list of appearances to trials and logs their appearances
-#
-
-
-
-
 
 
 def main():
