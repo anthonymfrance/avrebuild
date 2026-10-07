@@ -7,13 +7,9 @@ Roles (per block):
     NPT  non-privileged target     - in-category, the leftovers
     PD   privileged distractor     - other category
     NPD  non-privileged distractor - other category, the leftovers
-
-Usage: python stimulus_split.py <seed>
 """
 
 import csv
-import random
-import sys
 from pathlib import Path
 from types import MappingProxyType
 
@@ -136,18 +132,3 @@ def pt_sequence(pts, rng):
     sequence = [pt for pt in pts for _ in range(TRIALS_PER_PT)]
     rng.shuffle(sequence)
     return sequence
-
-
-if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        raise SystemExit('Usage: python stimulus_split.py <seed>')
-
-    rng = random.Random(int(sys.argv[1]))
-    for block, roles in split_pool(rng).items():
-        print(f'\n{block.upper()} BLOCK')
-        for role, items in roles.items():
-            print(f"  {role:<3} ({len(items)}): {', '.join(items)}")
-
-        sequence = pt_sequence(roles['PT'], rng)
-        print(f'  Active PT per trial ({len(sequence)} trials):')
-        print(f"    {', '.join(sequence)}")

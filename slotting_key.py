@@ -2,8 +2,6 @@
 
 import csv
 import math
-import random
-import sys
 from pathlib import Path
 
 from config import (
@@ -13,7 +11,7 @@ from config import (
     TRIAL_NPT_RANGE,
     TRIAL_PT_RANGE,
 )
-from stimulus_split import pt_sequence, split_pool, write_stimulus_assignment
+from stimulus_split import pt_sequence, write_stimulus_assignment
 
 
 BASE_FIELDS = [
@@ -188,7 +186,7 @@ def write_slotting_key(pid, seed, rows, stimulus_assignment, data_dir):
     try:
         with key_path.open('x', newline='', encoding='utf-8') as file:
             created.append(key_path)
-            writer = csv.DictWriter(file, fieldnames=FIELDNAMES)
+            writer = csv.DictWriter(file, fieldnames=FIELDNAMES, extrasaction='ignore')
             writer.writeheader()
             writer.writerows(rows)
 
@@ -202,26 +200,3 @@ def write_slotting_key(pid, seed, rows, stimulus_assignment, data_dir):
         raise
 
     return key_path
-
-
-def main():
-    if len(sys.argv) != 3:
-        raise SystemExit('Usage: python slotting_key.py <PID> <seed>')
-
-    pid = sys.argv[1]
-    try:
-        seed = int(sys.argv[2])
-    except ValueError:
-        raise SystemExit('Seed must be an integer.')
-
-    rng = random.Random(seed)
-    stimulus_assignment = split_pool(rng)
-    rows = build_slotting_key(rng, stimulus_assignment)
-    key_path = write_slotting_key(pid, seed, rows, stimulus_assignment, Path('data') / pid)
-    pt_count = sum(row['role'] == 'PT' for row in rows)
-    npt_count = sum(row['role'] == 'NPT' for row in rows)
-    print(f'Wrote {pt_count} PT and {npt_count} NPT appearances to {key_path}')
-
-
-if __name__ == '__main__':
-    main()

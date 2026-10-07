@@ -2,8 +2,6 @@
 
 import csv
 import math
-import random
-import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -32,9 +30,8 @@ from config import (
     TRIAL_NPT_RANGE,
     TRIAL_PD_RANGE,
     TRIAL_PT_RANGE,
-    WINDOW_SIZE,
 )
-from stimulus_split import read_stimulus_assignment, validate_stimulus_assignment
+from stimulus_split import validate_stimulus_assignment
 
 
 # global_onset is PLANNED time on one continuous clock assuming no pauses. It
@@ -67,7 +64,11 @@ class PlacementFailure(RuntimeError):
 def read_slotting_key(path):
     """Read PT/NPT assignments; slot_number is an identity label, not time order."""
     with Path(path).open(newline='', encoding='utf-8') as file:
-        rows = list(csv.DictReader(file))
+        return prepare_slotting_rows(list(csv.DictReader(file)))
+
+
+def prepare_slotting_rows(rows):
+    """Normalize slotting rows in place (typed trial/slot, stimulus field) and check them."""
     required = {'block', 'trial', 'role', 'slot_number', 'event_id', 'corner'}
     if not rows or not required.issubset(rows[0]):
         raise ValueError(f'Slotting key must have rows and columns: {sorted(required)}')
@@ -682,37 +683,3 @@ def write_timeline(path, timeline):
         writer.writeheader()
         writer.writerows(timeline)
     return path
-
-
-def main():
-    if len(sys.argv) != 3:
-        raise SystemExit('Usage: python timeline_key.py <PID> <seed>')
-    pid = sys.argv[1]
-    if not pid or Path(pid).name != pid or pid in {'.', '..'}:
-        raise SystemExit('PID must be a single folder name.')
-    try:
-        seed = int(sys.argv[2])
-    except ValueError:
-        raise SystemExit('Seed must be an integer.')
-    output_dir = Path(__file__).resolve().parent / 'data' / pid
-    try:
-        source_seed = int((output_dir / 'seed.txt').read_text(encoding='utf-8').strip())
-    except (OSError, ValueError):
-        raise SystemExit(f'Could not read a valid seed from {output_dir / "seed.txt"}')
-    if source_seed != seed:
-        raise SystemExit(f'Supplied seed {seed} does not match slotting-key seed {source_seed}.')
-
-    try:
-        slotting_rows = read_slotting_key(output_dir / 'slotting_key.csv')
-        stimulus_assignment = read_stimulus_assignment(output_dir / 'stimulus_assignment.csv')
-        rng = random.Random(seed)
-        timeline, required, stats = build_timeline(slotting_rows, rng, stimulus_assignment, WINDOW_SIZE)
-        validation_report(slotting_rows, required, timeline, stats)
-        path = write_timeline(output_dir / 'timeline_key.csv', timeline)
-    except (OSError, ValueError, PlacementFailure) as exc:
-        raise SystemExit(f'Participant {pid}: {exc}') from exc
-    print(f'Wrote {len(timeline)} events to {path}.')
-
-
-if __name__ == '__main__':
-    main()

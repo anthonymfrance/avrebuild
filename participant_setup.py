@@ -11,15 +11,16 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 
 import config
 from session_io import sha256_file
 from slotting_key import build_slotting_key, write_slotting_key
-from stimulus_split import read_stimulus_assignment, split_pool
+from stimulus_split import split_pool
 from timeline_key import (
     PlacementFailure,
     build_timeline,
-    read_slotting_key,
+    prepare_slotting_rows,
     validation_report,
     write_timeline,
 )
@@ -37,6 +38,35 @@ def derive_rng(seed: int, label: str) -> random.Random:
     if not label:
         raise ValueError('RNG stream label must not be empty.')
     return random.Random(f'{seed}:{label}')
+
+
+def build_plan(seed, block_order, count_ranges=None, diagnostics=None):
+    """Generate split -> slotting key -> timeline in memory from one master seed.
+
+    Returns (assignment, slotting_rows, timeline, required, stats). Raises
+    PlacementFailure when the timeline cannot be placed.
+    """
+    slotting_rng = derive_rng(seed, 'split_slotting')
+    split = split_pool(slotting_rng)
+    assignment = MappingProxyType({block: split[block] for block in block_order})
+    ranges = dict(count_ranges or {})
+    slotting_rows = prepare_slotting_rows(build_slotting_key(
+        slotting_rng, assignment,
+        pt_count_range=ranges.get('PT', config.TRIAL_PT_RANGE),
+        npt_count_range=ranges.get('NPT', config.TRIAL_NPT_RANGE),
+    ))
+    timeline, required, stats = build_timeline(
+        slotting_rows, derive_rng(seed, 'timeline'), assignment, config.WINDOW_SIZE,
+        diagnostics=diagnostics, count_ranges=count_ranges,
+    )
+    return assignment, slotting_rows, timeline, required, stats
+
+
+def config_snapshot():
+    """JSON-normalized uppercase config values (tuples become lists, sets sorted lists)."""
+    values = {name: value for name, value in vars(config).items()
+              if name.isupper() and not name.startswith('_')}
+    return json.loads(json.dumps(values, default=sorted))
 
 
 def next_participant_id(data_dir: Path) -> str:
@@ -137,28 +167,18 @@ def create_participant_plan(data_dir: Path, participant_id: str) -> tuple[Path, 
             while seed in used_seeds:
                 seed = secrets.randbits(64)
             used_seeds.add(seed)
-            slotting_rng = derive_rng(seed, 'split_slotting')
-            assignment = split_pool(slotting_rng)
-            assignment = {block: assignment[block] for block in block_order}
-            slotting_rows = build_slotting_key(slotting_rng, assignment)
-            write_slotting_key(participant_id, seed, slotting_rows, assignment, data_dir=temp_dir)
-            saved_assignment = read_stimulus_assignment(temp_dir / 'stimulus_assignment.csv')
-            saved_slotting = read_slotting_key(temp_dir / 'slotting_key.csv')
             try:
-                timeline, required, stats = build_timeline(
-                    saved_slotting, derive_rng(seed, 'timeline'), saved_assignment, config.WINDOW_SIZE,
-                )
+                assignment, slotting_rows, timeline, required, stats = build_plan(seed, block_order)
             except PlacementFailure as exc:
                 failed_seeds.append(seed)
-                for path in temp_dir.iterdir():
-                    path.unlink()
                 if attempt == 5:
                     failed = ', '.join(map(str, failed_seeds))
                     raise PlanGenerationError(
                         f'Timeline placement failed after 5 attempts; failed seeds: {failed}.'
                     ) from exc
                 continue
-            validation_report(saved_slotting, required, timeline, stats)
+            write_slotting_key(participant_id, seed, slotting_rows, assignment, data_dir=temp_dir)
+            validation_report(slotting_rows, required, timeline, stats)
             write_timeline(temp_dir / 'timeline_key.csv', timeline)
             break
         try:
@@ -182,10 +202,7 @@ def create_participant_plan(data_dir: Path, participant_id: str) -> tuple[Path, 
             'timeline_sha256': sha256_file(temp_dir / 'timeline_key.csv'),
             'generated_utc': datetime.now(timezone.utc).isoformat(),
             'git_commit': git_commit,
-            'config': {
-                name: value for name, value in vars(config).items()
-                if name.isupper() and not name.startswith('_')
-            },
+            'config': config_snapshot(),
             'artifacts': {
                 'stimulus_assignment': 'stimulus_assignment.csv',
                 'slotting_key': 'slotting_key.csv',

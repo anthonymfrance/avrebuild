@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import math
 import random
 import statistics
 import time
@@ -10,17 +9,14 @@ from collections import Counter
 from pathlib import Path
 
 from config import (
-    BETWEEN_PT_STIMULUS_GAP, FADE_IN_DUR, FADE_OUT_DUR,
-    MIN_AUDIO_GAP, MIN_SAME_ITEM_GAP, MIN_TARGET_END_TO_ONSET_GAP,
-    MIN_VISUAL_ONSET_GAP, PEAK_HOLD_DUR, RESPONSE_WINDOW, SOUND_DUR,
+    FADE_IN_DUR, FADE_OUT_DUR, MIN_TARGET_END_TO_ONSET_GAP,
+    MIN_VISUAL_ONSET_GAP, PEAK_HOLD_DUR,
     TRIAL_BUFFER_DUR, TRIAL_CONTENT_DUR,
     TRIAL_NPD_RANGE, TRIAL_NPT_RANGE, TRIAL_PD_RANGE, TRIAL_PT_RANGE,
     WINDOW_SIZE,
 )
-from slotting_key import build_slotting_key
-from participant_setup import derive_rng
-from stimulus_split import split_pool
-from timeline_key import PlacementFailure, _maximum_visual_events, build_timeline
+from participant_setup import build_plan
+from timeline_key import PlacementFailure, _maximum_visual_events, validate_timeline
 
 
 MAX_EXAMPLE_FAILURES = 20
@@ -124,7 +120,10 @@ def _layout_analysis(timelines, placement_stats, start_seed, n):
         total_weight = sum(weights)
         for _ in range(LAYOUT_SIMILARITY_SAMPLE_PAIRS):
             pick = pair_rng.randrange(total_weight)
-            group_index = next(i for i, weight in enumerate(weights) if (pick := pick - weight) < 0)
+            for group_index, weight in enumerate(weights):
+                pick -= weight
+                if pick < 0:
+                    break
             values = pairable[group_index][1]
             i = pair_rng.randrange(len(values))
             j = pair_rng.randrange(len(values) - 1)
@@ -225,135 +224,20 @@ def _layout_analysis(timelines, placement_stats, start_seed, n):
     }
 
 
-def _seed_inputs(seed, count_ranges=None):
-    """Recreate the persisted slotting inputs using the production seed flow."""
-    key_rng = derive_rng(seed, 'split_slotting')
-    assignment = split_pool(key_rng)
-    ranges = dict(count_ranges or {})
-    source_rows = build_slotting_key(
-        key_rng, assignment,
-        pt_count_range=ranges.get('PT', TRIAL_PT_RANGE),
-        npt_count_range=ranges.get('NPT', TRIAL_NPT_RANGE),
+def _audit_timeline(timeline, required, assignment, slotting_rows, count_ranges=None):
+    """Re-run the single full rule check on the finished timeline."""
+    validate_timeline(
+        slotting_rows, required, timeline, assignment, WINDOW_SIZE, count_ranges=count_ranges,
     )
-
-    # Match read_slotting_key's in-memory normalization of the CSV rows.
-    slotting_rows = []
-    for source in source_rows:
-        row = dict(source)
-        row['trial'] = int(row['trial'])
-        row['slot_number'] = int(row['slot_number'])
-        row['role'] = row['role'].strip()
-        row['stimulus'] = (
-            row.get('active_pt', '').strip() if row['role'] == 'PT'
-            else row.get('npt_item', '').strip() if row['role'] == 'NPT'
-            else ''
-        )
-        slotting_rows.append(row)
-    return slotting_rows, assignment
-
-
-def _audit_timeline(timeline, required, assignment, count_ranges=None):
-    """Independently check generated counts, windows, visual gaps, and audio."""
-    ranges = {
-        'PT': TRIAL_PT_RANGE, 'NPT': TRIAL_NPT_RANGE,
-        'PD': TRIAL_PD_RANGE, 'NPD': TRIAL_NPD_RANGE,
-    }
-    ranges.update(count_ranges or {})
-    blocks = list(assignment)
-    trial_count = max(row['trial'] for row in required)
-    visuals = [row for row in timeline if row['event_type'] == 'visual']
-    sounds = [row for row in timeline if row['event_type'] == 'sound']
-    expected = Counter((row['block'], row['trial'], row['role']) for row in required)
-    actual = Counter((row['block'], row['trial'], row['role']) for row in visuals)
-    if actual != expected:
-        raise ValueError('Monte Carlo audit: required visual counts changed.')
-    for row in visuals:
-        if row['stimulus'] not in assignment[row['block']][row['role']]:
-            raise ValueError(f"Monte Carlo audit: {row['event_id']} has an invalid role-pool item.")
-        low, high = ranges[row['role']]
-        count = actual[(row['block'], row['trial'], row['role'])]
-        if not low <= count <= high:
-            raise ValueError(f"Monte Carlo audit: {row['block']} trial {row['trial']} {row['role']} count is out of range.")
-
-    visuals_by_trial = {}
-    sounds_by_block = {}
-    for row in timeline:
-        trial_start = (blocks.index(row['block']) * trial_count + row['trial'] - 1) * TRIAL_DURATION
-        content_start = trial_start + TRIAL_BUFFER_DUR
-        content_end = content_start + TRIAL_CONTENT_DUR
-        event_end = row['global_onset'] + row['duration']
-        if row['event_type'] == 'visual':
-            visuals_by_trial.setdefault((row['block'], row['trial']), []).append(row)
-            if row['global_onset'] < content_start or event_end > content_end:
-                raise ValueError(f"Monte Carlo audit: visual {row['event_id']} escapes the content window.")
-            is_target = row['role'] in {'PT', 'NPT'}
-            if (row['response_window'] == RESPONSE_WINDOW) != is_target:
-                raise ValueError(f"Monte Carlo audit: response window is assigned to the wrong role for {row['event_id']}.")
-            if is_target and row['global_onset'] + row['response_window'] > trial_start + TRIAL_DURATION:
-                raise ValueError(f"Monte Carlo audit: response window for {row['event_id']} exceeds the trial.")
-        elif row['event_type'] == 'sound':
-            sounds_by_block.setdefault(row['block'], []).append(row)
-            if row['response_window'] != '' or row['global_onset'] < content_start or event_end > content_end:
-                raise ValueError(f"Monte Carlo audit: sound {row['event_id']} has invalid timing or a response window.")
-        else:
-            raise ValueError(f"Monte Carlo audit: unknown event type in {row['event_id']}.")
-
-    expected_sounds = {row['event_id'] for row in required if row['role'] in {'PT', 'PD'}}
-    sounds_by_source = {row['source_event_id']: row for row in sounds}
-    if set(sounds_by_source) != expected_sounds:
-        raise ValueError('Monte Carlo audit: PT/PD sound pairing is incomplete or unexpected.')
-
-    for (block, trial), rows in visuals_by_trial.items():
-        rows.sort(key=lambda row: row['global_onset'])
-        for left, right in zip(rows, rows[1:]):
-            if right['global_onset'] - left['global_onset'] < MIN_VISUAL_ONSET_GAP:
-                raise ValueError(f'Monte Carlo audit: visual onset gap failed in {block} trial {trial}.')
-        targets = [row for row in rows if row['role'] in {'PT', 'NPT'}]
-        for index, left in enumerate(rows):
-            for right in rows[index + 1:]:
-                onset_delta = right['global_onset'] - left['global_onset']
-                end_gap = onset_delta - VISUAL_DURATION
-                if left['corner'] == right['corner'] and end_gap < -1e-9:
-                    raise ValueError(
-                        f'Monte Carlo audit: same-corner images overlap in {block} trial {trial}: '
-                        f'{left["event_id"]}/{right["event_id"]}, end-to-onset gap={end_gap:.12g}s.'
-                    )
-                if left['stimulus'] == right['stimulus'] and end_gap < MIN_SAME_ITEM_GAP:
-                    raise ValueError(f'Monte Carlo audit: same-item gap failed in {block} trial {trial}.')
-                if left['role'] == right['role'] == 'PT' and end_gap < BETWEEN_PT_STIMULUS_GAP:
-                    raise ValueError(f'Monte Carlo audit: PT-to-PT gap failed in {block} trial {trial}.')
-        for left, right in zip(targets, targets[1:]):
-            if right['global_onset'] - (left['global_onset'] + VISUAL_DURATION) < MIN_TARGET_END_TO_ONSET_GAP:
-                raise ValueError(f'Monte Carlo audit: target fade-end gap failed in {block} trial {trial}.')
-            if right['global_onset'] - left['global_onset'] < RESPONSE_WINDOW:
-                raise ValueError(f'Monte Carlo audit: target response windows overlap in {block} trial {trial}.')
-
-    for block, rows in sounds_by_block.items():
-        rows.sort(key=lambda row: row['global_onset'])
-        for left, right in zip(rows, rows[1:]):
-            if right['global_onset'] - left['global_onset'] < SOUND_DUR + MIN_AUDIO_GAP:
-                raise ValueError(f'Monte Carlo audit: audio gap failed in {block}.')
-    for visual in visuals:
-        if visual['role'] in {'PT', 'PD'}:
-            sound = sounds_by_source[visual['event_id']]
-            if not math.isclose(
-                visual['global_onset'] + FADE_IN_DUR - sound['global_onset'],
-                sound['soa'],
-            ):
-                raise ValueError(f"Monte Carlo audit: SOA mismatch for {visual['event_id']}.")
 
 
 def _run_seed(seed, diagnostics=None, count_ranges=None):
-    slotting_rows, assignment = _seed_inputs(seed, count_ranges)
-    timeline_rng = derive_rng(seed, 'timeline')
-    timeline, required, stats = build_timeline(
-        slotting_rows, timeline_rng, assignment, WINDOW_SIZE,
-        diagnostics=diagnostics,
-        count_ranges=count_ranges,
+    assignment, slotting_rows, timeline, required, stats = build_plan(
+        seed, ['animate', 'inanimate'], count_ranges, diagnostics=diagnostics,
     )
     if diagnostics is not None:
         diagnostics['stage'] = 'monte_carlo_audit'
-    _audit_timeline(timeline, required, assignment, count_ranges)
+    _audit_timeline(timeline, required, assignment, slotting_rows, count_ranges)
     return timeline, required, stats, diagnostics
 
 
@@ -571,7 +455,7 @@ def _print_variability(analysis):
 
     timing = analysis['pt_pd_timing']
     print('\nPT/PD PAIRED AUDIOVISUAL SOA VARIABILITY')
-    print(f"  Intended SOA:")
+    print('  Intended SOA:')
     _print_distribution('intended', timing['intended_soa_seconds'])
     print('  Actual SOA:')
     _print_distribution('actual', timing['actual_soa_seconds'])
