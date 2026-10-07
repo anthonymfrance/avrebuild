@@ -18,26 +18,18 @@ from pathlib import Path
 import config
 from config import BLOCK_LABELS, TARGET_ROLES, TRIAL_DURATION, VISUAL_DURATION
 from participant_setup import create_participant_plan, derive_rng
+import screens
+from screens import KEY_TO_CORNER
 from session_io import load_timeline, save_session, sha256_file, sync_participant
 from audio_ptb import (
     AUDIO_START_SOURCE, backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio,
 )
 from scoring import (
-    classify_press, finalize_targets, inter_trial_row, session_false_alarms, trial_feedback,
+    classify_press, finalize_targets, session_false_alarms, trial_feedback,
 )
 
 
 ROOT = Path(os.environ.get('AV_STUDY_DIR', Path(__file__).resolve().parent)).resolve()
-RESPONSE_KEYS = {
-    'top_left': ('num_4', 'KP_Left'),
-    'top_right': ('num_5', 'KP_Begin'),
-    'bottom_left': ('num_1', 'KP_End'),
-    'bottom_right': ('num_2', 'KP_Down'),
-}
-KEY_TO_CORNER = {
-    key: corner for corner, keys in RESPONSE_KEYS.items() for key in keys
-}
-ALL_KEYS = list(KEY_TO_CORNER) + ['space', 'escape']
 
 
 def _finite_number(value, label):
@@ -246,81 +238,18 @@ def run(args):
             closeShape=False, lineColor=config.FIXATION_COLOR,
             lineWidth=config.FIXATION_LINE_WIDTH, pos=(0, 0), autoLog=False,
         )
-        instruction = visual.TextStim(
-            window, text='', color='white', height=28, wrapWidth=window.size[0] * 0.8,
-            units='pix', autoLog=False,
-        )
-        instruction.text = (
-            'Your goal is to press the numpad key for the corner containing your target image.\n'
-            'When you see a target, respond within '
-            f'{config.RESPONSE_WINDOW:g} seconds. Ignore other images.\n'
-            'Please keep your eyes near the center fixation cross and shift your attention\n'
-            'toward the corners as needed. You may notice patterns; keep following the task.\n\n'
-            '                 TOP\n'
-            '        4                 5\n'
-            '     top left          top right\n\n'
-            '        1                 2\n'
-            '  bottom left      bottom right\n'
-            '              BOTTOM\n\n'
-            'Press SPACE to begin. Press ESCAPE to stop the study.'
-        )
         kb = keyboard.Keyboard(clock=session_clock)
         kb.clearEvents()
 
-        numpad_test_keys = ('num_4', 'num_5', 'num_1', 'num_2')
-        numpad_test_names = {
-            'num_4': 'top-left (4)', 'num_5': 'top-right (5)',
-            'num_1': 'bottom-left (1)', 'num_2': 'bottom-right (2)',
-        }
-        numpad_test_text = visual.TextStim(
-            window, text='', color='white', height=28,
-            wrapWidth=window.size[0] * 0.8, units='pix', autoLog=False,
-        )
-        numpad_test_seen = set()
-        while len(numpad_test_seen) < len(numpad_test_keys):
-            missing = [numpad_test_names[key] for key in numpad_test_keys
-                       if key not in numpad_test_seen]
-            numpad_test_text.text = (
-                'Numpad check\n\n'
-                'Press each indicated key on the numeric keypad once.\n'
-                f'Still to check: {", ".join(missing)}\n\n'
-                'If a key does not register, turn Num Lock on and try again.\n'
-                'Press ESCAPE to stop.'
-            )
-            numpad_test_text.draw()
-            window.flip()
-            presses = kb.getKeys(keyList=list(numpad_test_keys) + ['escape'],
-                                 waitRelease=False, clear=True)
-            if any(key.name == 'escape' for key in presses):
-                return
-            numpad_test_seen.update(key.name for key in presses)
+        if not screens.numpad_check(window, kb, visual):
+            return
 
-        sound_check_text = visual.TextStim(
-            window, text='', color='white', height=28,
-            wrapWidth=window.size[0] * 0.8, units='pix', autoLog=False,
-        )
-        sound_check_text.text = (
-            'Sound check\n\nA short tone will play. '
-            'Press R to replay it, SPACE if you heard it, N if you did not, or ESCAPE to stop.'
-        )
-        test_tone.play()
-        while True:
-            sound_check_text.draw()
-            window.flip()
-            presses = kb.getKeys(keyList=['space', 'r', 'n', 'escape'], waitRelease=False, clear=True)
-            if any(key.name == 'escape' for key in presses):
-                return
-            if any(key.name == 'r' for key in presses):
-                test_tone.stop()
-                test_tone.play()
-            if any(key.name == 'space' for key in presses):
-                metadata['sound_check'] = {
-                    'status': 'confirmed', 'participant_response': 'heard',
-                    'tone_hz': 440, 'tone_duration_seconds': 0.8,
-                }
-                break
-            if any(key.name == 'n' for key in presses):
-                return
+        if not screens.sound_check(window, kb, visual, test_tone):
+            return
+        metadata['sound_check'] = {
+            'status': 'confirmed', 'participant_response': 'heard',
+            'tone_hz': 440, 'tone_duration_seconds': 0.8,
+        }
         test_tone_start = backend_start_time(test_tone, requested_ptb=0.0)
         metadata['sound_check']['backend_start_ptb_time'] = test_tone_start
         if test_tone_start is None:
@@ -370,74 +299,12 @@ def run(args):
         if not sound_cache:
             raise RuntimeError('Timeline has no sounds.')
 
-        # Operator-facing summary of this participant's immutable timeline plan.
-        pt_soa_by_block = {}
-        for block in block_order:
-            pt_soa_by_block[block] = {}
-            for row in rows:
-                if row['block'] == block and row['event_type'] == 'sound' and row['role'] == 'PT':
-                    pt_soa_by_block[block][row['stimulus']] = float(row['soa'])
-        debug_lines = [
-            'STUDY SETUP — STIMULUS ASSIGNMENTS',
-            f"Participant: {args.pid}    Block order: {' → '.join(BLOCK_LABELS[b] for b in block_order)}",
-            f'Target response window: {config.RESPONSE_WINDOW:.1f} seconds',
-            'PT SOA is fixed for each PT in this participant plan:',
-            f'PD sound lead: {config.PD_SOA_MIN:.2f}–{config.PD_SOA_MAX:.2f} seconds',
-            '',
-        ]
-        for block in block_order:
-            block_rows = [row for row in rows if row['block'] == block]
-            pt_counts = sum(row['event_type'] == 'visual' and row['role'] == 'PT' for row in block_rows)
-            pd_counts = sum(row['event_type'] == 'visual' and row['role'] == 'PD' for row in block_rows)
-            npd_counts = sum(row['event_type'] == 'visual' and row['role'] == 'NPD' for row in block_rows)
-            debug_lines.append(f"{BLOCK_LABELS[block]} BLOCK — target group: {BLOCK_LABELS[block]}")
-            debug_lines.append(
-                '  PT SOA by target: ' + ', '.join(
-                    f'{name} = {soa:.1f}s' for name, soa in sorted(pt_soa_by_block[block].items())
-                )
-            )
-            debug_lines.append(f'  Events per block — PT: {pt_counts}, PD: {pd_counts}, NPD: {npd_counts}')
-            for role, description in (
-                ('PT', 'Targets with sound (PT)'),
-                ('NPT', 'Targets without sound (NPT)'),
-                ('PD', 'Distractors with sound (PD)'),
-                ('NPD', 'Distractors without sound (NPD)'),
-            ):
-                names = sorted({row['stimulus'] for row in block_rows
-                                if row['event_type'] == 'visual' and row['role'] == role})
-                debug_lines.append(f"  {description}: {', '.join(names) if names else 'none'}")
-            debug_lines.append(
-                f"  Trials: {len(trials_by_block[block])}; visual events: "
-                f"{sum(row['event_type'] == 'visual' for row in block_rows)}"
-            )
-            debug_lines.append('')
-        debug_lines.append('Operator review: press SPACE to continue to the instructions.')
-        debug_text = visual.TextStim(
-            window, text='\n'.join(debug_lines), color='white', height=20,
-            wrapWidth=window.size[0] * 0.88, units='pix', autoLog=False,
-        )
+        debug_lines, pt_soa_by_block = screens.plan_summary(args.pid, rows, block_order, trials_by_block)
         debug_overlay_enabled = os.environ.get('AV_STUDY_DEBUG_OVERLAY', 'false').lower() == 'true'
-        if debug_overlay_enabled:
-            while True:
-                debug_text.draw()
-                window.flip()
-                presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
-                if any(key.name == 'escape' for key in presses):
-                    return
-                if any(key.name == 'space' for key in presses):
-                    break
-
-        window.flip()
-        instruction.draw()
-        window.flip()
-        while True:
-            instruction.draw()
-            window.flip()
-            presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
-            if any(key.name == 'escape' for key in presses):
-                return
-            if any(key.name == 'space' for key in presses):
-                break
+        if debug_overlay_enabled and not screens.operator_screen(window, kb, visual, debug_lines):
+            return
+        if not screens.instructions(window, kb, visual):
+            return
 
         session_clock.reset()
         kb.clearEvents()
@@ -471,52 +338,7 @@ def run(args):
         last_block, last_trial = '', ''
 
         def continuation(message):
-            window_text.text = message + '\n\nPress SPACE to continue. Press ESCAPE to stop.'
-            while True:
-                window_text.draw()
-                window.flip()
-                presses = kb.getKeys(keyList=ALL_KEYS, waitRelease=False, clear=True)
-                for key in presses:
-                    if key.name in KEY_TO_CORNER:
-                        key_rows.append(inter_trial_row(
-                            key.name, KEY_TO_CORNER[key.name], float(key.rt), last_block, last_trial,
-                        ))
-                if any(key.name == 'escape' for key in presses):
-                    key = next(key for key in presses if key.name == 'escape')
-                    key_rows.append({
-                        'session_time': float(key.rt), 'key': key.name, 'corner': '',
-                        'classification': 'abort', 'matched_event_ids': '',
-                        'target_matches': '', 'correct': '',
-                        'response_window_overlap': False,
-                        'block': last_block, 'trial': last_trial,
-                    })
-                    return False
-                if any(key.name == 'space' for key in presses):
-                    return True
-
-        def rest_break(duration_seconds=120):
-            rest_text = visual.TextStim(
-                window, text='', color='white', height=30,
-                wrapWidth=window.size[0] * 0.8, units='pix', autoLog=False,
-            )
-            rest_start = session_clock.getTime()
-            while True:
-                remaining = max(0, math.ceil(duration_seconds - (session_clock.getTime() - rest_start)))
-                if remaining:
-                    rest_text.text = (
-                        'You have a 2-minute rest break.\n\n'
-                        f'{remaining // 60}:{remaining % 60:02d} remaining.\n\n'
-                        'Press ESCAPE to stop.'
-                    )
-                else:
-                    rest_text.text = 'Rest break complete.\n\nPress SPACE to continue. Press ESCAPE to stop.'
-                rest_text.draw()
-                window.flip()
-                presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
-                if any(key.name == 'escape' for key in presses):
-                    return False
-                if remaining == 0 and any(key.name == 'space' for key in presses):
-                    return True
+            return screens.continuation(window, kb, window_text, message, key_rows, last_block, last_trial)
 
         aborted = False
         for block_index, block in enumerate(block_order):
@@ -768,7 +590,7 @@ def run(args):
                     aborted = True
                     break
             if not aborted and block_index < len(block_order) - 1:
-                aborted = not rest_break()
+                aborted = not screens.rest_break(window, kb, visual, session_clock)
             if aborted:
                 break
 
