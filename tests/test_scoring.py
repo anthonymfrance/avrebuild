@@ -72,6 +72,7 @@ def test_summaries_exclude_incomplete_trials():
               {'miss_count': 5, 'frame_count': 4, 'trial_complete': False}]
     assert trial_summary(trials) == {
         'trial_count': 1, 'miss_count': 2, 'long_frame_count': 0, 'frame_count': 10,
+        'audio_requested_only_count': 0,
     }
     keys = [{'classification': 'false_alarm', 'trial_complete': True},
             {'classification': 'false_alarm', 'trial_complete': False}]

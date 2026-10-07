@@ -25,6 +25,7 @@ from stimulus_split import ANIMATE, INANIMATE
 from timeline_key import FIELDS as TIMELINE_FIELDS
 from participant_setup import create_participant_plan
 from session_io import copy_participant_tree
+from audio_timing import AUDIO_START_SOURCE, backend_start_time, ptb_to_session, resolve_trial_audio
 from scoring import (
     classify_press, finalize_targets, inter_trial_row, session_false_alarms,
     trial_feedback, trial_summary,
@@ -466,32 +467,6 @@ def convert_default_clock(clock, default_time, logging):
     )
 
 
-def _audio_status_start(sound_obj):
-    """Return the PTB reported playback start time when the backend provides it."""
-    candidates = []
-    for owner in (sound_obj, getattr(sound_obj, 'stream', None)):
-        if owner is None:
-            continue
-        for name in ('status', 'statusDetailed', 'getStatus'):
-            try:
-                value = getattr(owner, name, None)
-                if callable(value):
-                    value = value()
-                candidates.append(value)
-            except Exception:
-                continue
-    for status in candidates:
-        if isinstance(status, dict):
-            for key in ('startTime', 'StartTime', 'realStartTime'):
-                if key in status and isinstance(status[key], (int, float)) and status[key] > 0:
-                    return float(status[key])
-        for key in ('startTime', 'realStartTime'):
-            value = getattr(status, key, None)
-            if isinstance(value, (int, float)) and value > 0:
-                return float(value)
-    return None
-
-
 def _atomic_csv(path, fieldnames, rows):
     path = Path(path)
     fd, temp_name = tempfile.mkstemp(prefix=f'.{path.name}.', dir=path.parent)
@@ -534,6 +509,7 @@ def save_session(session_dir, events, keys, trials, metadata):
         'actual_minus_planned_seconds',
         'audio_requested_session_time', 'audio_requested_ptb_time', 'audio_backend_start_ptb_time',
         'audio_backend_start_session_time', 'audio_timing_source',
+        'realized_soa_seconds', 'soa_error_seconds',
         'response_status', 'response_correct', 'response_key', 'response_session_time',
         'rt_from_actual_onset', 'rt_from_planned_onset', 'timing_flags',
         'key', 'classification', 'associated_event_id', 'matched_event_ids',
@@ -638,11 +614,19 @@ def run(args):
             'PsychoPy with its PTB audio backend, NumPy, Pillow, and psychtoolbox are required.'
         ) from exc
 
+    session_clock = core.Clock()
+    clock_offset = (
+        ptb_to_session(ptb.GetSecs(), session_clock.getLastResetTime()) - session_clock.getTime()
+    )
+    if abs(clock_offset) > 0.005:
+        raise RuntimeError(
+            f'PsychoPy Clock and PTB GetSecs do not share a time base (offset {clock_offset:.6f} s); '
+            'audio timestamps cannot be converted to session time.'
+        )
     shared_speaker, speaker_profile = _open_ptb_speaker(ptb_audio, SpeakerDevice)
 
     window = None
     session_dir = None
-    session_clock = core.Clock()
     kb = None
     all_events = []
     key_rows = []
@@ -659,6 +643,9 @@ def run(args):
         'audio_latency_mode': config.AUDIO_LATENCY_MODE,
         'audio_device_profile': speaker_profile,
         'audio_timing_note': 'PTB software-reported playback timing; no physical loopback measurement.',
+        'audio_start_source': None,
+        'audio_clock_conversion': 'session_time = PTB time - session_clock.getLastResetTime()',
+        'audio_clock_offset_check_seconds': clock_offset,
         'preflight': preflight_report,
         'display_refresh_hz': display_refresh_hz,
         'display_refresh_rate_source': 'xrandr active mode',
@@ -781,6 +768,11 @@ def run(args):
                     'tone_hz': 440, 'tone_duration_seconds': 0.8,
                 }
                 break
+        test_tone_start = backend_start_time(test_tone, requested_ptb=0.0)
+        metadata['sound_check']['backend_start_ptb_time'] = test_tone_start
+        if test_tone_start is None:
+            print(f'⚠️ PTB reported no audio start time ({AUDIO_START_SOURCE}) for the sound check; '
+                  "audio timing will fall back to requested times (audio_timing_source='requested_only').")
             if any(key.name == 'n' for key in presses):
                 return
 
@@ -992,6 +984,7 @@ def run(args):
                         'audio_requested_session_time': '',
                         'audio_requested_ptb_time': '', 'audio_backend_start_ptb_time': '',
                         'audio_backend_start_session_time': '', 'audio_timing_source': '',
+                        'realized_soa_seconds': '', 'soa_error_seconds': '',
                         'response_status': 'pending' if row['role'] in TARGET_ROLES and row['event_type'] == 'visual' else '',
                         'response_correct': '',
                         'response_key': '', 'response_session_time': '',
@@ -1107,13 +1100,15 @@ def run(args):
 
                     for row in trial_events:
                         if row['event_type'] == 'sound' and row['_audio_scheduled'] and not row['audio_backend_start_ptb_time']:
-                            reported_ptb = _audio_status_start(row['_audio_obj'])
-                            if (reported_ptb is not None
-                                    and reported_ptb >= float(row['audio_requested_ptb_time']) - 0.05):
+                            reported_ptb = backend_start_time(
+                                row['_audio_obj'], float(row['audio_requested_ptb_time']),
+                            )
+                            if reported_ptb is not None:
+                                metadata['audio_start_source'] = AUDIO_START_SOURCE
                                 row['audio_backend_start_ptb_time'] = reported_ptb
-                                ptb_now = ptb.GetSecs()
-                                session_now = session_clock.getTime()
-                                row['audio_backend_start_session_time'] = reported_ptb + (session_now - ptb_now)
+                                row['audio_backend_start_session_time'] = ptb_to_session(
+                                    reported_ptb, session_clock.getLastResetTime(),
+                                )
                                 row['actual_onset'] = row['audio_backend_start_session_time']
                                 row['onset_deviation'] = (
                                     row['audio_backend_start_session_time'] - row['_planned_runtime']
@@ -1168,6 +1163,7 @@ def run(args):
                             event['response_correct'] = False
                 trial_complete = not aborted
                 finalize_targets(trial_targets, trial_complete)
+                audio_requested_only = resolve_trial_audio(trial_events, config.FADE_IN_DUR)
                 trial_end = session_clock.getTime()
                 long_frames = [
                     interval for interval in frame_intervals
@@ -1184,6 +1180,7 @@ def run(args):
                     'max_frame_interval': max(frame_intervals, default=''),
                     'miss_count': sum(event['response_status'] == 'miss' for event in trial_targets),
                     'trial_complete': trial_complete,
+                    'audio_requested_only_count': audio_requested_only,
                 }
                 trial_rows.append(current_trial_row)
                 for row in trial_events:
@@ -1270,6 +1267,7 @@ def run(args):
                  if row['event_type'] == 'visual' and row['role'] in TARGET_ROLES],
                 complete=False,
             )
+            resolve_trial_audio(current_trial_events, config.FADE_IN_DUR)
             for row in current_trial_events + key_rows[trial_key_start:]:
                 row['trial_complete'] = False
             all_events.extend(current_trial_events)

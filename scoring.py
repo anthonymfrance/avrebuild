@@ -88,4 +88,7 @@ def trial_summary(trials):
         'miss_count': sum(int(row.get('miss_count', 0) or 0) for row in complete),
         'long_frame_count': sum(int(row.get('long_frame_count', 0) or 0) for row in complete),
         'frame_count': sum(int(row.get('frame_count', 0) or 0) for row in complete),
+        'audio_requested_only_count': sum(
+            int(row.get('audio_requested_only_count', 0) or 0) for row in complete
+        ),
     }
