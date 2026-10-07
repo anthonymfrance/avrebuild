@@ -594,6 +594,7 @@ def run(args):
     )
     if display_refresh_hz <= 0:
         raise ValueError('Preflight xrandr refresh rate must be positive.')
+    frame_period = 1.0 / display_refresh_hz
 
     try:
         import numpy as np
@@ -649,6 +650,8 @@ def run(args):
         'preflight': preflight_report,
         'display_refresh_hz': display_refresh_hz,
         'display_refresh_rate_source': 'xrandr active mode',
+        'visual_onset_flag_threshold_seconds': config.VISUAL_ONSET_FLAG_FRAMES * frame_period,
+        'audio_onset_flag_threshold_seconds': config.AUDIO_ONSET_FLAG_THRESHOLD,
         'background_source': str(ROOT / config.BG_SOURCE_FILE),
         'background_variants': 20,
         'seed': None,
@@ -1079,7 +1082,7 @@ def run(args):
                             row['_actual_onset'] = flip_session
                             row['actual_onset'] = flip_session
                             row['onset_deviation'] = flip_session - row['_planned_runtime']
-                            if abs(row['onset_deviation']) > 1e-9:
+                            if abs(row['onset_deviation']) > config.VISUAL_ONSET_FLAG_FRAMES * frame_period:
                                 row['timing_flags'] = 'visual_onset_deviation'
                             if row['role'] in TARGET_ROLES:
                                 for other in trial_visuals:
@@ -1113,7 +1116,7 @@ def run(args):
                                 row['onset_deviation'] = (
                                     row['audio_backend_start_session_time'] - row['_planned_runtime']
                                 )
-                                if abs(row['onset_deviation']) > 1e-6:
+                                if abs(row['onset_deviation']) > config.AUDIO_ONSET_FLAG_THRESHOLD:
                                     row['timing_flags'] = ';'.join(filter(None, [
                                         row['timing_flags'], 'audio_playback_deviation',
                                     ]))

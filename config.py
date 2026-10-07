@@ -46,6 +46,10 @@ AUDIO_SPEAKER = 'default'
 SOUND_DUR = 1.0
 MIN_AUDIO_GAP = 0.2
 
+# --- Timing flags ---
+VISUAL_ONSET_FLAG_FRAMES = 1.0          # flag visual onsets later/earlier than this many frame periods
+AUDIO_ONSET_FLAG_THRESHOLD = 0.005      # seconds; flag reported audio start deviations above this
+
 # --- Responses ---
 RESPONSE_WINDOW = 1.5
 
