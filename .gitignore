@@ -1,3 +1,5 @@
 __pycache__/
 *.py[cod]
 data/
+__pycache__/
+.pytest_cache/

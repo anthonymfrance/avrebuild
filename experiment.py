@@ -780,30 +780,77 @@ def run(args):
             units='pix', autoLog=False,
         )
         instruction.text = (
-            'Your target group for each block will be ANIMALS or OBJECTS.\n'
-            'Press the numpad key for the corner containing any target image.\n'
-            f'Respond within {config.RESPONSE_WINDOW:g} seconds. '
-            'Ignore images outside your target group.\n'
-            'During a trial, any keypress except ESCAPE that is not a valid hit is a false alarm.\n\n'
-            'Top left: 4     Top right: 5\n'
-            'Bottom left: 1  Bottom right: 2\n\n'
+            'Your goal is to press the numpad key for the corner containing your target image.\n'
+            'When you see a target, respond within '
+            f'{config.RESPONSE_WINDOW:g} seconds. Ignore other images.\n'
+            'Please keep your eyes near the center fixation cross and shift your attention\n'
+            'toward the corners as needed. You may notice patterns; keep following the task.\n\n'
+            '                 TOP\n'
+            '        4                 5\n'
+            '     top left          top right\n\n'
+            '        1                 2\n'
+            '  bottom left      bottom right\n'
+            '              BOTTOM\n\n'
             'Press SPACE to begin. Press ESCAPE to stop the study.'
         )
         kb = keyboard.Keyboard(clock=session_clock)
         kb.clearEvents()
 
+        numpad_test_keys = ('num_4', 'num_5', 'num_1', 'num_2')
+        numpad_test_names = {
+            'num_4': 'top-left (4)', 'num_5': 'top-right (5)',
+            'num_1': 'bottom-left (1)', 'num_2': 'bottom-right (2)',
+        }
+        numpad_test_text = visual.TextStim(
+            window, text='', color='white', height=28,
+            wrapWidth=window.size[0] * 0.8, units='pix', autoLog=False,
+        )
+        numpad_test_seen = set()
+        while len(numpad_test_seen) < len(numpad_test_keys):
+            missing = [numpad_test_names[key] for key in numpad_test_keys
+                       if key not in numpad_test_seen]
+            numpad_test_text.text = (
+                'Numpad check\n\n'
+                'Press each indicated key on the numeric keypad once.\n'
+                f'Still to check: {", ".join(missing)}\n\n'
+                'If a key does not register, turn Num Lock on and try again.\n'
+                'Press ESCAPE to stop.'
+            )
+            numpad_test_text.draw()
+            window.flip()
+            presses = kb.getKeys(keyList=list(numpad_test_keys) + ['escape'],
+                                 waitRelease=False, clear=True)
+            if any(key.name == 'escape' for key in presses):
+                return
+            numpad_test_seen.update(key.name for key in presses)
+
         # Operator-facing summary of this participant's immutable timeline plan.
+        pt_soa_by_block = {}
+        for block in block_order:
+            pt_soa_by_block[block] = {}
+            for row in rows:
+                if row['block'] == block and row['event_type'] == 'sound' and row['role'] == 'PT':
+                    pt_soa_by_block[block][row['stimulus']] = float(row['soa'])
         debug_lines = [
             'STUDY SETUP — STIMULUS ASSIGNMENTS',
             f"Participant: {args.pid}    Block order: {' → '.join(BLOCK_LABELS[b] for b in block_order)}",
             f'Target response window: {config.RESPONSE_WINDOW:.1f} seconds',
-            f'PT sound lead: {config.PT_SOA_MIN:.2f}–{config.PT_SOA_MAX:.2f} seconds',
+            'PT SOA is fixed for each PT in this participant plan:',
             f'PD sound lead: {config.PD_SOA_MIN:.2f}–{config.PD_SOA_MAX:.2f} seconds',
             '',
         ]
         for block in block_order:
             block_rows = [row for row in rows if row['block'] == block]
+            pt_counts = sum(row['event_type'] == 'visual' and row['role'] == 'PT' for row in block_rows)
+            pd_counts = sum(row['event_type'] == 'visual' and row['role'] == 'PD' for row in block_rows)
+            npd_counts = sum(row['event_type'] == 'visual' and row['role'] == 'NPD' for row in block_rows)
             debug_lines.append(f"{BLOCK_LABELS[block]} BLOCK — target group: {BLOCK_LABELS[block]}")
+            debug_lines.append(
+                '  PT SOA by target: ' + ', '.join(
+                    f'{name} = {soa:.1f}s' for name, soa in sorted(pt_soa_by_block[block].items())
+                )
+            )
+            debug_lines.append(f'  Events per block — PT: {pt_counts}, PD: {pd_counts}, NPD: {npd_counts}')
             for role, description in (
                 ('PT', 'Targets with sound (PT)'),
                 ('NPT', 'Targets without sound (NPT)'),
@@ -823,14 +870,16 @@ def run(args):
             window, text='\n'.join(debug_lines), color='white', height=20,
             wrapWidth=window.size[0] * 0.88, units='pix', autoLog=False,
         )
-        while True:
-            debug_text.draw()
-            window.flip()
-            presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
-            if any(key.name == 'escape' for key in presses):
-                return
-            if any(key.name == 'space' for key in presses):
-                break
+        debug_overlay_enabled = os.environ.get('AV_STUDY_DEBUG_OVERLAY', 'false').lower() == 'true'
+        if debug_overlay_enabled:
+            while True:
+                debug_text.draw()
+                window.flip()
+                presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+                if any(key.name == 'escape' for key in presses):
+                    return
+                if any(key.name == 'space' for key in presses):
+                    break
 
         sound_check_text = visual.TextStim(
             window, text='', color='white', height=28,
@@ -900,6 +949,12 @@ def run(args):
             window, text='', color='white', height=28,
             wrapWidth=window.size[0] * 0.8, units='pix', autoLog=False,
         )
+        debug_overlay = visual.TextStim(
+            window, text='', color='yellow', height=18,
+            pos=(-window.size[0] * 0.42, window.size[1] * 0.43),
+            alignText='left', anchorHoriz='left', anchorVert='top',
+            units='pix', autoLog=False,
+        )
 
         def continuation(message):
             window_text.text = message + '\n\nPress SPACE to continue. Press ESCAPE to stop.'
@@ -958,7 +1013,8 @@ def run(args):
         for block_index, block in enumerate(block_order):
             if not continuation(
                 f"Block {block_index + 1} of {len(block_order)}: {BLOCK_LABELS[block]}\n"
-                f'Target group: {BLOCK_LABELS[block]}'
+                f'Your target group is {BLOCK_LABELS[block].lower()}. Press the matching '
+                'numpad key when you see one.'
             ):
                 aborted = True
                 break
@@ -1013,6 +1069,12 @@ def run(args):
                         if now < fixation_green_until else config.FIXATION_COLOR
                     )
                     fixation.draw()
+                    if debug_overlay_enabled:
+                        debug_overlay.text = (
+                            f'{args.pid} | {BLOCK_LABELS[block]} | trial {trial}\n'
+                            f'PT SOA: {pt_soa_by_block[block]}'
+                        )
+                        debug_overlay.draw()
 
                     visual_onsets_this_flip = []
                     for row in trial_events:
@@ -1211,8 +1273,24 @@ def run(args):
                 current_trial_events = None
                 current_trial_row = None
                 save_session(session_dir, all_events, key_rows, trial_rows, metadata)
+                with (session_dir / 'event_log.csv').open(newline='', encoding='utf-8') as saved_log:
+                    saved_rows = list(csv.DictReader(saved_log))
+                trial_log_rows = [
+                    row for row in saved_rows
+                    if row.get('block') == block and str(row.get('trial')) == str(trial)
+                ]
+                trial_hits = sum(
+                    row.get('event_type') == 'visual' and row.get('role') in TARGET_ROLES
+                    and row.get('response_status') == 'hit' for row in trial_log_rows
+                )
+                trial_false_alarms = sum(
+                    row.get('event_type') == 'keypress' and row.get('classification') == 'false_alarm'
+                    for row in trial_log_rows
+                )
                 if aborted or not continuation(
-                    f'{BLOCK_LABELS[block]} trial {trial} complete.'
+                    f'{BLOCK_LABELS[block]} — Trial {trial} complete.\n'
+                    f'Correct hits: {trial_hits}\nFalse alarms: {trial_false_alarms} '
+                    '(please minimize these).'
                 ):
                     aborted = True
                     break
@@ -1226,27 +1304,6 @@ def run(args):
         if session_dir is not None:
             metadata['server_sync'] = {'status': 'pending'}
             save_session(session_dir, all_events, key_rows, trial_rows, metadata)
-            sync_result = copy_participant_data_to_server(args.pid)
-            metadata['server_sync'] = sync_result
-            save_session(session_dir, all_events, key_rows, trial_rows, metadata)
-            if sync_result['status'] == 'copied':
-                remote_metadata = Path(sync_result['destination']) / session_dir.name / 'session_metadata.json'
-                local_metadata = session_dir / 'session_metadata.json'
-                try:
-                    shutil.copyfile(local_metadata, remote_metadata)
-                    if hashlib.sha256(local_metadata.read_bytes()).hexdigest() != hashlib.sha256(remote_metadata.read_bytes()).hexdigest():
-                        raise OSError('session metadata checksum mismatch')
-                except OSError as exc:
-                    metadata['server_sync']['status'] = 'partial'
-                    metadata['server_sync']['failures'].append(f'session_metadata.json: {exc}')
-                    save_session(session_dir, all_events, key_rows, trial_rows, metadata)
-                    print(f'⚠️ Server copy completed, but final metadata update failed: {exc}')
-            if sync_result['status'] == 'copied':
-                print(f"✅ Session copy verified on server: {sync_result['destination']}")
-            elif sync_result['status'] == 'local_only':
-                print(f"⚠️ Session remains local at {session_dir}; no server was mounted at preflight.")
-            else:
-                print(f"⚠️ Server copy {sync_result['status']}; local data remains at {session_dir}.")
             if not aborted:
                 target_events = [
                     event for event in all_events
@@ -1272,32 +1329,35 @@ def run(args):
                     presses = kb.getKeys(keyList=['space'], waitRelease=False, clear=True)
                     if presses:
                         break
+            # The participant has acknowledged the final screen; now push the
+            # complete participant folder and verify its files on the lab share.
+            sync_result = copy_participant_data_to_server(args.pid)
+            metadata['server_sync'] = sync_result
+            save_session(session_dir, all_events, key_rows, trial_rows, metadata)
+            if sync_result['status'] == 'copied':
+                remote_metadata = Path(sync_result['destination']) / session_dir.name / 'session_metadata.json'
+                local_metadata = session_dir / 'session_metadata.json'
+                try:
+                    shutil.copyfile(local_metadata, remote_metadata)
+                    if hashlib.sha256(local_metadata.read_bytes()).hexdigest() != hashlib.sha256(remote_metadata.read_bytes()).hexdigest():
+                        raise OSError('session metadata checksum mismatch')
+                except OSError as exc:
+                    metadata['server_sync']['status'] = 'partial'
+                    metadata['server_sync']['failures'].append(f'session_metadata.json: {exc}')
+                    save_session(session_dir, all_events, key_rows, trial_rows, metadata)
+                    print(f'⚠️ Server copy completed, but final metadata update failed: {exc}')
+            if sync_result['status'] == 'copied':
+                print(f"✅ Full participant folder copied and verified on server: {sync_result['destination']}")
+            elif sync_result['status'] == 'local_only':
+                print(f"⚠️ Participant data remains local at {session_dir}; no server was mounted at preflight.")
+            else:
+                print(f"⚠️ Server copy {sync_result['status']}; local data remains at {session_dir}.")
     finally:
         if session_dir is not None and current_trial_events is not None:
-            for event in current_trial_events:
-                if event['event_type'] == 'visual' and event['role'] in TARGET_ROLES:
-                    if event['_actual_onset'] is None:
-                        event['response_status'] = 'not_presented'
-                    elif event['response_status'] == 'pending':
-                        event['response_status'] = 'miss'
-                        event['response_correct'] = False
-            all_events.extend(current_trial_events)
-            if current_trial_row is None:
-                first_event = current_trial_events[0]
-                current_trial_row = {
-                    'block': first_event['block'], 'trial': first_event['trial'],
-                    'trial_start_session_time': first_event['runtime_planned_onset']
-                    - first_event['trial_onset'],
-                    'trial_end_session_time': session_clock.getTime(),
-                    'frame_count': '', 'long_frame_count': '',
-                    'mean_frame_interval': '', 'median_frame_interval': '',
-                    'max_frame_interval': '',
-                    'miss_count': sum(
-                        event['response_status'] == 'miss'
-                        for event in current_trial_events
-                    ),
-                }
-                trial_rows.append(current_trial_row)
+            # An interrupted trial is not a complete observation; discard it while
+            # retaining prior fully completed trials in the local session record.
+            current_trial_events = None
+            current_trial_row = None
             metadata.setdefault('completion_status', 'aborted_or_error')
             metadata['ended_utc'] = datetime.now(timezone.utc).isoformat()
             save_session(session_dir, all_events, key_rows, trial_rows, metadata)

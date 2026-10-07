@@ -113,18 +113,13 @@ else
   add_row '⚠️' 'Headphone L/R balance' 'pactl is unavailable; verify left/right levels manually'
 fi
 
-if [[ "$(uname -s)" == Linux ]]; then
-  add_row '✅' 'Operating system' 'Linux'
-else
-  add_row '❌' 'Operating system' "Linux required; found $(uname -s)"
-  fatal=1
-fi
-
 session_type="${XDG_SESSION_TYPE:-unknown}"
-if [[ "$session_type" == x11 ]]; then
-  add_row '✅' 'Display session' 'Xorg (X11) detected'
+
+if gui_yes 'Is Num Lock turned on? The experiment will also ask you to verify the four numpad response keys.'; then
+  add_row '✅' 'Num Lock' 'On (confirmed by RA)'
 else
-  add_row '⚠️' 'Display session' "$session_type detected; Xorg is recommended for timing-critical runs"
+  add_row '❌' 'Num Lock' 'RA confirmed Num Lock is off'
+  fatal=1
 fi
 
 display_info=''
@@ -163,9 +158,9 @@ if [[ -n "$server_root" && -w "$server_root" ]]; then
   export AV_STUDY_SERVER_DATA_PATH="$PREFLIGHT_SERVER_DATA_PATH"
 else
   if [[ -n "$server_root" ]]; then
-    add_row '⚠️' 'Lab server' 'Mounted but not writable; results will remain local'
+    add_row '⚠️' 'Lab server' 'Mounted but not writable; mount the writable share to continue'
   else
-    add_row '⚠️' 'Lab server' 'Not mounted; results will be saved locally and will not be copied to the server'
+    add_row '⚠️' 'Lab server' 'Not mounted; mount the lab server to continue'
   fi
   unset AV_STUDY_SERVER_ROOT AV_STUDY_SERVER_DATA_PATH || true
 fi
@@ -183,7 +178,7 @@ report="$(mktemp "${TMPDIR:-/tmp}/av-preflight-${participant_id}.XXXXXX")"
 } > "$report"
 add_row '✅' 'Preflight report' 'Will be saved in the participant folder after launch'
 
-summary="Review the checks below. A red item must be fixed before the study can start."
+summary="Review the checks below. Yellow means the lab server must be mounted before continuing."
 zenity --list --title='AV study preflight checklist' --width=900 --height=480 \
   --text="$summary\n\nParticipant: $participant_id" \
   --column='Status' --column='Check' --column='Result' --print-column=2 \
@@ -194,14 +189,27 @@ if (( fatal )); then
   gui_error 'One or more required preflight checks failed. Fix the red items before starting.'
   exit 1
 fi
-if [[ "$session_type" != x11 ]]; then
-  gui_yes "Xorg is recommended for timing-critical runs. Your session is '$session_type'. Continue anyway?" || { rm -f -- "$report"; gui_info 'Preflight stopped. Log out and choose an Xorg session for the recommended setup.'; exit 1; }
-fi
 if [[ -z "$server_root" || ! -w "$server_root" ]]; then
-  gui_yes 'The lab server is unavailable or not writable. Data will remain local and will not be copied automatically. Continue?' || { rm -f -- "$report"; gui_info 'Preflight stopped. Mount the writable lab share and run preflight again.'; exit 1; }
+  if ! gui_yes 'The lab server is unavailable or not writable. Data will stay on this computer and will not be copied automatically. Continue with local-only storage?'; then
+    rm -f -- "$report"
+    gui_info 'Preflight stopped. Mount the lab server and run preflight again, or acknowledge local-only storage to continue.'
+    exit 1
+  fi
 fi
-gui_yes "All required checks passed. Start participant $participant_id now?" || { rm -f -- "$report"; gui_info 'Preflight passed. The experiment was not started.'; exit 0; }
+if gui_yes 'Show the debug/testing screen during trials? Choose No for participant-facing trials.'; then
+  debug_overlay=true
+else
+  debug_overlay=false
+fi
+participant_number="${participant_id##*_}"
+if (( 10#$participant_number % 2 )); then
+  planned_block_order='Animals, then Objects'
+else
+  planned_block_order='Objects, then Animals'
+fi
+gui_yes "Preflight checks are complete. Start $participant_id?\n\nPlanned block order: $planned_block_order\nThe participant plan will be created when the experiment starts." || { rm -f -- "$report"; gui_info 'Preflight passed. The experiment was not started.'; exit 0; }
 export AV_STUDY_PREFLIGHT_REPORT="$report"
+export AV_STUDY_DEBUG_OVERLAY="$debug_overlay"
 runner_log="$(mktemp "${TMPDIR:-/tmp}/av-experiment-${participant_id}.XXXXXX")"
 if pw-jack env LD_PRELOAD="$pipewire_jack_lib" "$python_bin" "$study_dir/experiment.py" "$participant_id" >"$runner_log" 2>&1; then
   rm -f -- "$runner_log"
