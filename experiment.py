@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import hashlib
 import inspect
 import json
 import math
@@ -14,20 +12,16 @@ import statistics
 import shutil
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import config
 from config import BLOCK_LABELS, TARGET_ROLES, TRIAL_DURATION, VISUAL_DURATION
-from timeline_key import FIELDS as TIMELINE_FIELDS
 from participant_setup import create_participant_plan, derive_rng
-from session_io import load_timeline, sha256_file
-from session_io import copy_participant_tree
+from session_io import load_timeline, save_session, sha256_file, sync_participant
 from audio_timing import AUDIO_START_SOURCE, backend_start_time, ptb_to_session, resolve_trial_audio
 from scoring import (
-    classify_press, finalize_targets, inter_trial_row, session_false_alarms,
-    trial_feedback, trial_summary,
+    classify_press, finalize_targets, inter_trial_row, session_false_alarms, trial_feedback,
 )
 
 
@@ -199,22 +193,6 @@ def convert_default_clock(clock, default_time, logging):
     )
 
 
-def _atomic_csv(path, fieldnames, rows):
-    path = Path(path)
-    fd, temp_name = tempfile.mkstemp(prefix=f'.{path.name}.', dir=path.parent)
-    try:
-        with os.fdopen(fd, 'w', newline='', encoding='utf-8') as output:
-            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
-            writer.writeheader()
-            writer.writerows(rows)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temp_name, path)
-    except Exception:
-        Path(temp_name).unlink(missing_ok=True)
-        raise
-
-
 def _parse_preflight_report(report_text):
     report = {}
     display_modes = []
@@ -232,82 +210,6 @@ def _parse_preflight_report(report_text):
     if display_modes:
         report['connected_display_modes'] = display_modes
     return report
-
-
-def save_session(session_dir, events, keys, trials, metadata):
-    event_fields = list(TIMELINE_FIELDS) + [
-        'session_time_seconds', 'planned_session_time_seconds',
-        'actual_session_time_seconds',
-        'actual_minus_planned_seconds',
-        'audio_requested_session_time', 'audio_requested_ptb_time', 'audio_backend_start_ptb_time',
-        'audio_backend_start_session_time', 'audio_timing_source',
-        'realized_soa_seconds', 'soa_error_seconds',
-        'response_status', 'response_correct', 'response_key', 'response_session_time',
-        'rt_from_actual_onset', 'rt_from_planned_onset', 'timing_flags',
-        'key', 'classification', 'associated_event_id', 'matched_event_ids',
-        'target_matches', 'correct', 'response_window_overlap', 'trial_complete',
-    ]
-    log_rows = []
-    for event in events:
-        row = dict(event)
-        actual_time = event.get('actual_onset')
-        row['session_time_seconds'] = actual_time if actual_time not in ('', None) else ''
-        row['planned_session_time_seconds'] = event.get('runtime_planned_onset', '')
-        row['actual_session_time_seconds'] = actual_time if actual_time not in (None, '') else ''
-        row['actual_minus_planned_seconds'] = event.get('onset_deviation', '')
-        row['classification'] = event.get('response_status', '')
-        row['response_correct'] = event.get('response_correct', '')
-        row['key'] = event.get('response_key', '')
-        log_rows.append(row)
-    for index, key in enumerate(keys, start=1):
-        row = {
-            'event_id': key.get('event_id', f"keypress_{index:06d}"),
-            'event_type': 'keypress', 'block': key.get('block', ''),
-            'trial': key.get('trial', ''),
-            'session_time_seconds': key.get('session_time', ''),
-            'actual_session_time_seconds': key.get('session_time', ''),
-            'key': key.get('key', ''), 'corner': key.get('corner', ''),
-            'classification': key.get('classification', ''),
-            'associated_event_id': key.get('associated_event_id', ''),
-            'matched_event_ids': key.get('matched_event_ids', ''),
-            'target_matches': key.get('target_matches', ''),
-            'correct': key.get('correct', ''),
-            'response_window_overlap': key.get('response_window_overlap', ''),
-            'rt_from_actual_onset': key.get('rt_from_actual_onset', ''),
-            'rt_from_planned_onset': key.get('rt_from_planned_onset', ''),
-            'trial_complete': key.get('trial_complete', ''),
-        }
-        log_rows.append(row)
-    log_rows.sort(key=lambda row: (
-        float(row['session_time_seconds']) if row.get('session_time_seconds') not in ('', None)
-        else float(row['audio_requested_session_time'])
-        if row.get('audio_requested_session_time') not in ('', None)
-        else float(row['planned_session_time_seconds'])
-        if row.get('planned_session_time_seconds') not in ('', None)
-        else math.inf,
-        0 if row.get('event_type') != 'keypress' else 1,
-    ))
-    _atomic_csv(session_dir / 'event_log.csv', event_fields, log_rows)
-    metadata['trial_summary'] = trial_summary(trials)
-    metadata['last_saved_utc'] = datetime.now(timezone.utc).isoformat()
-    temp_path = session_dir / '.session_metadata.json.tmp'
-    temp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding='utf-8')
-    os.replace(temp_path, session_dir / 'session_metadata.json')
-
-
-def copy_participant_data_to_server(participant_id):
-    """Copy the local participant folder to the configured share and verify files."""
-    server_root = os.environ.get('AV_STUDY_SERVER_ROOT')
-    data_path = os.environ.get('AV_STUDY_SERVER_DATA_PATH')
-    if not server_root or not data_path:
-        return {'status': 'local_only', 'reason': 'server was not mounted at preflight'}
-
-    local_participant_dir = ROOT / 'data' / participant_id
-    destination = Path(server_root) / data_path / participant_id
-    result = copy_participant_tree(local_participant_dir, destination)
-    if result['status'] == 'collision':
-        print(f"🚨 SERVER DATA COLLISION for {participant_id}: {result.get('reason', result.get('failures'))}")
-    return result
 
 
 def run(args):
@@ -1007,27 +909,10 @@ def run(args):
                         break
             # The participant has acknowledged the final screen; now push the
             # complete participant folder and verify its files on the lab share.
-            sync_result = copy_participant_data_to_server(args.pid)
-            metadata['server_sync'] = sync_result
-            save_session(session_dir, all_events, key_rows, trial_rows, metadata)
-            if sync_result['status'] == 'copied':
-                remote_metadata = Path(sync_result['destination']) / session_dir.name / 'session_metadata.json'
-                local_metadata = session_dir / 'session_metadata.json'
-                try:
-                    shutil.copyfile(local_metadata, remote_metadata)
-                    if hashlib.sha256(local_metadata.read_bytes()).hexdigest() != hashlib.sha256(remote_metadata.read_bytes()).hexdigest():
-                        raise OSError('session metadata checksum mismatch')
-                except OSError as exc:
-                    metadata['server_sync']['status'] = 'partial'
-                    metadata['server_sync']['failures'].append(f'session_metadata.json: {exc}')
-                    save_session(session_dir, all_events, key_rows, trial_rows, metadata)
-                    print(f'⚠️ Server copy completed, but final metadata update failed: {exc}')
-            if sync_result['status'] == 'copied':
-                print(f"✅ Full participant folder copied and verified on server: {sync_result['destination']}")
-            elif sync_result['status'] == 'local_only':
-                print(f"⚠️ Participant data remains local at {session_dir}; no server was mounted at preflight.")
-            else:
-                print(f"⚠️ Server copy {sync_result['status']}; local data remains at {session_dir}.")
+            sync_participant(
+                ROOT, args.pid, session_dir, metadata,
+                lambda: save_session(session_dir, all_events, key_rows, trial_rows, metadata),
+            )
     finally:
         if session_dir is not None and current_trial_events is not None:
             # An error interrupted a trial: keep its rows marked trial_complete=False
