@@ -594,7 +594,6 @@ def run(args):
     )
     if display_refresh_hz <= 0:
         raise ValueError('Preflight xrandr refresh rate must be positive.')
-    frame_period = 1.0 / display_refresh_hz
 
     try:
         import numpy as np
@@ -648,9 +647,7 @@ def run(args):
         'audio_clock_conversion': 'session_time = PTB time - session_clock.getLastResetTime()',
         'audio_clock_offset_check_seconds': clock_offset,
         'preflight': preflight_report,
-        'display_refresh_hz': display_refresh_hz,
-        'display_refresh_rate_source': 'xrandr active mode',
-        'visual_onset_flag_threshold_seconds': config.VISUAL_ONSET_FLAG_FRAMES * frame_period,
+        'display_refresh_hz_xrandr': display_refresh_hz,
         'audio_onset_flag_threshold_seconds': config.AUDIO_ONSET_FLAG_THRESHOLD,
         'background_source': str(ROOT / config.BG_SOURCE_FILE),
         'background_variants': 20,
@@ -665,6 +662,29 @@ def run(args):
             size=config.WINDOW_SIZE, fullscr=True, screen=0,
             units='pix', color=[0, 0, 0], checkTiming=True, waitBlanking=True,
         )
+        window_size = tuple(int(value) for value in window.size)
+        if window_size != tuple(config.WINDOW_SIZE):
+            raise RuntimeError(
+                f'Window opened at {window_size}, but config.WINDOW_SIZE is {tuple(config.WINDOW_SIZE)}. '
+                'Set the experiment display to that resolution.'
+            )
+        measured_refresh_hz = window.getActualFrameRate(
+            nIdentical=20, nMaxFrames=60, nWarmUpFrames=10, threshold=1,
+        )
+        if not measured_refresh_hz:
+            raise RuntimeError('Could not measure a stable display refresh rate with getActualFrameRate().')
+        frame_period = 1.0 / measured_refresh_hz
+        metadata.update({
+            'window_size': list(window_size),
+            'display_refresh_hz': measured_refresh_hz,
+            'display_refresh_rate_source': 'window.getActualFrameRate (~0.5 s of flips)',
+            'visual_onset_flag_threshold_seconds': config.VISUAL_ONSET_FLAG_FRAMES * frame_period,
+            'long_frame_threshold_seconds': 1.2 * frame_period,
+            'display_refresh_differs_from_xrandr': abs(measured_refresh_hz - display_refresh_hz) > 1.0,
+        })
+        if abs(measured_refresh_hz - display_refresh_hz) > 1.0:
+            print(f'⚠️ Measured refresh {measured_refresh_hz:.2f} Hz differs from xrandr '
+                  f'{display_refresh_hz:.2f} Hz by more than 1 Hz.')
         test_tone = sound.Sound(
             440, secs=0.8, stereo=True, speaker=shared_speaker, autoLog=False,
         )
@@ -1170,7 +1190,7 @@ def run(args):
                 trial_end = session_clock.getTime()
                 long_frames = [
                     interval for interval in frame_intervals
-                    if interval > (1.2 / display_refresh_hz)
+                    if interval > 1.2 * frame_period
                 ]
                 current_trial_row = {
                     'block': block, 'trial': trial,

@@ -123,20 +123,50 @@ else
 fi
 
 display_info=''
-active_mode=''
 if command -v xrandr >/dev/null 2>&1; then
   display_info="$(xrandr --current 2>&1 || true)"
-  active_mode="$(awk '/\*/ { print; exit }' <<< "$display_info")"
 fi
-if [[ -n "$active_mode" ]]; then
-  add_row '✅' 'Active display mode' "$active_mode"
-else
-  add_row '❌' 'Active display mode' 'Could not read the active mode with xrandr'
+# The experiment screen is the connected primary output, else the first connected
+# output with an active (*) mode. Prints output=, mode=, rate=, then connected= lines.
+display_summary="$(awk '
+  /^[^ \t]/ {
+    output = ""
+    if ($2 == "connected") { output = $1; connected[++n] = $0; is_primary[output] = ($3 == "primary") }
+    next
+  }
+  output != "" && /\*/ && !(output in mode) {
+    mode[output] = $1
+    for (i = 2; i <= NF; i++) if ($i ~ /\*/) { value = $i; gsub(/[^0-9.]/, "", value); rate[output] = value }
+    active[++m] = output
+  }
+  END {
+    chosen = ""
+    for (i = 1; i <= m; i++) if (is_primary[active[i]]) { chosen = active[i]; break }
+    if (chosen == "" && m > 0) chosen = active[1]
+    printf "output=%s\nmode=%s\nrate=%s\n", chosen, mode[chosen], rate[chosen]
+    for (i = 1; i <= n; i++) print "connected=" connected[i]
+  }' <<< "$display_info")"
+display_output="$(sed -n 's/^output=//p' <<< "$display_summary")"
+active_mode="$(sed -n 's/^mode=//p' <<< "$display_summary")"
+display_refresh_hz="$(sed -n 's/^rate=//p' <<< "$display_summary")"
+[[ "$display_refresh_hz" =~ ^[0-9]+([.][0-9]+)?$ ]] || display_refresh_hz=''
+while IFS= read -r connected_line; do
+  [[ -n "$connected_line" ]] && add_row 'ℹ️' 'Connected output' "$connected_line"
+done < <(sed -n 's/^connected=//p' <<< "$display_summary")
+expected_mode="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print("%dx%d" % tuple(config.WINDOW_SIZE))')" || expected_mode=''
+if [[ -z "$active_mode" ]]; then
+  add_row '❌' 'Experiment display mode' 'Could not read the active mode of a connected output with xrandr'
   fatal=1
+elif [[ -z "$expected_mode" ]]; then
+  add_row '❌' 'Experiment display mode' 'Could not read WINDOW_SIZE from config.py'
+  fatal=1
+elif [[ "$active_mode" != "$expected_mode" ]]; then
+  add_row '❌' 'Experiment display mode' "$display_output is $active_mode; config.WINDOW_SIZE requires $expected_mode"
+  fatal=1
+else
+  add_row '✅' 'Experiment display mode' "$display_output at $active_mode (matches config.WINDOW_SIZE)"
 fi
 
-# xrandr reports the refresh frequency of the active mode without opening a PsychoPy window.
-display_refresh_hz="$(awk '/\*/ { for (i = 1; i <= NF; i++) if ($i ~ /\*/) { value = $i; gsub(/[^0-9.]/, "", value); if (value ~ /^[0-9]+([.][0-9]+)?$/) print value; exit } }' <<< "$display_info")"
 if [[ -n "$display_refresh_hz" ]]; then
   add_row '✅' 'Reported refresh rate' "${display_refresh_hz} Hz (active xrandr mode)"
 else
@@ -169,7 +199,7 @@ report="$(mktemp "${TMPDIR:-/tmp}/av-preflight-${participant_id}.XXXXXX")"
 {
   printf 'measured_at=%s\n' "$(date --iso-8601=seconds)"
   printf 'study_dir=%s\nparticipant_id=%s\n' "$study_dir" "$participant_id"
-  printf 'session_type=%s\nactive_mode=%s\ndisplay_refresh_hz=%s\n' "$session_type" "$active_mode" "$display_refresh_hz"
+  printf 'session_type=%s\ndisplay_output=%s\nactive_mode=%s\ndisplay_refresh_hz=%s\n' "$session_type" "$display_output" "$active_mode" "$display_refresh_hz"
   printf 'audio_route=%s\npipewire_jack_library=%s\n' 'PTB via PipeWire JACK' "$pipewire_jack_lib"
   printf 'audio_balance=%s\naudio_balance_status=%s\n' "${audio_balance:-unknown}" "$audio_balance_status"
   printf 'server_mounted=%s\n' "$([[ -n "$server_root" && -w "$server_root" ]] && printf true || printf false)"
