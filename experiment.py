@@ -933,7 +933,7 @@ def run(args):
                             event['response_correct'] = False
                 trial_complete = not aborted
                 finalize_targets(trial_targets, trial_complete)
-                audio_requested_only = resolve_trial_audio(trial_events, config.FADE_IN_DUR)
+                audio_requested_only = resolve_trial_audio(trial_events, config.FADE_IN_DUR, trial_complete)
                 trial_end = session_clock.getTime()
                 long_frames = [
                     interval for interval in frame_intervals
@@ -1037,7 +1037,7 @@ def run(args):
                  if row['event_type'] == 'visual' and row['role'] in TARGET_ROLES],
                 complete=False,
             )
-            resolve_trial_audio(current_trial_events, config.FADE_IN_DUR)
+            resolve_trial_audio(current_trial_events, config.FADE_IN_DUR, complete=False)
             for row in current_trial_events + key_rows[trial_key_start:]:
                 row['trial_complete'] = False
             all_events.extend(current_trial_events)

@@ -37,18 +37,24 @@ def ptb_to_session(ptb_time, session_reset_ptb):
     return ptb_time - session_reset_ptb
 
 
-def resolve_trial_audio(trial_events, fade_in):
+def resolve_trial_audio(trial_events, fade_in, complete=True):
     """Finish audio timing for one trial in place; return the requested-only sound count.
 
     Scheduled sounds without a backend start fall back to the requested time
     (audio_timing_source='requested_only'). Each presented PT/PD visual gets
     realized_soa_seconds (visual onset + fade_in - audio onset, best available
-    audio time) and soa_error_seconds (realized - planned).
+    audio time) and soa_error_seconds (realized - planned). In an aborted trial
+    an unreported sound may simply not have started yet, so it gets no fallback.
     """
     visuals = {row['event_id']: row for row in trial_events if row['event_type'] == 'visual'}
     requested_only = 0
     for sound in trial_events:
         if sound['event_type'] != 'sound' or sound['audio_requested_session_time'] in ('', None):
+            continue
+        if sound['audio_backend_start_session_time'] in ('', None) and not complete:
+            sound['timing_flags'] = ';'.join(filter(None, [
+                sound['timing_flags'], 'trial_aborted_before_audio_start_report',
+            ]))
             continue
         if sound['audio_backend_start_session_time'] in ('', None):
             requested_only += 1

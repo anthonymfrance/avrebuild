@@ -59,6 +59,14 @@ def test_requested_only_fallback():
     assert events[0]['realized_soa_seconds'] == pytest.approx(10.3 - 9.30)
 
 
+def test_aborted_trial_unreported_sound_is_not_requested_only():
+    events = trial('')
+    assert resolve_trial_audio(events, fade_in=0.3, complete=False) == 0
+    assert events[1]['audio_timing_source'] == 'PTB scheduled playback'
+    assert 'trial_aborted_before_audio_start_report' in events[1]['timing_flags']
+    assert 'realized_soa_seconds' not in events[0]
+
+
 def test_unpresented_visual_or_unscheduled_sound_has_no_soa():
     events = trial(9.28)
     events[0]['_actual_onset'] = None
