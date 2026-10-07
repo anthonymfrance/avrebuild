@@ -212,8 +212,10 @@ export AV_STUDY_DEBUG_OVERLAY="$debug_overlay"
 runner_log="$(mktemp "${TMPDIR:-/tmp}/av-experiment-${participant_id}.XXXXXX")"
 if pw-jack env LD_PRELOAD="$pipewire_jack_lib" "$python_bin" "$study_dir/experiment.py" "$participant_id" >"$runner_log" 2>&1; then
   rm -f -- "$runner_log"
-  if ! compgen -G "$study_dir/data/$participant_id/session_*" >/dev/null; then
-    gui_info "The runner stopped before the session began. Participant $participant_id setup was preserved; run preflight again to resume it."
+  if [[ ! -d "$study_dir/data/$participant_id" ]]; then
+    gui_info "The runner stopped during the numpad or sound check. No plan was created and $participant_id was not used."
+  elif ! compgen -G "$study_dir/data/$participant_id/session_*" >/dev/null; then
+    gui_info "The runner stopped after creating the plan for $participant_id but before the session began. That ID is now used; run preflight again for the next participant."
   fi
 else
   run_status=$?

@@ -611,12 +611,6 @@ def run(args):
     if f'participant_id={args.pid}' not in report_text:
         raise ValueError('Preflight report participant ID does not match the requested participant.')
     preflight_report = _parse_preflight_report(report_text)
-    timeline_path, _config_snapshot = create_participant_plan(ROOT / 'data', args.pid)
-    participant_metadata_path = pid_dir / 'participant_metadata.json'
-    if not participant_metadata_path.is_file():
-        participant_metadata_path = pid_dir / 'session_config_snapshot.json'
-    Path(report_source).unlink(missing_ok=True)
-    timeline_path, rows, assets, block_order, trials_by_block = read_and_validate_timeline(timeline_path)
     if 'display_refresh_hz' not in preflight_report:
         raise ValueError('Preflight report does not contain the xrandr display refresh rate.')
     display_refresh_hz = _finite_number(
@@ -657,10 +651,6 @@ def run(args):
     current_trial_row = None
     metadata = {
         'participant_id': args.pid,
-        'timeline_path': str(timeline_path),
-        'timeline_sha256': hashlib.sha256(timeline_path.read_bytes()).hexdigest(),
-        'timeline_order': block_order,
-        'timeline_used_unchanged': True,
         'started_utc': None,
         'psychopy_version': psychopy.__version__,
         'python_version': sys.version,
@@ -675,19 +665,9 @@ def run(args):
         'background_source': str(ROOT / config.BG_SOURCE_FILE),
         'background_variants': 20,
         'seed': None,
-        'participant_metadata_file': participant_metadata_path.name,
-        'participant_metadata_sha256': hashlib.sha256(
-            participant_metadata_path.read_bytes()
-        ).hexdigest(),
         'sound_check': {'status': 'pending'},
         'clock_strategy': 'session core.Clock; Keyboard on session clock; flip timestamps converted from PsychoPy defaultClock; PTB targets converted from a paired future-flip time.',
     }
-    seed_file = pid_dir / 'seed.txt'
-    if seed_file.is_file():
-        try:
-            metadata['seed'] = int(seed_file.read_text(encoding='utf-8').strip())
-        except ValueError:
-            metadata['seed'] = seed_file.read_text(encoding='utf-8').strip()
 
     try:
         # The window is initialized before the participant sees the start screen.
@@ -695,26 +675,11 @@ def run(args):
             size=config.WINDOW_SIZE, fullscr=True, screen=0,
             units='pix', color=[0, 0, 0], checkTiming=True, waitBlanking=True,
         )
-        backgrounds = make_backgrounds(window, visual, np, Image)
-        image_cache = {
-            stimulus: visual.ImageStim(
-                window, image=str(path), size=config.IMAGE_SIZE,
-                units='pix', autoLog=False,
-            )
-            for stimulus, path in assets['images'].items()
-        }
-        sound_cache = {
-            stimulus: sound.Sound(
-                str(path), speaker=shared_speaker,
-                stereo=True, preBuffer=-1, autoLog=False,
-            )
-            for stimulus, path in assets['sounds'].items()
-        }
-        sample_sound = next(iter(sound_cache.values()), None)
-        if sample_sound is None:
-            raise RuntimeError('Timeline has no sounds to validate the PTB backend.')
-        sound_class = type(sample_sound)
-        play_signature = inspect.signature(sample_sound.play)
+        test_tone = sound.Sound(
+            440, secs=0.8, stereo=True, speaker=shared_speaker, autoLog=False,
+        )
+        sound_class = type(test_tone)
+        play_signature = inspect.signature(test_tone.play)
         if config.AUDIO_BACKEND != 'ptb':
             raise RuntimeError('Only the PTB audio backend is supported for this experiment.')
         if ('backend_ptb' not in sound_class.__module__
@@ -792,6 +757,67 @@ def run(args):
                 return
             numpad_test_seen.update(key.name for key in presses)
 
+        sound_check_text = visual.TextStim(
+            window, text='', color='white', height=28,
+            wrapWidth=window.size[0] * 0.8, units='pix', autoLog=False,
+        )
+        sound_check_text.text = (
+            'Sound check\n\nA short tone will play. '
+            'Press R to replay it, SPACE if you heard it, N if you did not, or ESCAPE to stop.'
+        )
+        test_tone.play()
+        while True:
+            sound_check_text.draw()
+            window.flip()
+            presses = kb.getKeys(keyList=['space', 'r', 'n', 'escape'], waitRelease=False, clear=True)
+            if any(key.name == 'escape' for key in presses):
+                return
+            if any(key.name == 'r' for key in presses):
+                test_tone.stop()
+                test_tone.play()
+            if any(key.name == 'space' for key in presses):
+                metadata['sound_check'] = {
+                    'status': 'confirmed', 'participant_response': 'heard',
+                    'tone_hz': 440, 'tone_duration_seconds': 0.8,
+                }
+                break
+            if any(key.name == 'n' for key in presses):
+                return
+
+        # The participant ID and plan are consumed only after both hardware checks pass.
+        timeline_path, plan_snapshot = create_participant_plan(ROOT / 'data', args.pid)
+        Path(report_source).unlink(missing_ok=True)
+        participant_metadata_path = pid_dir / 'participant_metadata.json'
+        timeline_path, rows, assets, block_order, trials_by_block = read_and_validate_timeline(timeline_path)
+        metadata.update({
+            'timeline_path': str(timeline_path),
+            'timeline_sha256': hashlib.sha256(timeline_path.read_bytes()).hexdigest(),
+            'timeline_order': block_order,
+            'timeline_used_unchanged': True,
+            'seed': plan_snapshot['seed'],
+            'participant_metadata_file': participant_metadata_path.name,
+            'participant_metadata_sha256': hashlib.sha256(
+                participant_metadata_path.read_bytes()
+            ).hexdigest(),
+        })
+        backgrounds = make_backgrounds(window, visual, np, Image)
+        image_cache = {
+            stimulus: visual.ImageStim(
+                window, image=str(path), size=config.IMAGE_SIZE,
+                units='pix', autoLog=False,
+            )
+            for stimulus, path in assets['images'].items()
+        }
+        sound_cache = {
+            stimulus: sound.Sound(
+                str(path), speaker=shared_speaker,
+                stereo=True, preBuffer=-1, autoLog=False,
+            )
+            for stimulus, path in assets['sounds'].items()
+        }
+        if not sound_cache:
+            raise RuntimeError('Timeline has no sounds.')
+
         # Operator-facing summary of this participant's immutable timeline plan.
         pt_soa_by_block = {}
         for block in block_order:
@@ -833,7 +859,7 @@ def run(args):
                 f"{sum(row['event_type'] == 'visual' for row in block_rows)}"
             )
             debug_lines.append('')
-        debug_lines.append('Operator review: press SPACE to continue to the sound check.')
+        debug_lines.append('Operator review: press SPACE to continue to the instructions.')
         debug_text = visual.TextStim(
             window, text='\n'.join(debug_lines), color='white', height=20,
             wrapWidth=window.size[0] * 0.88, units='pix', autoLog=False,
@@ -849,40 +875,6 @@ def run(args):
                 if any(key.name == 'space' for key in presses):
                     break
 
-        sound_check_text = visual.TextStim(
-            window, text='', color='white', height=28,
-            wrapWidth=window.size[0] * 0.8, units='pix', autoLog=False,
-        )
-        test_tone = sound.Sound(
-            440, secs=0.8, stereo=True, speaker=shared_speaker, autoLog=False,
-        )
-        sound_check_text.text = (
-            'Sound check\n\nA short tone will play. '
-            'Press R to replay it, SPACE if you heard it, N if you did not, or ESCAPE to stop.'
-        )
-        test_tone.play()
-        while True:
-            sound_check_text.draw()
-            window.flip()
-            presses = kb.getKeys(keyList=['space', 'r', 'n', 'escape'], waitRelease=False, clear=True)
-            if any(key.name == 'escape' for key in presses):
-                metadata['sound_check'] = {'status': 'stopped_before_confirmation'}
-                return
-            if any(key.name == 'r' for key in presses):
-                test_tone.stop()
-                test_tone.play()
-            if any(key.name == 'space' for key in presses):
-                metadata['sound_check'] = {
-                    'status': 'confirmed', 'participant_response': 'heard',
-                    'tone_hz': 440, 'tone_duration_seconds': 0.8,
-                }
-                break
-            if any(key.name == 'n' for key in presses):
-                metadata['sound_check'] = {
-                    'status': 'not_confirmed', 'participant_response': 'not_heard',
-                    'tone_hz': 440, 'tone_duration_seconds': 0.8,
-                }
-                return
         window.flip()
         instruction.draw()
         window.flip()
@@ -1329,6 +1321,7 @@ def run(args):
             metadata.setdefault('completion_status', 'aborted_or_error')
             metadata['ended_utc'] = datetime.now(timezone.utc).isoformat()
             save_session(session_dir, all_events, key_rows, trial_rows, metadata)
+        Path(report_source).unlink(missing_ok=True)
         if window is not None:
             window.close()
         sounds_to_close = list(locals().get('sound_cache', {}).values())
