@@ -57,7 +57,10 @@ def corner_pile(total, rng):
     return pile, counts
 
 
-def build_slotting_key(rng, stimulus_assignment):
+def build_slotting_key(
+    rng, stimulus_assignment, pt_count_range=TRIAL_PT_RANGE,
+    npt_count_range=TRIAL_NPT_RANGE,
+):
     """Build PT/NPT rows; slot_number is an identity label, not temporal order."""
     if len(CORNERS) < 2 or len(set(CORNERS)) != len(CORNERS):
         raise ValueError('CORNERS must contain at least two unique corner names.')
@@ -65,9 +68,9 @@ def build_slotting_key(rng, stimulus_assignment):
         raise ValueError('FAVORED_CORNER must be listed in CORNERS.')
     if not 0 <= TARGET_SPATIAL_BIAS <= 1:
         raise ValueError('TARGET_SPATIAL_BIAS must be between 0 and 1.')
-    if TRIAL_PT_RANGE[0] < 0 or TRIAL_PT_RANGE[0] > TRIAL_PT_RANGE[1]:
+    if pt_count_range[0] < 0 or pt_count_range[0] > pt_count_range[1]:
         raise ValueError('TRIAL_PT_RANGE must be a valid nonnegative range.')
-    if TRIAL_NPT_RANGE[0] < 0 or TRIAL_NPT_RANGE[0] > TRIAL_NPT_RANGE[1]:
+    if npt_count_range[0] < 0 or npt_count_range[0] > npt_count_range[1]:
         raise ValueError('TRIAL_NPT_RANGE must be a valid nonnegative range.')
 
     pt_rows = []
@@ -75,7 +78,7 @@ def build_slotting_key(rng, stimulus_assignment):
     for block, roles in stimulus_assignment.items():
         active_pts = pt_sequence(roles['PT'], rng)
         trial_counts = [
-            rng.randint(*TRIAL_PT_RANGE)
+            rng.randint(*pt_count_range)
             for _ in active_pts
         ]
         block_pt_rows = []
@@ -125,7 +128,7 @@ def build_slotting_key(rng, stimulus_assignment):
         npt_trial_items = {
             trial: rng.choices(
                 roles['NPT'],
-                k=rng.randint(*TRIAL_NPT_RANGE),
+                k=rng.randint(*npt_count_range),
             )
             for trial in range(1, len(active_pts) + 1)
         }

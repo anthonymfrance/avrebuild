@@ -31,16 +31,16 @@ Rules:
 
 ## 3. Session setup (once per participant)
 
-1. **Seeding: not implemented for now.** Ideally we figure out a way to use participant id as a seed for placing events so auditors can verify but if csv's store event details that may be enough since auditors will be more concerned with if raw data aligns with reported results
-
-2. Block order: ideally this would alter between participants so p1 would get animals objects p2 objects animals and so on so forth (one implementation idea would be to count participant folders in animate and compare to inanimate folder and just assign order based on which has less and if tie flip coin to choose
-3. Shuffle animals and objects, then take 4 of each:
+1. Assign the next available numeric participant ID, formatted with at least two digits (`participant_01` through `participant_99`, then `participant_100` and onward). IDs are based on existing participant folders, so deleting a folder allows that number to be reused when it is next in sequence.
+2. Give each participant a unique 64-bit random seed and save it with their generated plan.
+3. Alternate block order by ID parity: odd IDs complete animate then inanimate; even IDs complete inanimate then animate.
+4. Shuffle animals and objects, then take 4 of each:
    - Animals: `[B1_PT_1, B1_PT_2, B2_PD_1, B2_PD_2]`
    - Objects: `[B1_PD_1, B1_PD_2, B2_PT_1, B2_PT_2]`
    - If objects are block 1, swap which category supplies PTs.
-4. Remaining 6 animals and 6 objects become NPT/NPD per block (roles swap between blocks).
-5. Draw one SOA per PT from `SOA_range` and fix it for the session. Example: cat = 0.6, dog = 1.3.
-6. Write `session_config_snapshot.json` (resolved config and all drawn values) to the participant folder OR something alike this is again seeding and running notes like if we run participants based on older versions etc one idea was to use git hash for this
+5. Remaining 6 animals and 6 objects become NPT/NPD per block (roles swap between blocks).
+6. Draw one SOA per PT from `SOA_range` and fix it for the session. Example: cat = 0.6, dog = 1.3.
+7. Save the stimulus assignment, slotting key, timeline, seed, and config snapshot in the participant folder.
 
 ## 4. Timing model **[CONFIG]**
 
@@ -154,7 +154,7 @@ Im thinking place PTs, place PDs, place rest and if they cant fit just try again
 5. Log every keypress with its timestamp.
 6. Fixation cross: small, white, centered. Flashes green on a hit. (this logic can also probably be ported over from old_av.py as well as the background shuffling unless theres a more optimal way to shuffle background and reduce overhead if its simple and not overengineered)
 
-7. Sound is played equally in both ears (50/50) (this check to go in preflight) 
+7. Sound is played equally in both ears (50/50). The participant confirms audibility in the experiment runner after preflight.
 8. Measure and log the refresh rate and dropped frames. (maybe if this is deemed necessary)
 
 
@@ -173,7 +173,7 @@ TBD. Proposal: reuse the same generator with a shorter content window, fewer tri
 
 ## 12. Monte Carlo and validation (this here is more claude jumping the gun. Good stuff but I need to review this a bit more before implementing)
 
-- `validate_timeline.py` independently re-checks every constraint in section 7 on a generated timeline. Used by the generator, the Monte Carlo script, and preflight.
+- Timeline generation validates its constraints before the experiment starts.
 - `tests/monte_carlo.py` generates thousands of timelines per config and reports:
   - first-attempt success rate and mean retries at each level
   - which role fails most often
@@ -183,12 +183,12 @@ TBD. Proposal: reuse the same generator with a shorter content window, fewer tri
 
 ## 13. Pre-flight (`preflight.sh`)
 
-Check and report:
+Check and report before the experiment runner starts:
 - X11 (Xorg) session, not Wayland
-- display refresh rate (120 or 240 Hz) matches expectation
-- CPU governor set to `performance`
-- no heavy background processes running
-- audio device present and sample rate as expected
+- active display mode and refresh rate reported by `xrandr`
+- writable lab server mount (warn and ask before proceeding when unavailable)
+
+The experiment runner performs PTB audio initialization and a participant-confirmed sound check after preflight.
 
 PNG and WAV checks (non-empty pixel content, equal WAV length, similar loudness) and normalization are done outside this repo as a separate task.
 
@@ -206,7 +206,14 @@ src/
 tests/
   monte_carlo.py
 preflight.sh
-data/<participant_id>/     #need to figure out what all to store here later. Could be organized into animals first or inanimate first folders pretty easy tho then maybe their data on rt and session info config stuff (could make their config after hitting Y at end of preflight 
+data/participant_<PID>/
+  stimulus_assignment.csv
+  slotting_key.csv
+  timeline_key.csv
+  seed.txt
+  session_config_snapshot.json
+  preflight_display.txt
+  session_*/                 # behavioral CSVs and session metadata
 
 
 README.md 

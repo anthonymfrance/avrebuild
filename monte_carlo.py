@@ -2,25 +2,238 @@
 
 import argparse
 import json
+import math
 import random
+import statistics
 import time
 from collections import Counter
 from pathlib import Path
 
-from config import WINDOW_SIZE
+from config import (
+    BETWEEN_PT_STIMULUS_GAP, FADE_IN_DUR, FADE_OUT_DUR,
+    MIN_AUDIO_GAP, MIN_SAME_ITEM_GAP, MIN_TARGET_END_TO_ONSET_GAP,
+    MIN_VISUAL_ONSET_GAP, PEAK_HOLD_DUR, RESPONSE_WINDOW, SOUND_DUR,
+    TRIAL_BUFFER_DUR, TRIAL_CONTENT_DUR,
+    TRIAL_NPD_RANGE, TRIAL_NPT_RANGE, TRIAL_PD_RANGE, TRIAL_PT_RANGE,
+    WINDOW_SIZE,
+)
 from slotting_key import build_slotting_key
 from stimulus_split import split_pool
 from timeline_key import PlacementFailure, _maximum_visual_events, build_timeline
 
 
 MAX_EXAMPLE_FAILURES = 20
+MAX_LAYOUT_TIMELINES = 250
+VISUAL_DURATION = FADE_IN_DUR + PEAK_HOLD_DUR + FADE_OUT_DUR
+TRIAL_DURATION = 2 * TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
+LAYOUT_SIMILARITY_SAMPLE_PAIRS = 50_000
+NEAR_EXACT_ONSET_RESOLUTION = 0.001
 
 
-def _seed_inputs(seed):
+def _distribution(values):
+    if not values:
+        return {'count': 0, 'mean': None, 'standard_deviation': None,
+                'minimum': None, 'median': None, 'maximum': None}
+    return {
+        'count': len(values), 'mean': statistics.fmean(values),
+        'standard_deviation': statistics.pstdev(values), 'minimum': min(values),
+        'median': statistics.median(values), 'maximum': max(values),
+    }
+
+
+def _layout_analysis(timelines, placement_stats, start_seed, n):
+    """Summarize successful timelines; all rows originate in build_timeline."""
+    onset_by_position = {}
+    gaps = []
+    target_end_gaps = []
+    role_orders = Counter()
+    identity_orders = Counter()
+    normalized_layouts = Counter()
+    intended_soas = []
+    actual_soas = []
+    abs_soa_errors = []
+    attempts_by_timeline = []
+    trial_records = []
+
+    for timeline, stats in zip(timelines, placement_stats):
+        by_trial = {}
+        visuals = [row for row in timeline if row['event_type'] == 'visual']
+        sounds_by_source = {
+            row['source_event_id']: row for row in timeline
+            if row['event_type'] == 'sound'
+        }
+        for row in visuals:
+            by_trial.setdefault((row['block'], row['trial']), []).append(row)
+            if row['role'] in {'PT', 'PD'}:
+                sound = sounds_by_source.get(row['event_id'])
+                if sound is not None:
+                    intended = float(sound['soa'])
+                    # Production SOA is hold-start minus sound onset.
+                    actual = row['global_onset'] + FADE_IN_DUR - sound['global_onset']
+                    intended_soas.append(intended)
+                    actual_soas.append(actual)
+                    abs_soa_errors.append(abs(actual - intended))
+
+        for (block, trial), events in by_trial.items():
+            events.sort(key=lambda row: row['global_onset'])
+            order = tuple(row['role'] for row in events)
+            identities = tuple(
+                (row['role'], row.get('stimulus', ''), row.get('event_id', ''))
+                for row in events
+            )
+            onsets = [row['global_onset'] for row in events]
+            local_onsets = [row['trial_onset'] for row in events]
+            for position, (global_onset, local_onset) in enumerate(zip(onsets, local_onsets), 1):
+                onset_by_position.setdefault(position, {'global': [], 'trial': []})
+                onset_by_position[position]['global'].append(global_onset)
+                onset_by_position[position]['trial'].append(local_onset)
+            trial_gaps = [
+                right['global_onset'] - left['global_onset']
+                for left, right in zip(events, events[1:])
+            ]
+            gaps.extend(trial_gaps)
+            targets = [row for row in events if row['role'] in {'PT', 'NPT'}]
+            target_end_gaps.extend(
+                right['global_onset'] - (left['global_onset'] + VISUAL_DURATION)
+                for left, right in zip(targets, targets[1:])
+            )
+            normalized = tuple(
+                round((onset - onsets[0]) / NEAR_EXACT_ONSET_RESOLUTION)
+                * NEAR_EXACT_ONSET_RESOLUTION for onset in onsets
+            )
+            role_orders[order] += 1
+            identity_orders[identities] += 1
+            normalized_layouts[(order, normalized)] += 1
+            trial_records.append({
+                'event_count': len(events), 'normalized_onsets': normalized,
+            })
+
+        attempts_by_timeline.append(stats.get('placement_attempts', 0))
+
+    # Sample with replacement from valid equal-event-count groups. The fixed
+    # range-derived RNG makes the reported distance sample reproducible.
+    pair_rng = random.Random((start_seed * 1_000_003 + n) & ((1 << 64) - 1))
+    groups = {}
+    for record in trial_records:
+        groups.setdefault(record['event_count'], []).append(record['normalized_onsets'])
+    pairable = [(count, values) for count, values in groups.items() if len(values) >= 2]
+    pair_distances = []
+    if pairable:
+        weights = [len(values) * (len(values) - 1) // 2 for _, values in pairable]
+        total_weight = sum(weights)
+        for _ in range(LAYOUT_SIMILARITY_SAMPLE_PAIRS):
+            pick = pair_rng.randrange(total_weight)
+            group_index = next(i for i, weight in enumerate(weights) if (pick := pick - weight) < 0)
+            values = pairable[group_index][1]
+            i = pair_rng.randrange(len(values))
+            j = pair_rng.randrange(len(values) - 1)
+            if j >= i:
+                j += 1
+            pair_distances.append(statistics.fmean(
+                abs(a - b) for a, b in zip(values[i], values[j])
+            ))
+
+    def top_patterns(counter, limit=10):
+        total = sum(counter.values())
+        return [
+            {'pattern': repr(pattern), 'count': count,
+             'percentage': 100 * count / total if total else 0.0}
+            for pattern, count in counter.most_common(limit)
+        ]
+
+    onset_stats = {
+        str(position): {
+            'global_onset': _distribution(values['global']),
+            'trial_onset': _distribution(values['trial']),
+        }
+        for position, values in sorted(onset_by_position.items())
+    }
+    gap_stats = _distribution(gaps)
+    gap_stats.update({
+        'minimum_allowed_gap': MIN_VISUAL_ONSET_GAP,
+        'at_minimum_count': sum(abs(gap - MIN_VISUAL_ONSET_GAP) <= 1e-9 for gap in gaps),
+        'at_minimum_percentage': 100 * sum(
+            abs(gap - MIN_VISUAL_ONSET_GAP) <= 1e-9 for gap in gaps
+        ) / len(gaps) if gaps else 0.0,
+        'above_minimum_count': sum(gap > MIN_VISUAL_ONSET_GAP + 1e-9 for gap in gaps),
+        'above_minimum_percentage': 100 * sum(
+            gap > MIN_VISUAL_ONSET_GAP + 1e-9 for gap in gaps
+        ) / len(gaps) if gaps else 0.0,
+    })
+    target_gap_stats = _distribution(target_end_gaps)
+    target_gap_stats.update({
+        'minimum_allowed_gap': MIN_TARGET_END_TO_ONSET_GAP,
+        'at_minimum_count': sum(
+            abs(gap - MIN_TARGET_END_TO_ONSET_GAP) <= 1e-9 for gap in target_end_gaps
+        ),
+        'above_minimum_count': sum(
+            gap > MIN_TARGET_END_TO_ONSET_GAP + 1e-9 for gap in target_end_gaps
+        ),
+    })
+    order_total = sum(role_orders.values())
+    most_common_order, most_common_count = role_orders.most_common(1)[0] if role_orders else ((), 0)
+    normalized_total = sum(normalized_layouts.values())
+    normalized_most_common, normalized_most_count = (
+        normalized_layouts.most_common(1)[0] if normalized_layouts else (None, 0)
+    )
+    return {
+        'successful_timelines_analyzed': len(timelines),
+        'visual_onset_by_position': onset_stats,
+        'visual_gaps': gap_stats,
+        'target_end_to_onset_gaps': target_gap_stats,
+        'visual_order_diversity': {
+            'successful_trials_analyzed': order_total,
+            'unique_role_order_patterns': len(role_orders),
+            'most_common_role_pattern': repr(most_common_order),
+            'most_common_role_pattern_count': most_common_count,
+            'most_common_role_pattern_percentage': 100 * most_common_count / order_total if order_total else 0.0,
+            'top_10_role_patterns': top_patterns(role_orders),
+            'unique_full_identity_patterns': len(identity_orders),
+            'top_10_full_identity_patterns': top_patterns(identity_orders),
+        },
+        'onset_layout_similarity': {
+            'method': 'Mean absolute difference between first-onset-normalized onset vectors, sampled with replacement from equal event-count trial groups.',
+            'comparable_trials': len(trial_records),
+            'sampled_pairs': len(pair_distances),
+            'distance_seconds': _distribution(pair_distances),
+        },
+        'pt_pd_timing': {
+            'measurement': 'PT/PD visual-to-associated-sound SOA; production SOA is hold-start minus sound onset. PT-to-PD visual pairs are not represented by a dedicated pair field in the production timeline.',
+            'intended_soa_seconds': _distribution(intended_soas),
+            'actual_soa_seconds': _distribution(actual_soas),
+            'mean_absolute_difference_seconds': statistics.fmean(abs_soa_errors) if abs_soa_errors else None,
+        },
+        'schedule_repetition': {
+            'normalized_signature_definition': 'Role order plus first-onset-relative visual onset vector rounded to 1 ms.',
+            'unique_normalized_layout_signatures': len(normalized_layouts),
+            'successful_trials_analyzed': normalized_total,
+            'most_repeated_signature_count': normalized_most_count,
+            'most_repeated_signature_percentage': 100 * normalized_most_count / normalized_total if normalized_total else 0.0,
+            'most_repeated_signature': repr(normalized_most_common),
+        },
+        'placement_behavior': {
+            'placement_attempts_total': sum(attempts_by_timeline),
+            'placement_attempts_per_successful_timeline': _distribution(attempts_by_timeline),
+        },
+        'sampling': {
+            'layout_similarity_pairs': len(pair_distances),
+            'similarity_sampling_seed': (start_seed * 1_000_003 + n) & ((1 << 64) - 1),
+            'near_exact_signature_onset_resolution_seconds': NEAR_EXACT_ONSET_RESOLUTION,
+            'note': 'No categorical high/moderate/low labels are assigned; inspect the reported measurements directly.',
+        },
+    }
+
+
+def _seed_inputs(seed, count_ranges=None):
     """Recreate the persisted slotting inputs using the production seed flow."""
     key_rng = random.Random(seed)
     assignment = split_pool(key_rng)
-    source_rows = build_slotting_key(key_rng, assignment)
+    ranges = dict(count_ranges or {})
+    source_rows = build_slotting_key(
+        key_rng, assignment,
+        pt_count_range=ranges.get('PT', TRIAL_PT_RANGE),
+        npt_count_range=ranges.get('NPT', TRIAL_NPT_RANGE),
+    )
 
     # Match read_slotting_key's in-memory normalization of the CSV rows.
     slotting_rows = []
@@ -38,18 +251,115 @@ def _seed_inputs(seed):
     return slotting_rows, assignment
 
 
-def _run_seed(seed, diagnostics=None):
-    slotting_rows, assignment = _seed_inputs(seed)
+def _audit_timeline(timeline, required, assignment, count_ranges=None):
+    """Independently check generated counts, windows, visual gaps, and audio."""
+    ranges = {
+        'PT': TRIAL_PT_RANGE, 'NPT': TRIAL_NPT_RANGE,
+        'PD': TRIAL_PD_RANGE, 'NPD': TRIAL_NPD_RANGE,
+    }
+    ranges.update(count_ranges or {})
+    blocks = list(assignment)
+    trial_count = max(row['trial'] for row in required)
+    visuals = [row for row in timeline if row['event_type'] == 'visual']
+    sounds = [row for row in timeline if row['event_type'] == 'sound']
+    expected = Counter((row['block'], row['trial'], row['role']) for row in required)
+    actual = Counter((row['block'], row['trial'], row['role']) for row in visuals)
+    if actual != expected:
+        raise ValueError('Monte Carlo audit: required visual counts changed.')
+    for row in visuals:
+        if row['stimulus'] not in assignment[row['block']][row['role']]:
+            raise ValueError(f"Monte Carlo audit: {row['event_id']} has an invalid role-pool item.")
+        low, high = ranges[row['role']]
+        count = actual[(row['block'], row['trial'], row['role'])]
+        if not low <= count <= high:
+            raise ValueError(f"Monte Carlo audit: {row['block']} trial {row['trial']} {row['role']} count is out of range.")
+
+    visuals_by_trial = {}
+    sounds_by_block = {}
+    for row in timeline:
+        trial_start = (blocks.index(row['block']) * trial_count + row['trial'] - 1) * TRIAL_DURATION
+        content_start = trial_start + TRIAL_BUFFER_DUR
+        content_end = content_start + TRIAL_CONTENT_DUR
+        event_end = row['global_onset'] + row['duration']
+        if row['event_type'] == 'visual':
+            visuals_by_trial.setdefault((row['block'], row['trial']), []).append(row)
+            if row['global_onset'] < content_start or event_end > content_end:
+                raise ValueError(f"Monte Carlo audit: visual {row['event_id']} escapes the content window.")
+            is_target = row['role'] in {'PT', 'NPT'}
+            if (row['response_window'] == RESPONSE_WINDOW) != is_target:
+                raise ValueError(f"Monte Carlo audit: response window is assigned to the wrong role for {row['event_id']}.")
+            if is_target and row['global_onset'] + row['response_window'] > trial_start + TRIAL_DURATION:
+                raise ValueError(f"Monte Carlo audit: response window for {row['event_id']} exceeds the trial.")
+        elif row['event_type'] == 'sound':
+            sounds_by_block.setdefault(row['block'], []).append(row)
+            if row['response_window'] != '' or row['global_onset'] < content_start or event_end > content_end:
+                raise ValueError(f"Monte Carlo audit: sound {row['event_id']} has invalid timing or a response window.")
+        else:
+            raise ValueError(f"Monte Carlo audit: unknown event type in {row['event_id']}.")
+
+    expected_sounds = {row['event_id'] for row in required if row['role'] in {'PT', 'PD'}}
+    sounds_by_source = {row['source_event_id']: row for row in sounds}
+    if set(sounds_by_source) != expected_sounds:
+        raise ValueError('Monte Carlo audit: PT/PD sound pairing is incomplete or unexpected.')
+
+    for (block, trial), rows in visuals_by_trial.items():
+        rows.sort(key=lambda row: row['global_onset'])
+        for left, right in zip(rows, rows[1:]):
+            if right['global_onset'] - left['global_onset'] < MIN_VISUAL_ONSET_GAP:
+                raise ValueError(f'Monte Carlo audit: visual onset gap failed in {block} trial {trial}.')
+        targets = [row for row in rows if row['role'] in {'PT', 'NPT'}]
+        for index, left in enumerate(rows):
+            for right in rows[index + 1:]:
+                onset_delta = right['global_onset'] - left['global_onset']
+                end_gap = onset_delta - VISUAL_DURATION
+                if left['corner'] == right['corner'] and end_gap < -1e-9:
+                    raise ValueError(
+                        f'Monte Carlo audit: same-corner images overlap in {block} trial {trial}: '
+                        f'{left["event_id"]}/{right["event_id"]}, end-to-onset gap={end_gap:.12g}s.'
+                    )
+                if left['stimulus'] == right['stimulus'] and end_gap < MIN_SAME_ITEM_GAP:
+                    raise ValueError(f'Monte Carlo audit: same-item gap failed in {block} trial {trial}.')
+                if left['role'] == right['role'] == 'PT' and end_gap < BETWEEN_PT_STIMULUS_GAP:
+                    raise ValueError(f'Monte Carlo audit: PT-to-PT gap failed in {block} trial {trial}.')
+        for left, right in zip(targets, targets[1:]):
+            if right['global_onset'] - (left['global_onset'] + VISUAL_DURATION) < MIN_TARGET_END_TO_ONSET_GAP:
+                raise ValueError(f'Monte Carlo audit: target fade-end gap failed in {block} trial {trial}.')
+            if right['global_onset'] - left['global_onset'] < RESPONSE_WINDOW:
+                raise ValueError(f'Monte Carlo audit: target response windows overlap in {block} trial {trial}.')
+
+    for block, rows in sounds_by_block.items():
+        rows.sort(key=lambda row: row['global_onset'])
+        for left, right in zip(rows, rows[1:]):
+            if right['global_onset'] - left['global_onset'] < SOUND_DUR + MIN_AUDIO_GAP:
+                raise ValueError(f'Monte Carlo audit: audio gap failed in {block}.')
+    for visual in visuals:
+        if visual['role'] in {'PT', 'PD'}:
+            sound = sounds_by_source[visual['event_id']]
+            if not math.isclose(
+                visual['global_onset'] + FADE_IN_DUR - sound['global_onset'],
+                sound['soa'],
+            ):
+                raise ValueError(f"Monte Carlo audit: SOA mismatch for {visual['event_id']}.")
+
+
+def _run_seed(seed, diagnostics=None, count_ranges=None):
+    slotting_rows, assignment = _seed_inputs(seed, count_ranges)
     timeline_rng = random.Random(seed)
     timeline, required, stats = build_timeline(
         slotting_rows, timeline_rng, assignment, WINDOW_SIZE,
         diagnostics=diagnostics,
+        count_ranges=count_ranges,
     )
+    if diagnostics is not None:
+        diagnostics['stage'] = 'monte_carlo_audit'
+    _audit_timeline(timeline, required, assignment, count_ranges)
     return timeline, required, stats, diagnostics
 
 
 def _classify_failure(exc, diagnostics):
     stage = diagnostics.get('stage', 'unknown')
+    if stage == 'monte_carlo_audit':
+        return 'independent_validation_failure'
     counts = diagnostics.get('trial_visual_counts', [])
     over_capacity = [
         item for item in counts if item['count'] > _maximum_visual_events()
@@ -63,26 +373,38 @@ def _classify_failure(exc, diagnostics):
     return 'unexpected_internal_error'
 
 
-def run_monte_carlo(n, start_seed=1, progress_every=0):
+def run_monte_carlo(n, start_seed=1, progress_every=0, count_ranges=None):
     count_distribution = Counter()
     reason_counts = Counter()
     failure_records = []
+    successful_layouts = []
+    successful_placement_stats = []
     trial_count = 0
     over_capacity_trials = 0
     max_visual_events = 0
     successful = 0
     placement_attempts = 0
     timeline_attempts = 0
-    backtracks = 0
-    max_trial_backtracks = 0
+    first_attempt_successes = 0
+    layout_rng = random.Random((start_seed * 2_000_033 + n) & ((1 << 64) - 1))
     started = time.monotonic()
 
     for index, seed in enumerate(range(start_seed, start_seed + n), start=1):
         pid = f'MC_{seed:06d}'
         diagnostics = {}
         try:
-            _, _, stats, _ = _run_seed(seed, diagnostics)
+            timeline, _, stats, _ = _run_seed(seed, diagnostics, count_ranges)
             successful += 1
+            if diagnostics.get('timeline_attempts') == 1:
+                first_attempt_successes += 1
+            if len(successful_layouts) < MAX_LAYOUT_TIMELINES:
+                successful_layouts.append(timeline)
+                successful_placement_stats.append(dict(stats))
+            else:
+                replacement = layout_rng.randrange(successful)
+                if replacement < MAX_LAYOUT_TIMELINES:
+                    successful_layouts[replacement] = timeline
+                    successful_placement_stats[replacement] = dict(stats)
         except Exception as exc:  # Preserve all failure details and seed context.
             category = _classify_failure(exc, diagnostics)
             counts = diagnostics.get('trial_visual_counts', [])
@@ -115,21 +437,27 @@ def run_monte_carlo(n, start_seed=1, progress_every=0):
             over_capacity_trials += event_count > _maximum_visual_events()
         placement_attempts += stats.get('placement_attempts', 0)
         timeline_attempts += diagnostics.get('timeline_attempts', stats.get('timeline_attempts', 0))
-        backtracks += stats.get('backtracks', 0)
-        max_trial_backtracks = max(
-            max_trial_backtracks, stats.get('max_trial_backtracks', 0)
-        )
         if progress_every and index % progress_every == 0:
             print(
-                f'Progress: {index}/{n} seeds; successes={successful}, failures={len(failure_records)}',
+                f'Progress: {index:,}/{n:,} seeds; successes={successful:,}, failures={len(failure_records):,}',
                 flush=True,
             )
 
     failed = len(failure_records)
-    return {
+    summary = {
         'seeds_tested': n,
         'start_seed': start_seed,
         'successful_timelines': successful,
+        'first_attempt_successes': first_attempt_successes,
+        'first_attempt_success_rate': first_attempt_successes / n if n else 0.0,
+        'layout_analysis_sampled_timelines': len(successful_layouts),
+        'count_ranges': {
+            role: (count_ranges or {}).get(role, bounds)
+            for role, bounds in {
+                'PT': TRIAL_PT_RANGE, 'NPT': TRIAL_NPT_RANGE,
+                'PD': TRIAL_PD_RANGE, 'NPD': TRIAL_NPD_RANGE,
+            }.items()
+        },
         'failed_timelines': failed,
         'failure_rate': failed / n if n else 0.0,
         'failure_counts_by_reason': dict(sorted(reason_counts.items())),
@@ -142,10 +470,6 @@ def run_monte_carlo(n, start_seed=1, progress_every=0):
         },
         'trials_observed': trial_count,
         'maximum_visual_events_observed': max_visual_events,
-        'trials_with_27_visual_events': count_distribution[27],
-        'percentage_of_trials_with_27_visual_events': (
-            100 * count_distribution[27] / trial_count if trial_count else 0.0
-        ),
         'over_capacity_trials': over_capacity_trials,
         'timelines_failed_over_capacity': sum(
             record['category'] == 'over_capacity' for record in failure_records
@@ -155,44 +479,42 @@ def run_monte_carlo(n, start_seed=1, progress_every=0):
         'unexpected_internal_errors': reason_counts['unexpected_internal_error'],
         'placement_attempts': placement_attempts,
         'timeline_attempts': timeline_attempts,
-        'backtracks': backtracks,
-        'maximum_trial_backtracks': max_trial_backtracks,
         'elapsed_seconds': time.monotonic() - started,
         'failed_seeds': [record['seed'] for record in failure_records],
         'failures': failure_records,
     }
+    summary['variability_analysis'] = _layout_analysis(
+        successful_layouts, successful_placement_stats, start_seed, n,
+    )
+    return summary
 
 
 def _print_summary(summary):
     print('Monte Carlo timeline validation')
-    print(f"Seeds tested: {summary['seeds_tested']}")
-    print(f"Successful: {summary['successful_timelines']}")
-    print(f"Failed: {summary['failed_timelines']}")
+    print(f"Seeds tested: {summary['seeds_tested']:,}")
+    print(f"Successful: {summary['successful_timelines']:,}")
+    print(f"Failed: {summary['failed_timelines']:,}")
     print(f"Failure rate: {summary['failure_rate']:.2%}")
+    print(f"First-attempt success rate: {summary['first_attempt_success_rate']:.2%}")
     print('\nFailure counts by reason:')
     if summary['failure_counts_by_reason']:
         for reason, count in summary['failure_counts_by_reason'].items():
-            print(f'  {reason}: {count}')
+            print(f'  {reason}: {count:,}')
     else:
         print('  none')
     print('\nVisual event count distribution (count, percentage of trials):')
     for event_count, values in summary['visual_event_count_distribution'].items():
-        print(f"  {event_count}: {values['count']} ({values['percentage']:.2f}%)")
-    print(f"Trials observed: {summary['trials_observed']}")
-    print(f"Maximum visual events observed: {summary['maximum_visual_events_observed']}")
+        print(f"  {event_count}: {values['count']:,} ({values['percentage']:.2f}%)")
+    print(f"Trials observed: {summary['trials_observed']:,}")
+    print(f"Maximum visual events observed: {summary['maximum_visual_events_observed']:,}")
+    print(f"Over-capacity trials: {summary['over_capacity_trials']:,}")
+    print(f"Timelines failed over capacity: {summary['timelines_failed_over_capacity']:,}")
+    print(f"Placement failures within capacity: {summary['placement_failures_within_capacity']:,}")
+    print(f"Validation failures: {summary['validation_failures']:,}")
+    print(f"Unexpected/internal errors: {summary['unexpected_internal_errors']:,}")
     print(
-        f"Trials with 27 visual events: {summary['trials_with_27_visual_events']} "
-        f"({summary['percentage_of_trials_with_27_visual_events']:.2f}%)"
-    )
-    print(f"Over-capacity trials: {summary['over_capacity_trials']}")
-    print(f"Timelines failed over capacity: {summary['timelines_failed_over_capacity']}")
-    print(f"Placement failures within capacity: {summary['placement_failures_within_capacity']}")
-    print(f"Validation failures: {summary['validation_failures']}")
-    print(f"Unexpected/internal errors: {summary['unexpected_internal_errors']}")
-    print(
-        f"Placement layouts/retries: {summary['placement_attempts']} / "
-        f"{summary['timeline_attempts']}; backtracks: {summary['backtracks']} "
-        f"(max in one trial: {summary['maximum_trial_backtracks']})"
+        f"Randomized placement orders: {summary['placement_attempts']:,}; "
+        f"whole-timeline attempts: {summary['timeline_attempts']:,}"
     )
     print(f"Elapsed: {summary['elapsed_seconds']:.2f}s")
     print(f"\nExample failed seeds (first {MAX_EXAMPLE_FAILURES}):")
@@ -202,9 +524,114 @@ def _print_summary(summary):
         print('  none')
 
 
+def _print_distribution(label, values):
+    if values['count']:
+        print(
+            f"  n={values['count']:,}; mean={values['mean']:.3f}s; "
+            f"SD={values['standard_deviation']:.3f}s; min={values['minimum']:.3f}s; "
+            f"median={values['median']:.3f}s; max={values['maximum']:.3f}s"
+        )
+    else:
+        print('  no observations')
+
+
+def _print_variability(analysis):
+    print('\nVISUAL ONSET VARIABILITY')
+    for position, values in analysis['visual_onset_by_position'].items():
+        glob, local = values['global_onset'], values['trial_onset']
+        print(f"Position {position} (global): mean={glob['mean']:.3f}s, SD={glob['standard_deviation']:.3f}s, min={glob['minimum']:.3f}s, max={glob['maximum']:.3f}s")
+        print(f"             (within trial): mean={local['mean']:.3f}s, SD={local['standard_deviation']:.3f}s, min={local['minimum']:.3f}s, max={local['maximum']:.3f}s")
+
+    gaps = analysis['visual_gaps']
+    print('\nVISUAL GAP VARIABILITY')
+    _print_distribution('gaps', gaps)
+    print(f"  at minimum gap ({gaps['minimum_allowed_gap']:.3f}s): {gaps['at_minimum_percentage']:.2f}%")
+    print(f"  above minimum gap: {gaps['above_minimum_percentage']:.2f}%")
+
+    target_gaps = analysis['target_end_to_onset_gaps']
+    print('\nTARGET FADE-END TO NEXT-TARGET GAPS')
+    _print_distribution('target gaps', target_gaps)
+    print(f"  at minimum gap ({target_gaps['minimum_allowed_gap']:.3f}s): {target_gaps['at_minimum_count']:,}")
+
+    orders = analysis['visual_order_diversity']
+    print('\nVISUAL ORDER DIVERSITY')
+    print(f"  Successful trials analyzed: {orders['successful_trials_analyzed']:,}")
+    print(f"  Unique role-order patterns: {orders['unique_role_order_patterns']:,}")
+    print(f"  Most common role pattern: {orders['most_common_role_pattern']} — {orders['most_common_role_pattern_count']:,} ({orders['most_common_role_pattern_percentage']:.2f}%)")
+    print('  Top role patterns:')
+    for index, item in enumerate(orders['top_10_role_patterns'], 1):
+        print(f"    {index}. {item['pattern']} — {item['count']:,} ({item['percentage']:.2f}%)")
+    print(f"  Unique full identity patterns: {orders['unique_full_identity_patterns']:,}")
+
+    similarity = analysis['onset_layout_similarity']
+    print('\nONSET-LAYOUT SIMILARITY')
+    print(f"  Comparable trials: {similarity['comparable_trials']:,}; sampled pairs: {similarity['sampled_pairs']:,}")
+    _print_distribution('layout distance', similarity['distance_seconds'])
+
+    timing = analysis['pt_pd_timing']
+    print('\nPT/PD PAIRED AUDIOVISUAL SOA VARIABILITY')
+    print(f"  Intended SOA:")
+    _print_distribution('intended', timing['intended_soa_seconds'])
+    print('  Actual SOA:')
+    _print_distribution('actual', timing['actual_soa_seconds'])
+    if timing['mean_absolute_difference_seconds'] is not None:
+        print(f"  Mean absolute actual/intended difference: {timing['mean_absolute_difference_seconds']:.6f}s")
+    print(f"  Note: {timing['measurement']}")
+
+    repetition = analysis['schedule_repetition']
+    print('\nEXACT/NEAR-EXACT SCHEDULE REPETITION')
+    print(f"  Unique normalized layout signatures: {repetition['unique_normalized_layout_signatures']:,}")
+    print(f"  Successful trials analyzed: {repetition['successful_trials_analyzed']:,}")
+    print(f"  Most repeated signature: {repetition['most_repeated_signature_count']:,} ({repetition['most_repeated_signature_percentage']:.2f}%)")
+    print(f"  Signature definition: {repetition['normalized_signature_definition']}")
+
+    placement = analysis['placement_behavior']
+    print('\nPLACEMENT ATTEMPT VARIABILITY')
+    print(f"  Placement attempts total: {placement['placement_attempts_total']:,}")
+    print(f"  Placement attempts per successful timeline: {placement['placement_attempts_per_successful_timeline']}")
+
+    print('\n' + '=' * 60)
+    print('SCHEDULE VARIABILITY ASSESSMENT')
+    print('=' * 60)
+    print('Insufficient evidence for categorical high/moderate/low labels; inspect the measured distributions above.')
+    if similarity['distance_seconds']['count']:
+        print(
+            f"Interpretation: among {similarity['sampled_pairs']:,} reproducibly sampled equal-event-count trial pairs, "
+            f"the mean normalized onset-layout distance was "
+            f"{similarity['distance_seconds']['mean']:.3f}s (median "
+            f"{similarity['distance_seconds']['median']:.3f}s). The most common "
+            f"normalized signature occurred in {repetition['most_repeated_signature_percentage']:.2f}% "
+            'of analyzed trials.'
+        )
+
+
+def _worst_case_ranges():
+    return {
+        'PT': (TRIAL_PT_RANGE[1], TRIAL_PT_RANGE[1]),
+        'NPT': (TRIAL_NPT_RANGE[1], TRIAL_NPT_RANGE[1]),
+        'PD': (TRIAL_PD_RANGE[1], TRIAL_PD_RANGE[1]),
+        'NPD': (TRIAL_NPD_RANGE[1], TRIAL_NPD_RANGE[1]),
+    }
+
+
+def _sweep_ranges():
+    """Sweep NPT/NPD upper bounds while keeping their configured minima fixed."""
+    for npt_max in range(TRIAL_NPT_RANGE[0], TRIAL_NPT_RANGE[1] + 1):
+        for npd_max in range(TRIAL_NPD_RANGE[0], TRIAL_NPD_RANGE[1] + 1):
+            yield {
+                'PT': TRIAL_PT_RANGE,
+                'NPT': (TRIAL_NPT_RANGE[0], npt_max),
+                'PD': TRIAL_PD_RANGE,
+                'NPD': (TRIAL_NPD_RANGE[0], npd_max),
+            }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--n', type=int, default=10_000, help='number of seeds to simulate (default: 10000)')
+    parser.add_argument(
+        '--n', type=int, default=None,
+        help='number of seeds to simulate (prompt interactively when omitted)',
+    )
     parser.add_argument('--start-seed', type=int, default=1, help='first seed to simulate (default: 1)')
     parser.add_argument(
         '--progress-every', type=int, default=1000,
@@ -214,12 +641,78 @@ def main():
         '--json-report', type=Path,
         help='optional path for one machine-readable summary including all failed seeds',
     )
+    scenario_group = parser.add_mutually_exclusive_group()
+    scenario_group.add_argument(
+        '--worst-case', action='store_true',
+        help='set PT, NPT, PD, and NPD counts to their configured maxima',
+    )
+    scenario_group.add_argument(
+        '--sweep', action='store_true',
+        help='sweep all NPT/NPD upper-bound combinations, keeping minima fixed',
+    )
     args = parser.parse_args()
-    if args.n < 1 or args.progress_every < 0:
-        parser.error('--n must be positive and --progress-every must be nonnegative')
+    if args.progress_every < 0:
+        parser.error('--progress-every must be nonnegative')
 
-    summary = run_monte_carlo(args.n, args.start_seed, args.progress_every)
-    _print_summary(summary)
+    if args.n is None:
+        print('=' * 60)
+        print('MONTE CARLO TIMELINE VALIDATION')
+        print('=' * 60)
+        while True:
+            try:
+                response = input('\nHow many seeds would you like to test? ')
+            except EOFError:
+                parser.error('no seed count was provided')
+            try:
+                n = int(response)
+                if n > 0:
+                    break
+            except ValueError:
+                pass
+            print('Please enter a positive whole number (for example, 10000).')
+    else:
+        n = args.n
+        if n < 1:
+            parser.error('--n must be positive')
+
+    print(f'\nSeeds to test: {n:,}')
+    print(f'Seed range: {args.start_seed:,}–{args.start_seed + n - 1:,}\n')
+
+    try:
+        if args.sweep:
+            results = []
+            scenarios = list(_sweep_ranges())
+            for index, ranges in enumerate(scenarios, start=1):
+                label = f"NPT={ranges['NPT']} NPD={ranges['NPD']}"
+                print(f'\nSweep {index}/{len(scenarios)}: {label}')
+                result = run_monte_carlo(
+                    n, args.start_seed, args.progress_every, count_ranges=ranges,
+                )
+                results.append({'ranges': ranges, 'result': result})
+                print(
+                    f"  success={result['successful_timelines']}/{n}; "
+                    f"first_attempt={result['first_attempt_success_rate']:.1%}; "
+                    f"failures={result['failure_counts_by_reason']}"
+                )
+            summary = {
+                'scenario': 'npt_npd_upper_bound_sweep',
+                'seeds_per_scenario': n,
+                'start_seed': args.start_seed,
+                'scenarios': results,
+            }
+        else:
+            ranges = _worst_case_ranges() if args.worst_case else None
+            summary = run_monte_carlo(
+                n, args.start_seed, args.progress_every, count_ranges=ranges,
+            )
+    except KeyboardInterrupt:
+        print('\nMonte Carlo simulation interrupted.')
+        return
+    if args.sweep:
+        print(f"\nCompleted {len(summary['scenarios'])} range-sweep scenarios.")
+    else:
+        _print_summary(summary)
+        _print_variability(summary['variability_analysis'])
     if args.json_report:
         args.json_report.parent.mkdir(parents=True, exist_ok=True)
         args.json_report.write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')

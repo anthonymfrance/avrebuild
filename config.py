@@ -1,4 +1,4 @@
-"""Study constants. Numbers only: no functions, no PsychoPy imports.
+"""Study constants: no functions, no PsychoPy imports.
 A constant is added here only when the first function that uses it is written."""
 
 # --- Stimulus split ---
@@ -18,7 +18,6 @@ TRIAL_NPT_RANGE = (3, 8)
 TRIAL_PD_RANGE = (3, 5)
 TRIAL_NPD_RANGE = (6, 11)
 MAX_PLACEMENT_ATTEMPTS = 250
-MAX_BACKTRACK_ATTEMPTS = 5000
 MAX_TIMELINE_ATTEMPTS = 3
 
 TARGET_SPATIAL_BIAS = 0.80
@@ -31,6 +30,7 @@ FADE_IN_DUR = 0.3
 PEAK_HOLD_DUR = 0.0
 FADE_OUT_DUR = 0.3
 MIN_VISUAL_ONSET_GAP = 0.15
+MIN_TARGET_END_TO_ONSET_GAP = 0.15
 MIN_SAME_ITEM_GAP = 0.75
 
 # --- Trial structure: buffer + content + buffer = 24 s ---
@@ -39,6 +39,10 @@ TRIAL_CONTENT_DUR = 20.0
 BETWEEN_PT_STIMULUS_GAP = 0.5
 
 # --- Audio ---
+AUDIO_BACKEND = 'ptb'
+AUDIO_LATENCY_MODE = 2
+AUDIO_DEVICE = 'default'
+AUDIO_SPEAKER = 'default'
 SOUND_DUR = 1.0
 MIN_AUDIO_GAP = 0.2
 
