@@ -26,6 +26,7 @@ CORNERS = ('top_left', 'top_right', 'bottom_left', 'bottom_right')
 FAVORED_CORNER = 'top_right'
 
 # --- Visual timing (seconds) ---
+WINDOW_SIZE = (1920, 1080)
 FADE_IN_DUR = 0.3
 PEAK_HOLD_DUR = 0.0
 FADE_OUT_DUR = 0.3

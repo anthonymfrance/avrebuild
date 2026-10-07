@@ -14,7 +14,6 @@ from config import (
     FADE_OUT_DUR,
     IMAGE_SIZE,
     MAX_BACKTRACK_ATTEMPTS,
-    MAX_PLACEMENT_ATTEMPTS,
     MAX_TIMELINE_ATTEMPTS,
     MIN_AUDIO_GAP,
     MIN_SAME_ITEM_GAP,
@@ -32,19 +31,22 @@ from config import (
     TRIAL_NPT_RANGE,
     TRIAL_PD_RANGE,
     TRIAL_PT_RANGE,
+    WINDOW_SIZE,
 )
 from stimulus_split import read_stimulus_assignment, validate_stimulus_assignment
 
 
+# global_onset is PLANNED time on one continuous clock assuming no pauses. It
+# is used for timeline planning and validation, not runtime scheduling; participant
+# breaks can occur between trials or blocks.
 FIELDS = [
     'block', 'trial', 'event_index', 'order_in_trial', 'event_id', 'source_event_id', 'role',
-    'stimulus', 'slot_number', 'corner', 'x', 'y', 'onset', 'duration', 'event_type',
+    'stimulus', 'slot_number', 'corner', 'x', 'y', 'global_onset', 'trial_onset', 'duration', 'event_type',
     'soa', 'response_window',
 ]
 VISUAL_DURATION = FADE_IN_DUR + PEAK_HOLD_DUR + FADE_OUT_DUR
 TRIAL_DURATION = 2 * TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
 ROLE_ORDER = ('PT', 'PD', 'NPT', 'NPD')
-ROLE_PRIORITY = {role: index for index, role in enumerate(ROLE_ORDER)}
 RANGES = {
     'PT': TRIAL_PT_RANGE,
     'NPT': TRIAL_NPT_RANGE,
@@ -130,7 +132,7 @@ def _event(block, trial, role, stimulus, slot, event_id, corner, soa=None):
     }
 
 
-def _required_events(slotting_rows, stimulus_assignment, rng, pt_soa_by_block, trial_count):
+def _required_events(slotting_rows, stimulus_assignment, rng, pt_soa_by_identity, trial_count):
     events = []
     counts = Counter((row['block'], row['trial'], row['role']) for row in slotting_rows)
     blocks = list(dict.fromkeys(row['block'] for row in slotting_rows))
@@ -150,7 +152,7 @@ def _required_events(slotting_rows, stimulus_assignment, rng, pt_soa_by_block, t
         events.append(_event(
             row['block'], row['trial'], row['role'], row['stimulus'],
             row['slot_number'], row['event_id'], row['corner'],
-            pt_soa_by_block[row['block']] if row['role'] == 'PT' else None,
+            pt_soa_by_identity[(row['block'], row['stimulus'])] if row['role'] == 'PT' else None,
         ))
 
     trials = range(1, trial_count + 1)
@@ -172,119 +174,236 @@ def _required_events(slotting_rows, stimulus_assignment, rng, pt_soa_by_block, t
 
 def _conflict(event, onset, placed, trial_end):
     content_start = event['trial_start'] + TRIAL_BUFFER_DUR
+    hold_start = onset + FADE_IN_DUR
+    sound_onset = hold_start - event['soa'] if event['role'] in {'PT', 'PD'} else None
     if onset < content_start or onset + VISUAL_DURATION > trial_end:
         return 'trial content boundary'
     if event['role'] in {'PT', 'PD'}:
-        audio_end = onset + event['soa'] + SOUND_DUR + RESPONSE_WINDOW
-        if audio_end > trial_end:
+        audio_end = sound_onset + SOUND_DUR + RESPONSE_WINDOW
+        if sound_onset < content_start or audio_end > trial_end:
             return 'sound or response window exceeds trial content'
     visuals = [row for row in placed if row['event_type'] == 'visual']
     for other in visuals:
-        gap = abs(onset - other['onset'])
-        if event['corner'] == other['corner'] and gap < VISUAL_DURATION:
+        if onset >= other['global_onset']:
+            next_visual_start = onset
+            previous_visual_end = other['global_onset'] + VISUAL_DURATION
+        else:
+            next_visual_start = other['global_onset']
+            previous_visual_end = onset + VISUAL_DURATION
+        visual_gap = next_visual_start - previous_visual_end
+        if event['corner'] == other['corner'] and visual_gap < 0:
             return 'same-corner overlap'
-        if gap < MIN_VISUAL_ONSET_GAP:
-            return 'minimum visual onset gap'
-        if event['stimulus'] == other['stimulus'] and gap < MIN_SAME_ITEM_GAP:
+        if visual_gap < MIN_VISUAL_ONSET_GAP:
+            return 'minimum visual gap'
+        if event['stimulus'] == other['stimulus'] and visual_gap < MIN_SAME_ITEM_GAP:
             return 'minimum same-item gap'
-        if event['role'] == other['role'] == 'PT' and gap < BETWEEN_PT_STIMULUS_GAP:
+        if event['role'] == other['role'] == 'PT' and visual_gap < BETWEEN_PT_STIMULUS_GAP:
             return 'between-PT stimulus gap'
     if event['role'] in {'PT', 'PD'}:
-        sound_onset = onset + event['soa']
         for other in placed:
-            if other['event_type'] == 'sound' and abs(sound_onset - other['onset']) < SOUND_DUR + MIN_AUDIO_GAP:
+            if other['event_type'] == 'sound' and abs(sound_onset - other['global_onset']) < SOUND_DUR + MIN_AUDIO_GAP:
                 return 'sound overlap or minimum audio gap'
     return ''
 
 
-def _solve_trial(events, trial_start, stats):
-    stats['attempt_backtracks'] = 0
-    trial_end = trial_start + TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
-    # Role and slot labels prioritize placement; slot_number does not assign time.
-    ordered = sorted(events, key=lambda e: (ROLE_PRIORITY[e['role']], e['slot_number'], e['event_id']))
-    placed = []
+def _maximum_visual_events():
+    """Return the capacity imposed by visual duration and end-to-start gap."""
+    separation = VISUAL_DURATION + MIN_VISUAL_ONSET_GAP
+    return math.floor((TRIAL_CONTENT_DUR + MIN_VISUAL_ONSET_GAP) / separation)
 
-    def solve(index):
-        if index == len(ordered):
+
+def _fill_visual_order(events, paired_positions, rng, backtrack_counter):
+    """Fill remaining visual slots without adjacent repeats of one stimulus."""
+    count = len(events)
+    sequence = [None] * count
+    for position, event in paired_positions.items():
+        sequence[position] = event
+    remaining = list(event for event in events if event['role'] not in {'PT', 'PD'})
+    rng.shuffle(remaining)
+
+    def fill(position):
+        if position == count:
             return True
-        event = dict(ordered[index], trial_start=trial_start)
-        last_conflict = 'no legal candidate found'
-        attempts = 0
-        for attempts in range(1, MAX_PLACEMENT_ATTEMPTS + 1):
-            stats['placement_attempts'] += 1
-            onset = stats['rng'].uniform(
-                trial_start + TRIAL_BUFFER_DUR,
-                trial_end - VISUAL_DURATION,
-            )
-            reason = _conflict(event, onset, placed, trial_end)
-            if reason:
-                last_conflict = reason
-                continue
-            visual = {
-                'block': event['block'], 'trial': event['trial'],
-                'event_id': event['event_id'], 'source_event_id': event['event_id'],
-                'role': event['role'], 'stimulus': event['stimulus'],
-                'slot_number': event['slot_number'], 'corner': event['corner'],
-                'onset': onset, 'duration': VISUAL_DURATION,
-                'event_type': 'visual', 'soa': '', 'response_window': '',
-            }
-            placed.append(visual)
-            sound = None
-            if event['role'] in {'PT', 'PD'}:
-                sound = {
-                    'block': event['block'], 'trial': event['trial'],
-                    'event_id': f"{event['event_id']}_sound",
-                    'source_event_id': event['event_id'], 'role': event['role'],
-                    'stimulus': event['stimulus'], 'slot_number': event['slot_number'],
-                    'corner': '', 'onset': onset + event['soa'], 'duration': SOUND_DUR,
-                    'event_type': 'sound', 'soa': event['soa'],
-                    'response_window': RESPONSE_WINDOW,
-                }
-                placed.append(sound)
-            if solve(index + 1):
+        if sequence[position] is not None:
+            return fill(position + 1)
+        previous = sequence[position - 1]['stimulus'] if position and sequence[position - 1] else None
+        by_stimulus = defaultdict(list)
+        for index, event in enumerate(remaining):
+            if event['stimulus'] != previous:
+                by_stimulus[event['stimulus']].append(index)
+        choices = list(by_stimulus.values())
+        rng.shuffle(choices)
+        for indices in choices:
+            index = rng.choice(indices)
+            event = remaining.pop(index)
+            sequence[position] = event
+            if fill(position + 1):
                 return True
-            if stats['attempt_backtracks'] >= MAX_BACKTRACK_ATTEMPTS:
-                stats['max_trial_backtracks'] = max(
-                    stats['max_trial_backtracks'], stats['attempt_backtracks']
-                )
-                corner_count = sum(
-                    row['event_type'] == 'visual' and row['corner'] == event['corner']
-                    for row in placed
-                )
-                placed.pop()
-                if sound:
-                    placed.pop()
-                raise PlacementFailure(
-                    f"{event['block']} trial {event['trial']} event {event['event_id']}: "
-                    f"required={len(ordered)}, placed={sum(r['event_type'] == 'visual' for r in placed)}, "
-                    f'corner={event["corner"]}, corner_events_placed={corner_count}, '
-                    f'constraint={last_conflict}; backtrack limit={MAX_BACKTRACK_ATTEMPTS} reached.'
-                )
-            stats['backtracks'] += 1
-            stats['attempt_backtracks'] += 1
-            placed.pop()
-            if sound:
-                placed.pop()
-        stats['last_failure'] = (
-            f"{event['block']} trial {event['trial']} role {event['role']} "
-            f"event {event['event_id']} item {event['stimulus']}: "
-            f"required={len(ordered)}, placed={sum(r['event_type'] == 'visual' for r in placed)}, "
-            f"corner={event['corner']}, corner_events_placed="
-            f"{sum(r['event_type'] == 'visual' and r['corner'] == event['corner'] for r in placed)}, "
-            f'constraint={last_conflict}, placement attempts={attempts}, '
-            f'backtracks={stats["attempt_backtracks"]}.'
-        )
+            sequence[position] = None
+            remaining.insert(index, event)
+            backtrack_counter[0] += 1
+            if backtrack_counter[0] >= MAX_BACKTRACK_ATTEMPTS:
+                return False
         return False
 
-    if not solve(0):
-        stats['max_trial_backtracks'] = max(
-            stats['max_trial_backtracks'], stats['attempt_backtracks']
-        )
-        raise PlacementFailure(stats['last_failure'])
-    stats['max_trial_backtracks'] = max(
-        stats['max_trial_backtracks'], stats['attempt_backtracks']
+    return sequence if fill(0) else None
+
+
+def _construct_trial_schedule(events, trial_start, stats):
+    """Construct a randomized legal visual sequence and its paired sound rows."""
+    count = len(events)
+    content_start = trial_start + TRIAL_BUFFER_DUR
+    content_end = content_start + TRIAL_CONTENT_DUR
+    paired = [event for event in events if event['role'] in {'PT', 'PD'}]
+    rng = stats['rng']
+    backtracks = [0]
+
+    def try_order(ordered_pairs):
+        if ordered_pairs:
+            positions = [0]
+            for previous, current in zip(ordered_pairs, ordered_pairs[1:]):
+                # Two visual slots suffice when SOA does not rise by more than
+                # 0.25 s; otherwise use three slots to retain audio separation.
+                slot_gap = 2 if current['soa'] - previous['soa'] <= 0.25 else 3
+                positions.append(positions[-1] + slot_gap)
+        else:
+            positions = []
+        max_offset = count - 1 - (positions[-1] if positions else 0)
+        if max_offset < 0:
+            return None
+        offsets = list(range(max_offset + 1))
+        rng.shuffle(offsets)
+        for offset in offsets:
+            paired_positions = {
+                offset + position: event
+                for position, event in zip(positions, ordered_pairs)
+            }
+            layout = _fill_visual_order(events, paired_positions, rng, backtracks)
+            if layout is None:
+                continue
+
+            # Randomly distribute some available visual slack across the gaps.
+            visual_slack = max(
+                0.0,
+                TRIAL_CONTENT_DUR - count * VISUAL_DURATION
+                - (count - 1) * MIN_VISUAL_ONSET_GAP,
+            )
+            attempts = 8
+            for attempt in range(attempts + 1):
+                extra_total = 0.0 if attempt == attempts else rng.uniform(0.0, visual_slack)
+                weights = [rng.random() for _ in range(max(0, count - 1))]
+                weight_total = sum(weights)
+                if weight_total and extra_total:
+                    extras = [extra_total * weight / weight_total for weight in weights]
+                else:
+                    extras = [0.0] * len(weights)
+                offsets_by_event = [0.0]
+                for extra in extras:
+                    offsets_by_event.append(
+                        offsets_by_event[-1] + VISUAL_DURATION + MIN_VISUAL_ONSET_GAP + extra
+                    )
+
+                lower = content_start
+                upper = content_end - VISUAL_DURATION - offsets_by_event[-1]
+                for index, event in enumerate(layout):
+                    if event['role'] in {'PT', 'PD'}:
+                        lower = max(
+                            lower,
+                            content_start - FADE_IN_DUR + event['soa'] - offsets_by_event[index],
+                        )
+                        upper = min(
+                            upper,
+                            content_end - SOUND_DUR - RESPONSE_WINDOW - FADE_IN_DUR
+                            + event['soa'] - offsets_by_event[index],
+                        )
+                if lower <= upper + 1e-9:
+                    base = rng.uniform(lower, max(lower, upper))
+                    placed = []
+                    visual_rows = []
+                    paired_rows = {}
+                    for index, event in enumerate(layout):
+                        picture_onset = trial_start + (base - trial_start) + offsets_by_event[index]
+                        visual = {
+                            'block': event['block'], 'trial': event['trial'],
+                            'event_id': event['event_id'], 'source_event_id': event['event_id'],
+                            'role': event['role'], 'stimulus': event['stimulus'],
+                            'slot_number': event['slot_number'], 'corner': event['corner'],
+                            'global_onset': picture_onset, 'trial_onset': picture_onset - trial_start,
+                            'duration': VISUAL_DURATION, 'event_type': 'visual',
+                            'soa': '', 'response_window': '',
+                        }
+                        placed.append(visual)
+                        visual_rows.append((event, picture_onset, visual))
+                        if event['role'] in {'PT', 'PD'}:
+                            sound_onset = picture_onset + FADE_IN_DUR - event['soa']
+                            sound = {
+                                'block': event['block'], 'trial': event['trial'],
+                                'event_id': f"{event['event_id']}_sound",
+                                'source_event_id': event['event_id'], 'role': event['role'],
+                                'stimulus': event['stimulus'], 'slot_number': event['slot_number'],
+                                'corner': '', 'global_onset': sound_onset,
+                                'trial_onset': sound_onset - trial_start, 'duration': SOUND_DUR,
+                                'event_type': 'sound', 'soa': event['soa'],
+                                'response_window': RESPONSE_WINDOW,
+                            }
+                            placed.append(sound)
+                            paired_rows[event['event_id']] = sound
+                    checked = []
+                    for event, picture_onset, visual in visual_rows:
+                        reason = _conflict(
+                            dict(event, trial_start=trial_start), picture_onset,
+                            checked, content_end,
+                        )
+                        if reason:
+                            checked = None
+                            break
+                        checked.append(visual)
+                        if event['event_id'] in paired_rows:
+                            checked.append(paired_rows[event['event_id']])
+                    if checked is None:
+                        continue
+                    return placed
+            stats['placement_attempts'] += attempts + 1
+        return None
+
+    # Try randomized paired-event orders. A descending-SOA order is a guaranteed
+    # fallback: paired sounds then remain ordered and at least two visual slots apart.
+    for _ in range(64):
+        order = list(paired)
+        rng.shuffle(order)
+        result = try_order(order)
+        stats['placement_attempts'] += 1
+        if result is not None:
+            stats['backtracks'] += backtracks[0]
+            stats['attempt_backtracks'] = backtracks[0]
+            stats['max_trial_backtracks'] = max(stats['max_trial_backtracks'], backtracks[0])
+            return result
+        if backtracks[0] >= MAX_BACKTRACK_ATTEMPTS:
+            break
+    fallback = sorted(paired, key=lambda event: event['soa'], reverse=True)
+    result = try_order(fallback)
+    stats['placement_attempts'] += 1
+    stats['backtracks'] += backtracks[0]
+    stats['attempt_backtracks'] = backtracks[0]
+    stats['max_trial_backtracks'] = max(stats['max_trial_backtracks'], backtracks[0])
+    if result is not None:
+        return result
+    minimum_space = count * VISUAL_DURATION + max(0, count - 1) * MIN_VISUAL_ONSET_GAP
+    raise PlacementFailure(
+        f'Could not construct a trial schedule: required_visual_events={count}, '
+        f'content_window={TRIAL_CONTENT_DUR:.3f}s, visual_duration={VISUAL_DURATION:.3f}s, '
+        f'minimum_visual_gap={MIN_VISUAL_ONSET_GAP:.3f}s, '
+        f'minimum_onset_separation={VISUAL_DURATION + MIN_VISUAL_ONSET_GAP:.3f}s, '
+        f'minimum_visual_space={minimum_space:.3f}s, '
+        f'theoretical_visual_capacity={_maximum_visual_events()}, '
+        f'paired_sound_events={len(paired)}; additional pairing, same-item, PT, and '
+        f'audio constraints prevented this constructive search.'
     )
-    return placed
+
+
+def _solve_trial(events, trial_start, stats):
+    stats['attempt_backtracks'] = 0
+    return _construct_trial_schedule(events, trial_start, stats)
 
 
 def validate_timeline(slotting_rows, required_events, timeline, stimulus_assignment, window_size):
@@ -293,7 +412,7 @@ def validate_timeline(slotting_rows, required_events, timeline, stimulus_assignm
     ids = [row['event_id'] for row in timeline]
     if len(ids) != len(set(ids)):
         raise ValueError('Duplicate timeline event IDs.')
-    if timeline != sorted(timeline, key=lambda row: row['onset']):
+    if timeline != sorted(timeline, key=lambda row: row['global_onset']):
         raise ValueError('Timeline is not chronologically ordered.')
     visuals = [row for row in timeline if row['event_type'] == 'visual']
     sounds = [row for row in timeline if row['event_type'] == 'sound']
@@ -350,66 +469,83 @@ def validate_timeline(slotting_rows, required_events, timeline, stimulus_assignm
         start = _trial_start(blocks.index(row['block']), row['trial'], trial_count)
         lower = start + TRIAL_BUFFER_DUR
         upper = start + TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
-        end = row['onset'] + row['duration']
+        if not math.isclose(row['trial_onset'], row['global_onset'] - start):
+            raise ValueError(f"{row['block']} trial {row['trial']} {row['event_id']}: global/local timing mismatch.")
+        local_end = row['trial_onset'] + row['duration'] + (row['response_window'] or 0)
+        if row['trial_onset'] < 0 or local_end > TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR:
+            raise ValueError(f"{row['block']} trial {row['trial']} {row['event_id']}: invalid local trial timing.")
+        end = row['global_onset'] + row['duration']
         if row['event_type'] == 'sound':
             end += row['response_window']
-        if row['onset'] < lower or end > upper:
+        if row['global_onset'] < lower or end > upper:
             raise ValueError(f"{row['block']} trial {row['trial']} {row['event_id']}: outside trial content window.")
 
     by_block = defaultdict(list)
     for row in timeline:
         by_block[row['block']].append(row)
     for block, rows in by_block.items():
-        block_visuals = sorted((r for r in rows if r['event_type'] == 'visual'), key=lambda r: r['onset'])
-        block_sounds = sorted((r for r in rows if r['event_type'] == 'sound'), key=lambda r: r['onset'])
+        block_visuals = sorted((r for r in rows if r['event_type'] == 'visual'), key=lambda r: r['global_onset'])
+        block_sounds = sorted((r for r in rows if r['event_type'] == 'sound'), key=lambda r: r['global_onset'])
         corner_groups = defaultdict(list)
         trial_visuals = defaultdict(list)
         for visual in block_visuals:
             corner_groups[(visual['trial'], visual['corner'])].append(visual)
             trial_visuals[visual['trial']].append(visual)
         for (trial, corner), corner_rows in corner_groups.items():
-            corner_rows.sort(key=lambda r: r['onset'])
+            corner_rows.sort(key=lambda r: r['global_onset'])
             for left, right in zip(corner_rows, corner_rows[1:]):
-                if right['onset'] - left['onset'] + 1e-9 < VISUAL_DURATION:
+                if right['global_onset'] - (left['global_onset'] + VISUAL_DURATION) + 1e-9 < 0:
                     raise ValueError(
                         f'{block} trial {trial} corner {corner}: same-corner overlap '
                         f'({len(corner_rows)} visual events in that corner).'
                     )
         for left, right in zip(block_visuals, block_visuals[1:]):
-            if right['onset'] - left['onset'] < MIN_VISUAL_ONSET_GAP:
-                raise ValueError(f'{block}: minimum visual onset gap violated.')
+            if right['global_onset'] - (left['global_onset'] + VISUAL_DURATION) < MIN_VISUAL_ONSET_GAP:
+                raise ValueError(f'{block}: minimum visual gap violated.')
         for i, left in enumerate(block_visuals):
             for right in block_visuals[i + 1:]:
-                if left['stimulus'] == right['stimulus'] and right['onset'] - left['onset'] < MIN_SAME_ITEM_GAP:
+                gap = right['global_onset'] - (left['global_onset'] + VISUAL_DURATION)
+                if left['stimulus'] == right['stimulus'] and gap < MIN_SAME_ITEM_GAP:
                     raise ValueError(f'{block}: minimum same-item gap violated.')
-                if left['role'] == right['role'] == 'PT' and right['onset'] - left['onset'] < BETWEEN_PT_STIMULUS_GAP:
+                if left['role'] == right['role'] == 'PT' and gap < BETWEEN_PT_STIMULUS_GAP:
                     raise ValueError(f'{block}: between-PT gap violated.')
         if any(row['event_type'] == 'sound' and row['order_in_trial'] != '' for row in rows):
             raise ValueError(f'{block}: sound rows must have empty order_in_trial.')
         for trial, trial_rows in trial_visuals.items():
-            trial_rows.sort(key=lambda r: r['onset'])
+            trial_rows.sort(key=lambda r: r['global_onset'])
             if [row['order_in_trial'] for row in trial_rows] != list(range(1, len(trial_rows) + 1)):
                 raise ValueError(f'{block} trial {trial}: order_in_trial does not match onset order.')
         for left, right in zip(block_sounds, block_sounds[1:]):
-            if right['onset'] - left['onset'] < SOUND_DUR + MIN_AUDIO_GAP:
+            if right['global_onset'] - left['global_onset'] < SOUND_DUR + MIN_AUDIO_GAP:
                 raise ValueError(f'{block}: sound overlap or minimum audio gap violated.')
         sounds_by_source = {r['source_event_id']: r for r in block_sounds}
         for visual in block_visuals:
             if visual['role'] in {'PT', 'PD'}:
                 sound = sounds_by_source[visual['event_id']]
                 lower, upper = (PT_SOA_MIN, PT_SOA_MAX) if visual['role'] == 'PT' else (PD_SOA_MIN, PD_SOA_MAX)
-                if not lower <= sound['soa'] <= upper or not math.isclose(sound['onset'] - visual['onset'], sound['soa']):
-                    raise ValueError(f"{visual['block']} trial {visual['trial']} {visual['event_id']}: invalid SOA.")
-                if visual['role'] == 'PT' and any(
-                    other['role'] == 'PT' and other['block'] == visual['block']
-                    and sounds_by_source[other['event_id']]['soa'] != sound['soa']
-                    for other in block_visuals
+                hold_start = visual['global_onset'] + FADE_IN_DUR
+                if not lower <= sound['soa'] <= upper or not math.isclose(
+                    hold_start - sound['global_onset'], sound['soa']
                 ):
-                    raise ValueError(f"{block}: PT SOA is not fixed within the block.")
+                    raise ValueError(f"{visual['block']} trial {visual['trial']} {visual['event_id']}: invalid SOA.")
+    pt_soa_by_identity = {}
+    for visual in visuals:
+        if visual['role'] != 'PT':
+            continue
+        sound = next(row for row in sounds if row['source_event_id'] == visual['event_id'])
+        identity = (visual['block'], visual['stimulus'])
+        if identity in pt_soa_by_identity and not math.isclose(
+            pt_soa_by_identity[identity], sound['soa']
+        ):
+            raise ValueError(
+                f"{visual['block']} trial {visual['trial']} {visual['event_id']}: "
+                f'PT SOA changed for identity {visual["stimulus"]!r}.'
+            )
+        pt_soa_by_identity[identity] = sound['soa']
     return True
 
 
-def build_timeline(slotting_rows, rng, stimulus_assignment, window_size):
+def build_timeline(slotting_rows, rng, stimulus_assignment, window_size, diagnostics=None):
     """Construct a complete deterministic timeline or fail without writing."""
     _position_bounds(window_size, IMAGE_SIZE)
     validate_stimulus_assignment(stimulus_assignment)
@@ -432,13 +568,60 @@ def build_timeline(slotting_rows, rng, stimulus_assignment, window_size):
         'rng': rng, 'placement_attempts': 0, 'backtracks': 0,
         'attempt_backtracks': 0, 'max_trial_backtracks': 0,
     }
-    pt_soa_by_block = {block: rng.uniform(PT_SOA_MIN, PT_SOA_MAX) for block in blocks}
-    required = _required_events(slotting_rows, stimulus_assignment, rng, pt_soa_by_block, trial_count)
+    timeline_attempt_count = 0
+
+    def publish_diagnostics(stage):
+        if diagnostics is not None:
+            diagnostics['stage'] = stage
+            diagnostics['timeline_attempts'] = timeline_attempt_count
+            diagnostics['placement_stats'] = {
+                key: value for key, value in stats.items() if key != 'rng'
+            }
+
+    publish_diagnostics('event_generation')
+    # Freeze one PT SOA for each (block, stimulus identity) before generating
+    # PD instances and before any placement attempt or retry.
+    pt_identities = list(dict.fromkeys(
+        (row['block'], row['stimulus']) for row in slotting_rows if row['role'] == 'PT'
+    ))
+    pt_soa_by_identity = {
+        identity: rng.uniform(PT_SOA_MIN, PT_SOA_MAX) for identity in pt_identities
+    }
+    # _required_events assigns each PD instance its own SOA once; the resulting
+    # required-event list is reused unchanged across all placement retries.
+    required = _required_events(slotting_rows, stimulus_assignment, rng, pt_soa_by_identity, trial_count)
     required_by_trial = defaultdict(list)
     for event in required:
         required_by_trial[(event['block'], event['trial'])].append(event)
+    if diagnostics is not None:
+        diagnostics['trial_visual_counts'] = [
+            {'block': block, 'trial': trial, 'count': len(events)}
+            for (block, trial), events in required_by_trial.items()
+        ]
+    publish_diagnostics('capacity_check')
+    capacity = _maximum_visual_events()
+    for (block, trial), events in required_by_trial.items():
+        if len(events) > capacity:
+            minimum_space = (
+                len(events) * VISUAL_DURATION
+                + (len(events) - 1) * MIN_VISUAL_ONSET_GAP
+            )
+            raise PlacementFailure(
+                f'{block} trial {trial}: required_visual_events={len(events)}, '
+                f'content_window={TRIAL_CONTENT_DUR:.3f}s, '
+                f'visual_duration={VISUAL_DURATION:.3f}s, '
+                f'minimum_visual_gap={MIN_VISUAL_ONSET_GAP:.3f}s, '
+                f'minimum_onset_separation={VISUAL_DURATION + MIN_VISUAL_ONSET_GAP:.3f}s, '
+                f'minimum_visual_space={minimum_space:.3f}s, '
+                f'theoretical_visual_capacity={capacity}. The universal visual-gap '
+                f'constraint alone makes this load infeasible; same-corner overlap is '
+                f'redundant under that rule, and same-item/PT/audio constraints can only '
+                f'reduce capacity further.'
+            )
     last_failure = None
     for _ in range(MAX_TIMELINE_ATTEMPTS):
+        timeline_attempt_count += 1
+        publish_diagnostics('placement')
         stats['max_trial_backtracks'] = 0
         stats['last_failure'] = ''
         timeline = []
@@ -448,7 +631,7 @@ def build_timeline(slotting_rows, rng, stimulus_assignment, window_size):
                     events = required_by_trial[(block, trial)]
                     start = _trial_start(block_index, trial, trial_count)
                     timeline.extend(_solve_trial(events, start, stats))
-            timeline.sort(key=lambda row: row['onset'])
+            timeline.sort(key=lambda row: row['global_onset'])
             for index, row in enumerate(timeline, start=1):
                 row['event_index'] = index
                 row['order_in_trial'] = ''
@@ -461,10 +644,13 @@ def build_timeline(slotting_rows, rng, stimulus_assignment, window_size):
                     row['x'], row['y'] = _jitter_position(row['corner'], window_size, rng)
                 else:
                     row['x'] = row['y'] = ''
+            publish_diagnostics('validation')
             validate_timeline(slotting_rows, required, timeline, stimulus_assignment, window_size)
+            publish_diagnostics('complete')
             return timeline, required, stats
         except PlacementFailure as exc:
             last_failure = exc
+            publish_diagnostics('placement')
     raise PlacementFailure(
         f'Failed after {MAX_TIMELINE_ATTEMPTS} timeline attempts; '
         f'{last_failure}; total placements={stats["placement_attempts"]}, '
@@ -499,8 +685,8 @@ def write_timeline(path, timeline):
 
 
 def main():
-    if len(sys.argv) != 5:
-        raise SystemExit('Usage: python timeline_key.py <PID> <seed> <window_width> <window_height>')
+    if len(sys.argv) != 3:
+        raise SystemExit('Usage: python timeline_key.py <PID> <seed>')
     pid = sys.argv[1]
     if not pid or Path(pid).name != pid or pid in {'.', '..'}:
         raise SystemExit('PID must be a single folder name.')
@@ -508,10 +694,6 @@ def main():
         seed = int(sys.argv[2])
     except ValueError:
         raise SystemExit('Seed must be an integer.')
-    try:
-        window_size = (int(sys.argv[3]), int(sys.argv[4]))
-    except ValueError:
-        raise SystemExit('Window width and height must be integers in pixels.')
     output_dir = Path(__file__).resolve().parent / 'data' / pid
     try:
         source_seed = int((output_dir / 'seed.txt').read_text(encoding='utf-8').strip())
@@ -524,7 +706,7 @@ def main():
         slotting_rows = read_slotting_key(output_dir / 'slotting_key.csv')
         stimulus_assignment = read_stimulus_assignment(output_dir / 'stimulus_assignment.csv')
         rng = random.Random(seed)
-        timeline, required, stats = build_timeline(slotting_rows, rng, stimulus_assignment, window_size)
+        timeline, required, stats = build_timeline(slotting_rows, rng, stimulus_assignment, WINDOW_SIZE)
         validation_report(slotting_rows, required, timeline, stats)
         path = write_timeline(output_dir / 'timeline_key.csv', timeline)
     except (OSError, ValueError, PlacementFailure) as exc:
