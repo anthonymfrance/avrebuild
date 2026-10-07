@@ -6,10 +6,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from config import (
+    AUDIO_ROLES,
     BETWEEN_PT_STIMULUS_GAP,
+    CORNER_SIGNS,
     CORNERS,
     FADE_IN_DUR,
-    FADE_OUT_DUR,
     IMAGE_SIZE,
     MAX_PLACEMENT_ATTEMPTS,
     MAX_TIMELINE_ATTEMPTS,
@@ -19,7 +20,6 @@ from config import (
     MIN_VISUAL_ONSET_GAP,
     PD_SOA_MAX,
     PD_SOA_MIN,
-    PEAK_HOLD_DUR,
     PT_SOA_MAX,
     PT_SOA_MIN,
     RESPONSE_WINDOW,
@@ -29,7 +29,11 @@ from config import (
     TRIAL_NPD_RANGE,
     TRIAL_NPT_RANGE,
     TRIAL_PD_RANGE,
+    TRIAL_DURATION,
     TRIAL_PT_RANGE,
+    TARGET_ROLES,
+    VISUAL_DURATION,
+    VISUAL_ROLES,
 )
 from stimulus_split import validate_stimulus_assignment
 
@@ -42,8 +46,6 @@ FIELDS = [
     'stimulus', 'slot_number', 'corner', 'x', 'y', 'global_onset', 'trial_onset', 'duration', 'event_type',
     'soa', 'response_window',
 ]
-VISUAL_DURATION = FADE_IN_DUR + PEAK_HOLD_DUR + FADE_OUT_DUR
-TRIAL_DURATION = 2 * TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
 ROLE_ORDER = ('PT', 'PD', 'NPT', 'NPD')
 RANGES = {
     'PT': TRIAL_PT_RANGE,
@@ -51,20 +53,10 @@ RANGES = {
     'PD': TRIAL_PD_RANGE,
     'NPD': TRIAL_NPD_RANGE,
 }
-CORNER_SIGNS = {
-    'top_left': (-1, 1), 'top_right': (1, 1),
-    'bottom_left': (-1, -1), 'bottom_right': (1, -1),
-}
 
 
 class PlacementFailure(RuntimeError):
     pass
-
-
-def read_slotting_key(path):
-    """Read PT/NPT assignments; slot_number is an identity label, not time order."""
-    with Path(path).open(newline='', encoding='utf-8') as file:
-        return prepare_slotting_rows(list(csv.DictReader(file)))
 
 
 def prepare_slotting_rows(rows):
@@ -84,7 +76,7 @@ def prepare_slotting_rows(rows):
             else row.get('npt_item', '').strip() if row['role'] == 'NPT'
             else ''
         )
-        if row['role'] not in {'PT', 'NPT'} or not row['stimulus']:
+        if row['role'] not in TARGET_ROLES or not row['stimulus']:
             raise ValueError(f"Unsupported role or missing stimulus in {row['event_id']}.")
         if row['corner'] not in CORNERS:
             raise ValueError(f"Invalid corner in slotting event {row['event_id']}.")
@@ -181,13 +173,13 @@ def _conflict(event, onset, placed):
     content_end = content_start + TRIAL_CONTENT_DUR
     trial_end = event['trial_start'] + TRIAL_DURATION
     hold_start = onset + FADE_IN_DUR
-    sound_onset = hold_start - event['soa'] if event['role'] in {'PT', 'PD'} else None
+    sound_onset = hold_start - event['soa'] if event['role'] in AUDIO_ROLES else None
     if onset < content_start or onset + VISUAL_DURATION > content_end:
         return 'trial content boundary'
-    if event['role'] in {'PT', 'PD'}:
+    if event['role'] in AUDIO_ROLES:
         if sound_onset < content_start or sound_onset + SOUND_DUR > content_end:
             return 'sound exceeds trial content'
-    if event['role'] in {'PT', 'NPT'} and onset + RESPONSE_WINDOW > trial_end:
+    if event['role'] in TARGET_ROLES and onset + RESPONSE_WINDOW > trial_end:
         return 'target response window exceeds trial'
     visuals = [row for row in placed if row['event_type'] == 'visual']
     for other in visuals:
@@ -199,7 +191,7 @@ def _conflict(event, onset, placed):
             return 'minimum visual onset gap'
         if event['corner'] == other['corner'] and end_to_onset_gap < 0:
             return 'same-corner overlap'
-        if event['role'] in {'PT', 'NPT'} and other['role'] in {'PT', 'NPT'}:
+        if event['role'] in TARGET_ROLES and other['role'] in TARGET_ROLES:
             if end_to_onset_gap < MIN_TARGET_END_TO_ONSET_GAP:
                 return 'minimum target end-to-onset gap'
             if onset_difference < RESPONSE_WINDOW:
@@ -208,7 +200,7 @@ def _conflict(event, onset, placed):
             return 'minimum same-item gap'
         if event['role'] == other['role'] == 'PT' and end_to_onset_gap < BETWEEN_PT_STIMULUS_GAP:
             return 'between-PT stimulus gap'
-    if event['role'] in {'PT', 'PD'}:
+    if event['role'] in AUDIO_ROLES:
         for other in placed:
             if other['event_type'] == 'sound' and abs(sound_onset - other['global_onset']) < SOUND_DUR + MIN_AUDIO_GAP:
                 return 'sound overlap or minimum audio gap'
@@ -253,13 +245,13 @@ def _construct_trial_schedule(events, trial_start, stats):
             separation = max(separation, VISUAL_DURATION + MIN_SAME_ITEM_GAP)
         if previous['role'] == current['role'] == 'PT':
             separation = max(separation, VISUAL_DURATION + BETWEEN_PT_STIMULUS_GAP)
-        if previous['role'] in {'PT', 'NPT'} and current['role'] in {'PT', 'NPT'}:
+        if previous['role'] in TARGET_ROLES and current['role'] in TARGET_ROLES:
             separation = max(
                 separation,
                 VISUAL_DURATION + MIN_TARGET_END_TO_ONSET_GAP,
                 RESPONSE_WINDOW,
             )
-        if previous['role'] in {'PT', 'PD'} and current['role'] in {'PT', 'PD'}:
+        if previous['role'] in AUDIO_ROLES and current['role'] in AUDIO_ROLES:
             separation = max(
                 separation,
                 SOUND_DUR + MIN_AUDIO_GAP + current['soa'] - previous['soa'],
@@ -299,7 +291,7 @@ def _construct_trial_schedule(events, trial_start, stats):
             lower = content_start
             upper = content_end - VISUAL_DURATION - offsets[-1]
             for index, event in enumerate(layout):
-                if event['role'] in {'PT', 'PD'}:
+                if event['role'] in AUDIO_ROLES:
                     lower = max(
                         lower,
                         content_start - FADE_IN_DUR + event['soa'] - offsets[index],
@@ -309,7 +301,7 @@ def _construct_trial_schedule(events, trial_start, stats):
                         content_end - SOUND_DUR - FADE_IN_DUR
                         + event['soa'] - offsets[index],
                     )
-                if event['role'] in {'PT', 'NPT'}:
+                if event['role'] in TARGET_ROLES:
                     upper = min(upper, trial_end - RESPONSE_WINDOW - offsets[index])
             if lower > upper + 1e-9:
                 continue
@@ -326,10 +318,10 @@ def _construct_trial_schedule(events, trial_start, stats):
                     'global_onset': picture_onset, 'trial_onset': picture_onset - trial_start,
                     'duration': VISUAL_DURATION, 'event_type': 'visual',
                     'soa': '',
-                    'response_window': RESPONSE_WINDOW if event['role'] in {'PT', 'NPT'} else '',
+                    'response_window': RESPONSE_WINDOW if event['role'] in TARGET_ROLES else '',
                 }
                 placed.append(visual)
-                if event['role'] in {'PT', 'PD'}:
+                if event['role'] in AUDIO_ROLES:
                     sound_onset = picture_onset + FADE_IN_DUR - event['soa']
                     placed.append({
                         'block': event['block'], 'trial': event['trial'],
@@ -377,10 +369,6 @@ def _construct_trial_schedule(events, trial_start, stats):
     )
 
 
-def _solve_trial(events, trial_start, stats):
-    return _construct_trial_schedule(events, trial_start, stats)
-
-
 def validate_timeline(
     slotting_rows, required_events, timeline, stimulus_assignment, window_size,
     count_ranges=None,
@@ -403,7 +391,7 @@ def validate_timeline(
         got = (actual['block'], actual['trial'], actual['role'], actual['stimulus'], actual['slot_number'], actual['corner'])
         if got != expected:
             raise ValueError(f"Slotting assignment changed for {source['event_id']}.")
-    expected_audio = {row['event_id'] for row in required_events if row['role'] in {'PT', 'PD'}}
+    expected_audio = {row['event_id'] for row in required_events if row['role'] in AUDIO_ROLES}
     if {row['source_event_id'] for row in sounds} != expected_audio:
         raise ValueError('PT/PD audio pairing is incomplete or contains unexpected sounds.')
 
@@ -463,7 +451,7 @@ def validate_timeline(
         else:
             if row['global_onset'] < lower or end > upper:
                 raise ValueError(f"{row['block']} trial {row['trial']} {row['event_id']}: visual outside content window.")
-            expected_window = RESPONSE_WINDOW if row['role'] in {'PT', 'NPT'} else ''
+            expected_window = RESPONSE_WINDOW if row['role'] in TARGET_ROLES else ''
             if row['response_window'] != expected_window:
                 raise ValueError(f"{row['event_id']}: response window does not match target role.")
             if expected_window and end - row['duration'] + row['response_window'] > start + TRIAL_DURATION:
@@ -498,7 +486,7 @@ def validate_timeline(
                     raise ValueError(f'{block}: minimum same-item gap violated.')
                 if left['role'] == right['role'] == 'PT' and gap < BETWEEN_PT_STIMULUS_GAP:
                     raise ValueError(f'{block}: between-PT gap violated.')
-                if left['role'] in {'PT', 'NPT'} and right['role'] in {'PT', 'NPT'}:
+                if left['role'] in TARGET_ROLES and right['role'] in TARGET_ROLES:
                     if gap < MIN_TARGET_END_TO_ONSET_GAP:
                         raise ValueError(f'{block}: minimum target end-to-onset gap violated.')
                     if right['global_onset'] - left['global_onset'] < RESPONSE_WINDOW:
@@ -514,7 +502,7 @@ def validate_timeline(
                 raise ValueError(f'{block}: sound overlap or minimum audio gap violated.')
         sounds_by_source = {r['source_event_id']: r for r in block_sounds}
         for visual in block_visuals:
-            if visual['role'] in {'PT', 'PD'}:
+            if visual['role'] in AUDIO_ROLES:
                 sound = sounds_by_source[visual['event_id']]
                 lower, upper = (PT_SOA_MIN, PT_SOA_MAX) if visual['role'] == 'PT' else (PD_SOA_MIN, PD_SOA_MAX)
                 hold_start = visual['global_onset'] + FADE_IN_DUR
@@ -559,7 +547,7 @@ def build_timeline(
             f'{sorted(stimulus_assignment)}.'
         )
     for block in blocks:
-        if block not in stimulus_assignment or set(stimulus_assignment[block]) != {'PT', 'NPT', 'PD', 'NPD'}:
+        if block not in stimulus_assignment or set(stimulus_assignment[block]) != VISUAL_ROLES:
             raise ValueError(f'{block}: missing or incomplete persisted stimulus assignment.')
     trial_count = max(row['trial'] for row in slotting_rows)
     if trial_count < 1 or {row['trial'] for row in slotting_rows} != set(range(1, trial_count + 1)):
@@ -620,7 +608,6 @@ def build_timeline(
     for _ in range(MAX_TIMELINE_ATTEMPTS):
         timeline_attempt_count += 1
         publish_diagnostics('placement')
-        stats['last_failure'] = ''
         timeline = []
         try:
             for block_index, block in enumerate(blocks):
@@ -628,7 +615,7 @@ def build_timeline(
                     events = required_by_trial[(block, trial)]
                     start = _trial_start(block_index, trial, trial_count)
                     try:
-                        timeline.extend(_solve_trial(events, start, stats))
+                        timeline.extend(_construct_trial_schedule(events, start, stats))
                     except PlacementFailure as exc:
                         raise PlacementFailure(f'{block} trial {trial}: {exc}') from exc
             timeline.sort(key=lambda row: row['global_onset'])

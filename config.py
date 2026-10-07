@@ -1,5 +1,7 @@
-"""Study constants: no functions, no PsychoPy imports.
-A constant is added here only when the first function that uses it is written."""
+"""Study constants: no functions, no imports.
+A constant is added here only when the first function that uses it is written.
+Derived constants (computed from constants above them) are allowed so every
+module shares one definition."""
 
 # --- Stimulus split ---
 TRIALS_PER_PT = 15   # trials in which each PT is the active PT (per block)
@@ -37,6 +39,18 @@ MIN_SAME_ITEM_GAP = 0.75
 TRIAL_BUFFER_DUR = 2.0     # applied at both the start and the end of the trial
 TRIAL_CONTENT_DUR = 20.0
 BETWEEN_PT_STIMULUS_GAP = 0.5
+
+# --- Derived timing, roles, and labels ---
+VISUAL_DURATION = FADE_IN_DUR + PEAK_HOLD_DUR + FADE_OUT_DUR
+TRIAL_DURATION = 2 * TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
+CORNER_SIGNS = {
+    'top_left': (-1, 1), 'top_right': (1, 1),
+    'bottom_left': (-1, -1), 'bottom_right': (1, -1),
+}
+VISUAL_ROLES = frozenset({'PT', 'NPT', 'PD', 'NPD'})
+TARGET_ROLES = frozenset({'PT', 'NPT'})
+AUDIO_ROLES = frozenset({'PT', 'PD'})
+BLOCK_LABELS = {'animate': 'ANIMALS', 'inanimate': 'OBJECTS'}
 
 # --- Audio ---
 AUDIO_BACKEND = 'ptb'

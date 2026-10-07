@@ -9,9 +9,8 @@ from collections import Counter
 from pathlib import Path
 
 from config import (
-    FADE_IN_DUR, FADE_OUT_DUR, MIN_TARGET_END_TO_ONSET_GAP,
-    MIN_VISUAL_ONSET_GAP, PEAK_HOLD_DUR,
-    TRIAL_BUFFER_DUR, TRIAL_CONTENT_DUR,
+    AUDIO_ROLES, FADE_IN_DUR, MIN_TARGET_END_TO_ONSET_GAP, MIN_VISUAL_ONSET_GAP,
+    TARGET_ROLES, VISUAL_DURATION,
     TRIAL_NPD_RANGE, TRIAL_NPT_RANGE, TRIAL_PD_RANGE, TRIAL_PT_RANGE,
     WINDOW_SIZE,
 )
@@ -21,8 +20,6 @@ from timeline_key import PlacementFailure, _maximum_visual_events, validate_time
 
 MAX_EXAMPLE_FAILURES = 20
 MAX_LAYOUT_TIMELINES = 250
-VISUAL_DURATION = FADE_IN_DUR + PEAK_HOLD_DUR + FADE_OUT_DUR
-TRIAL_DURATION = 2 * TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
 LAYOUT_SIMILARITY_SAMPLE_PAIRS = 50_000
 NEAR_EXACT_ONSET_RESOLUTION = 0.001
 
@@ -61,7 +58,7 @@ def _layout_analysis(timelines, placement_stats, start_seed, n):
         }
         for row in visuals:
             by_trial.setdefault((row['block'], row['trial']), []).append(row)
-            if row['role'] in {'PT', 'PD'}:
+            if row['role'] in AUDIO_ROLES:
                 sound = sounds_by_source.get(row['event_id'])
                 if sound is not None:
                     intended = float(sound['soa'])
@@ -89,7 +86,7 @@ def _layout_analysis(timelines, placement_stats, start_seed, n):
                 for left, right in zip(events, events[1:])
             ]
             gaps.extend(trial_gaps)
-            targets = [row for row in events if row['role'] in {'PT', 'NPT'}]
+            targets = [row for row in events if row['role'] in TARGET_ROLES]
             target_end_gaps.extend(
                 right['global_onset'] - (left['global_onset'] + VISUAL_DURATION)
                 for left, right in zip(targets, targets[1:])

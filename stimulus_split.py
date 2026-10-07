@@ -13,7 +13,7 @@ import csv
 from pathlib import Path
 from types import MappingProxyType
 
-from config import PD_COUNT_PER_BLOCK, PT_COUNT_PER_BLOCK, TRIALS_PER_PT
+from config import PD_COUNT_PER_BLOCK, PT_COUNT_PER_BLOCK, TRIALS_PER_PT, VISUAL_ROLES
 
 ANIMATE = ['cat', 'frog', 'duck', 'cow', 'rooster', 'dog', 'horse', 'lion', 'pig', 'elephant']
 INANIMATE = ['camera', 'door', 'phone', 'toilet', 'clock', 'car', 'wineglass', 'helicopter', 'motorcycle', 'ship']
@@ -55,7 +55,6 @@ def split_pool(rng):
 
 
 ASSIGNMENT_FIELDS = ('block', 'role', 'item', 'item_index')
-ROLES = frozenset({'PT', 'NPT', 'PD', 'NPD'})
 
 
 def validate_stimulus_assignment(assignment):
@@ -63,7 +62,7 @@ def validate_stimulus_assignment(assignment):
     if not assignment:
         raise ValueError('Stimulus assignment is empty.')
     for block, roles in assignment.items():
-        if set(roles) != ROLES:
+        if set(roles) != VISUAL_ROLES:
             raise ValueError(f'{block}: stimulus assignment must contain PT, NPT, PD, and NPD.')
         items = [item for pool in roles.values() for item in pool]
         if any(not item for item in items) or len(items) != len(set(items)):
@@ -93,38 +92,6 @@ def write_stimulus_assignment(path, assignment):
             path.unlink(missing_ok=True)
         raise
     return path
-
-
-def read_stimulus_assignment(path):
-    """Load the persisted assignment as immutable role pools."""
-    with Path(path).open(newline='', encoding='utf-8') as file:
-        reader = csv.DictReader(file)
-        if reader.fieldnames is None or not set(ASSIGNMENT_FIELDS).issubset(reader.fieldnames):
-            raise ValueError(f'Stimulus assignment must contain columns: {ASSIGNMENT_FIELDS}')
-        rows = list(reader)
-    assignment = {}
-    for row in rows:
-        block, role, item = row['block'], row['role'], row['item']
-        if not block or role not in ROLES or not item:
-            raise ValueError('Stimulus assignment contains an invalid block, role, or item.')
-        index = int(row['item_index'])
-        assignment.setdefault(block, {}).setdefault(role, []).append((index, item))
-    if not assignment or any(set(roles) != ROLES for roles in assignment.values()):
-        raise ValueError('Stimulus assignment must include PT, NPT, PD, and NPD pools for every block.')
-    for roles in assignment.values():
-        for role, indexed_items in roles.items():
-            indexed_items.sort()
-            indices = [index for index, _ in indexed_items]
-            items = [item for _, item in indexed_items]
-            if indices != list(range(1, len(items) + 1)):
-                raise ValueError(f'{role} assignment indices must be consecutive and items unique.')
-            roles[role] = tuple(items)
-    assignment = MappingProxyType({
-        block: MappingProxyType(dict(roles))
-        for block, roles in assignment.items()
-    })
-    validate_stimulus_assignment(assignment)
-    return assignment
 
 
 def pt_sequence(pts, rng):

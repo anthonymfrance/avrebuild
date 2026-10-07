@@ -15,16 +15,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import wave
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 import config
-from stimulus_split import ANIMATE, INANIMATE
+from config import BLOCK_LABELS, TARGET_ROLES, TRIAL_DURATION, VISUAL_DURATION
 from timeline_key import FIELDS as TIMELINE_FIELDS
 from participant_setup import create_participant_plan, derive_rng
-from session_io import sha256_file
+from session_io import load_timeline, sha256_file
 from session_io import copy_participant_tree
 from audio_timing import AUDIO_START_SOURCE, backend_start_time, ptb_to_session, resolve_trial_audio
 from scoring import (
@@ -43,36 +41,7 @@ RESPONSE_KEYS = {
 KEY_TO_CORNER = {
     key: corner for corner, keys in RESPONSE_KEYS.items() for key in keys
 }
-VISUAL_ROLES = {'PT', 'NPT', 'PD', 'NPD'}
-TARGET_ROLES = {'PT', 'NPT'}
-AUDIO_ROLES = {'PT', 'PD'}
-TRIAL_DURATION = 2 * config.TRIAL_BUFFER_DUR + config.TRIAL_CONTENT_DUR
-VISUAL_DURATION = config.FADE_IN_DUR + config.PEAK_HOLD_DUR + config.FADE_OUT_DUR
 ALL_KEYS = list(KEY_TO_CORNER) + ['space', 'escape']
-BLOCK_LABELS = {'animate': 'ANIMALS', 'inanimate': 'OBJECTS'}
-
-
-def stimulus_paths(block, role, stimulus):
-    """Resolve a timeline item through the study's canonical numbered pools."""
-    if block not in {'animate', 'inanimate'} or role not in VISUAL_ROLES:
-        raise ValueError(f'Unsupported block or role: {block!r}, {role!r}.')
-    category = block if role in TARGET_ROLES else (
-        'inanimate' if block == 'animate' else 'animate'
-    )
-    names = ANIMATE if category == 'animate' else INANIMATE
-    try:
-        number = names.index(stimulus) + 1
-    except ValueError as exc:
-        raise ValueError(f'{stimulus!r} is not in the {category} stimulus pool.') from exc
-    image = (
-        ROOT / '20_stimuli' / category / 'objects_numbered' / '_normalized'
-        / f'obj_{number}_bw.png'
-    )
-    sound = (
-        ROOT / '20_stimuli' / category / 'obj_snds' / '_cleaned'
-        / f'snd_{number}.wav'
-    )
-    return image, sound
 
 
 def _patch_ptb_output_channels(ptb_audio, target_channels=2):
@@ -190,244 +159,6 @@ def _finite_number(value, label):
     if not math.isfinite(number):
         raise ValueError(f'{label} must be finite.')
     return number
-
-
-def read_and_validate_timeline(path):
-    """Validate the complete planned session and every asset before the task."""
-    path = Path(path).resolve()
-    with path.open(newline='', encoding='utf-8') as source:
-        reader = csv.DictReader(source)
-        if reader.fieldnames is None or not set(TIMELINE_FIELDS).issubset(reader.fieldnames):
-            missing = sorted(set(TIMELINE_FIELDS) - set(reader.fieldnames or []))
-            raise ValueError(f'Timeline is missing required columns: {missing}')
-        rows = list(reader)
-    if not rows:
-        raise ValueError('Timeline has no events.')
-
-    ids = [row['event_id'] for row in rows]
-    if any(not value for value in ids) or len(ids) != len(set(ids)):
-        raise ValueError('Timeline event_id values must be present and unique.')
-    first_order = list(dict.fromkeys(row['block'] for row in rows))
-    if any(block not in {'animate', 'inanimate'} for block in first_order):
-        raise ValueError('Timeline block values must be animate or inanimate.')
-    if set(first_order) != {'animate', 'inanimate'}:
-        raise ValueError('Timeline must contain both animate and inanimate blocks.')
-
-    trials_by_block = {}
-    rows_by_trial = defaultdict(list)
-    visual_by_id = {}
-    expected_sounds = set()
-    previous_global = -math.inf
-    assets = {'images': {}, 'sounds': {}}
-    for row in rows:
-        try:
-            row['trial'] = int(row['trial'])
-            row['event_index'] = int(row['event_index'])
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid trial or event_index in {row['event_id']}.") from exc
-        if row['trial'] < 1:
-            raise ValueError(f"Invalid trial number in {row['event_id']}.")
-        row['global_onset'] = _finite_number(row['global_onset'], f"{row['event_id']} global_onset")
-        row['trial_onset'] = _finite_number(row['trial_onset'], f"{row['event_id']} trial_onset")
-        row['duration'] = _finite_number(row['duration'], f"{row['event_id']} duration")
-        if row['global_onset'] < previous_global:
-            raise ValueError('Timeline rows are not ordered by global_onset.')
-        previous_global = row['global_onset']
-        if row['trial_onset'] < 0 or row['trial_onset'] >= TRIAL_DURATION:
-            raise ValueError(f"{row['event_id']} trial_onset is outside the configured trial.")
-        if row['trial_onset'] + row['duration'] > TRIAL_DURATION + 1e-9:
-            raise ValueError(f"{row['event_id']} extends beyond its configured trial.")
-        rows_by_trial[(row['block'], row['trial'])].append(row)
-        trials_by_block.setdefault(row['block'], set()).add(row['trial'])
-
-        if row['event_type'] == 'visual':
-            if row['role'] not in VISUAL_ROLES:
-                raise ValueError(f"Unsupported visual role in {row['event_id']}.")
-            if row['corner'] not in RESPONSE_KEYS:
-                raise ValueError(f"Invalid visual corner in {row['event_id']}.")
-            x = _finite_number(row['x'], f"{row['event_id']} x")
-            y = _finite_number(row['y'], f"{row['event_id']} y")
-            x_sign, y_sign = {
-                'top_left': (-1, 1), 'top_right': (1, 1),
-                'bottom_left': (-1, -1), 'bottom_right': (1, -1),
-            }[row['corner']]
-            x_low, x_high = config.IMAGE_SIZE[0] / 2, config.WINDOW_SIZE[0] / 2 - config.IMAGE_SIZE[0] / 2
-            y_low, y_high = config.IMAGE_SIZE[1] / 2, config.WINDOW_SIZE[1] / 2 - config.IMAGE_SIZE[1] / 2
-            if not (x_low <= x_sign * x <= x_high and y_low <= y_sign * y <= y_high):
-                raise ValueError(f"{row['event_id']} position is outside its configured corner.")
-            if not math.isclose(row['duration'], VISUAL_DURATION, abs_tol=1e-6):
-                raise ValueError(f"{row['event_id']} duration differs from configured visual duration.")
-            if (row['trial_onset'] < config.TRIAL_BUFFER_DUR - 1e-9
-                    or row['trial_onset'] + row['duration']
-                    > config.TRIAL_BUFFER_DUR + config.TRIAL_CONTENT_DUR + 1e-9):
-                raise ValueError(f"{row['event_id']} visual is outside the content window.")
-            target_window = row['role'] in TARGET_ROLES
-            if target_window:
-                row['response_window'] = _finite_number(
-                    row['response_window'], f"{row['event_id']} response_window"
-                )
-                if not math.isclose(row['response_window'], config.RESPONSE_WINDOW, abs_tol=1e-6):
-                    raise ValueError(f"{row['event_id']} response window differs from config.")
-                if row['trial_onset'] + row['response_window'] > TRIAL_DURATION + 1e-9:
-                    raise ValueError(f"{row['event_id']} response window extends beyond its trial.")
-            elif row['response_window'] != '':
-                raise ValueError(f"Distractor {row['event_id']} has a response window.")
-            image_path, sound_path = stimulus_paths(row['block'], row['role'], row['stimulus'])
-            assets['images'][row['stimulus']] = image_path
-            visual_by_id[row['event_id']] = row
-            if row['role'] in AUDIO_ROLES:
-                expected_sounds.add((row['event_id'], row['stimulus'], sound_path))
-        elif row['event_type'] == 'sound':
-            if row['role'] not in AUDIO_ROLES or row['corner'] or row['x'] or row['y']:
-                raise ValueError(f"Invalid sound row {row['event_id']}.")
-            if row['response_window'] != '':
-                raise ValueError(f"Sound {row['event_id']} has a response window.")
-            if (row['trial_onset'] < config.TRIAL_BUFFER_DUR - 1e-9
-                    or row['trial_onset'] + row['duration']
-                    > config.TRIAL_BUFFER_DUR + config.TRIAL_CONTENT_DUR + 1e-9):
-                raise ValueError(f"{row['event_id']} sound is outside the content window.")
-            if not math.isclose(row['duration'], config.SOUND_DUR, abs_tol=1e-6):
-                raise ValueError(f"{row['event_id']} duration differs from configured sound duration.")
-        else:
-            raise ValueError(f"Unknown event_type in {row['event_id']}.")
-
-    for block in first_order:
-        block_trials = trials_by_block[block]
-        if block_trials != set(range(1, max(block_trials) + 1)):
-            raise ValueError(f'{block} trial numbers must be contiguous starting at 1.')
-    expected_trial_keys = {
-        (block, trial) for block in first_order for trial in trials_by_block[block]
-    }
-    if set(rows_by_trial) != expected_trial_keys:
-        raise ValueError('Timeline contains an inconsistent block/trial grouping.')
-    offsets_by_trial = {}
-    for key, group in rows_by_trial.items():
-        offsets = {round(row['global_onset'] - row['trial_onset'], 6) for row in group}
-        if len(offsets) != 1:
-            raise ValueError(f'{key[0]} trial {key[1]} has inconsistent global/local onset offsets.')
-        offsets_by_trial[key] = offsets.pop()
-        visuals = sorted(
-            (row for row in group if row['event_type'] == 'visual'),
-            key=lambda row: row['global_onset'],
-        )
-        try:
-            visual_order = [int(row['order_in_trial']) for row in visuals]
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f'{key[0]} trial {key[1]} has invalid visual order labels.') from exc
-        if visual_order != list(range(1, len(visuals) + 1)):
-            raise ValueError(f'{key[0]} trial {key[1]} visual order labels do not match onset order.')
-        targets = [row for row in visuals if row['role'] in TARGET_ROLES]
-        for left, right in zip(visuals, visuals[1:]):
-            if right['global_onset'] - left['global_onset'] + 1e-9 < config.MIN_VISUAL_ONSET_GAP:
-                raise ValueError(f'{key[0]} trial {key[1]} violates the visual onset gap.')
-        for left, right in zip(targets, targets[1:]):
-            if right['global_onset'] - left['global_onset'] + 1e-9 < config.RESPONSE_WINDOW:
-                raise ValueError(f'{key[0]} trial {key[1]} has overlapping planned target windows.')
-            target_gap = right['global_onset'] - (left['global_onset'] + VISUAL_DURATION)
-            if target_gap + 1e-9 < config.MIN_TARGET_END_TO_ONSET_GAP:
-                raise ValueError(f'{key[0]} trial {key[1]} violates target end-to-onset gap.')
-
-    for block in first_order:
-        block_trials = sorted(trials_by_block[block])
-        for left_trial, right_trial in zip(block_trials, block_trials[1:]):
-            left_offset = offsets_by_trial[(block, left_trial)]
-            right_offset = offsets_by_trial[(block, right_trial)]
-            if not math.isclose(right_offset - left_offset, TRIAL_DURATION, abs_tol=1e-4):
-                raise ValueError(f'{block} planned trial spacing differs from configured trial duration.')
-    block_trial_counts = {len(trials_by_block[block]) for block in first_order}
-    if len(block_trial_counts) != 1:
-        raise ValueError('Blocks must contain the same number of trials for the planned global clock.')
-    trial_count = block_trial_counts.pop()
-    for block_index, block in enumerate(first_order):
-        for trial in trials_by_block[block]:
-            expected_offset = (block_index * trial_count + trial - 1) * TRIAL_DURATION
-            if not math.isclose(
-                offsets_by_trial[(block, trial)], expected_offset, abs_tol=1e-4
-            ):
-                raise ValueError(f'{block} trial {trial} global_onset does not match the no-break plan.')
-
-    sounds_by_id = [row for row in rows if row['event_type'] == 'sound']
-    sound_sources = [row['source_event_id'] for row in sounds_by_id]
-    expected_by_id = {event_id for event_id, _, _ in expected_sounds}
-    if len(sound_sources) != len(set(sound_sources)) or set(sound_sources) != expected_by_id:
-        raise ValueError('Timeline sound rows do not pair one-to-one with PT and PD visuals.')
-    for row in sounds_by_id:
-        source = visual_by_id.get(row['source_event_id'])
-        if source is None or source['stimulus'] != row['stimulus'] or source['role'] != row['role']:
-            raise ValueError(f"Sound {row['event_id']} does not match its source visual.")
-        if row['block'] != source['block'] or row['trial'] != source['trial']:
-            raise ValueError(f"Sound {row['event_id']} is assigned to the wrong trial.")
-        if row['event_id'] != f"{source['event_id']}_sound":
-            raise ValueError(f"Sound {row['event_id']} has an unexpected event identifier.")
-        if row['duration'] <= 0:
-            raise ValueError(f"Sound {row['event_id']} has invalid duration.")
-        row['soa'] = _finite_number(row['soa'], f"{row['event_id']} soa")
-        soa_min, soa_max = (
-            (config.PT_SOA_MIN, config.PT_SOA_MAX)
-            if row['role'] == 'PT' else (config.PD_SOA_MIN, config.PD_SOA_MAX)
-        )
-        if not soa_min <= row['soa'] <= soa_max:
-            raise ValueError(f"{row['event_id']} SOA is outside configured bounds.")
-        if not math.isclose(
-            row['trial_onset'],
-            source['trial_onset'] + config.FADE_IN_DUR - row['soa'],
-            abs_tol=1e-5,
-        ):
-            raise ValueError(f"{row['event_id']} does not match its visual SOA.")
-        assets['sounds'][row['stimulus']] = stimulus_paths(
-            row['block'], row['role'], row['stimulus']
-        )[1]
-
-    for block in first_order:
-        block_visuals = sorted(
-            (row for row in rows if row['block'] == block and row['event_type'] == 'visual'),
-            key=lambda row: row['global_onset'],
-        )
-        block_sounds = sorted(
-            (row for row in rows if row['block'] == block and row['event_type'] == 'sound'),
-            key=lambda row: row['global_onset'],
-        )
-        by_corner = defaultdict(list)
-        for visual_row in block_visuals:
-            by_corner[visual_row['corner']].append(visual_row)
-        for corner_rows in by_corner.values():
-            for left, right in zip(corner_rows, corner_rows[1:]):
-                if right['global_onset'] - left['global_onset'] + 1e-9 < VISUAL_DURATION:
-                    raise ValueError(f'{block} contains overlapping visuals in one corner.')
-        for index, left in enumerate(block_visuals):
-            for right in block_visuals[index + 1:]:
-                gap = right['global_onset'] - (left['global_onset'] + VISUAL_DURATION)
-                if left['stimulus'] == right['stimulus'] and gap + 1e-9 < config.MIN_SAME_ITEM_GAP:
-                    raise ValueError(f'{block} violates the minimum same-item gap.')
-                if left['role'] == right['role'] == 'PT' and gap + 1e-9 < config.BETWEEN_PT_STIMULUS_GAP:
-                    raise ValueError(f'{block} violates the between-PT gap.')
-        for left, right in zip(block_sounds, block_sounds[1:]):
-            if right['global_onset'] - left['global_onset'] + 1e-9 < config.SOUND_DUR + config.MIN_AUDIO_GAP:
-                raise ValueError(f'{block} violates the minimum audio gap.')
-
-    missing = [str(path) for group in assets.values() for path in group.values() if not path.is_file()]
-    if not (ROOT / config.BG_SOURCE_FILE).is_file():
-        missing.append(str(ROOT / config.BG_SOURCE_FILE))
-    if missing:
-        raise FileNotFoundError('Required experiment assets are missing:\n  ' + '\n  '.join(missing))
-    for stimulus, path in assets['sounds'].items():
-        try:
-            with wave.open(str(path), 'rb') as audio_file:
-                if audio_file.getnchannels() not in {1, 2} or audio_file.getnframes() < 1:
-                    raise ValueError('audio must contain samples in one or two channels')
-                actual_duration = audio_file.getnframes() / audio_file.getframerate()
-                if not math.isclose(actual_duration, config.SOUND_DUR, abs_tol=0.002):
-                    raise ValueError(
-                        f'audio duration {actual_duration:.4f}s differs from configured '
-                        f'{config.SOUND_DUR:.4f}s'
-                    )
-        except (wave.Error, OSError, ValueError) as exc:
-            raise ValueError(f'Invalid WAV for {stimulus}: {path}: {exc}') from exc
-
-    indices = [row['event_index'] for row in rows]
-    if indices != list(range(1, len(rows) + 1)):
-        raise ValueError('Timeline event_index values must be consecutive in CSV order.')
-    return path, rows, assets, first_order, trials_by_block
 
 
 def make_backgrounds(window, visual, np, Image, rng):
@@ -633,7 +364,6 @@ def run(args):
     key_rows = []
     trial_rows = []
     current_trial_events = None
-    current_trial_row = None
     metadata = {
         'participant_id': args.pid,
         'started_utc': None,
@@ -805,13 +535,16 @@ def run(args):
         shutil.copyfile(report_source, pid_dir / 'preflight_report.txt')
         Path(report_source).unlink(missing_ok=True)
         participant_metadata_path = pid_dir / 'participant_metadata.json'
-        timeline_path, rows, assets, block_order, trials_by_block = read_and_validate_timeline(timeline_path)
-        timeline_sha256 = sha256_file(timeline_path)
+        participant_metadata = json.loads(participant_metadata_path.read_text(encoding='utf-8'))
+        rows, assets, block_order, trials_by_block = load_timeline(
+            timeline_path, participant_metadata, ROOT,
+        )
         metadata.update({
             'timeline_path': str(timeline_path),
-            'timeline_sha256': timeline_sha256,
-            'timeline_sha256_at_generation': plan_snapshot['timeline_sha256'],
-            'timeline_sha256_verified': timeline_sha256 == plan_snapshot['timeline_sha256'],
+            'timeline_sha256': sha256_file(timeline_path),
+            'timeline_sha256_at_generation': participant_metadata['timeline_sha256'],
+            'timeline_sha256_verified': True,
+            'config_matches_plan_snapshot': True,
             'timeline_order': block_order,
             'seed': plan_snapshot['seed'],
             'participant_metadata_file': participant_metadata_path.name,
@@ -819,11 +552,6 @@ def run(args):
             'preflight_report_file': 'preflight_report.txt',
             'background_rng': "numpy default_rng(derive_rng(seed, 'background').getrandbits(128))",
         })
-        if not metadata['timeline_sha256_verified']:
-            raise RuntimeError(
-                f'{timeline_path} changed after generation (sha256 {timeline_sha256} != '
-                f"{plan_snapshot['timeline_sha256']}); refusing to run a modified plan."
-            )
         backgrounds = make_backgrounds(
             window, visual, np, Image,
             np.random.default_rng(derive_rng(plan_snapshot['seed'], 'background').getrandbits(128)),
@@ -1211,7 +939,7 @@ def run(args):
                     interval for interval in frame_intervals
                     if interval > 1.2 * frame_period
                 ]
-                current_trial_row = {
+                trial_row = {
                     'block': block, 'trial': trial,
                     'trial_start_session_time': trial_start,
                     'trial_end_session_time': trial_end,
@@ -1224,7 +952,7 @@ def run(args):
                     'trial_complete': trial_complete,
                     'audio_requested_only_count': audio_requested_only,
                 }
-                trial_rows.append(current_trial_row)
+                trial_rows.append(trial_row)
                 for row in trial_events:
                     row['trial_complete'] = trial_complete
                 trial_keys = key_rows[trial_key_start:]

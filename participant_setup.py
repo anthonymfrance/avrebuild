@@ -14,7 +14,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import config
-from session_io import sha256_file
+from session_io import config_snapshot, sha256_file
 from slotting_key import build_slotting_key, write_slotting_key
 from stimulus_split import split_pool
 from timeline_key import (
@@ -60,13 +60,6 @@ def build_plan(seed, block_order, count_ranges=None, diagnostics=None):
         diagnostics=diagnostics, count_ranges=count_ranges,
     )
     return assignment, slotting_rows, timeline, required, stats
-
-
-def config_snapshot():
-    """JSON-normalized uppercase config values (tuples become lists, sets sorted lists)."""
-    values = {name: value for name, value in vars(config).items()
-              if name.isupper() and not name.startswith('_')}
-    return json.loads(json.dumps(values, default=sorted))
 
 
 def next_participant_id(data_dir: Path) -> str:
