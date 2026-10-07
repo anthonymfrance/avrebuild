@@ -791,13 +791,13 @@ def run(args):
                     'tone_hz': 440, 'tone_duration_seconds': 0.8,
                 }
                 break
+            if any(key.name == 'n' for key in presses):
+                return
         test_tone_start = backend_start_time(test_tone, requested_ptb=0.0)
         metadata['sound_check']['backend_start_ptb_time'] = test_tone_start
         if test_tone_start is None:
             print(f'⚠️ PTB reported no audio start time ({AUDIO_START_SOURCE}) for the sound check; '
                   "audio timing will fall back to requested times (audio_timing_source='requested_only').")
-            if any(key.name == 'n' for key in presses):
-                return
 
         # The participant ID and plan are consumed only after both hardware checks pass.
         timeline_path, plan_snapshot = create_participant_plan(ROOT / 'data', args.pid)
