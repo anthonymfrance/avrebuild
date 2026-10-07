@@ -170,12 +170,12 @@ def build_slotting_key(
     return pt_rows + npt_rows
 
 
-def write_slotting_key(pid, seed, rows, stimulus_assignment):
+def write_slotting_key(pid, seed, rows, stimulus_assignment, data_dir):
     """Write the key and seed without overwriting an existing participant key."""
     if not pid or Path(pid).name != pid or pid in {'.', '..'}:
         raise ValueError('PID must be a single folder name.')
 
-    output_dir = Path(__file__).resolve().parent / 'data' / pid
+    output_dir = Path(data_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     key_path = output_dir / 'slotting_key.csv'
     seed_path = output_dir / 'seed.txt'
@@ -217,7 +217,7 @@ def main():
     rng = random.Random(seed)
     stimulus_assignment = split_pool(rng)
     rows = build_slotting_key(rng, stimulus_assignment)
-    key_path = write_slotting_key(pid, seed, rows, stimulus_assignment)
+    key_path = write_slotting_key(pid, seed, rows, stimulus_assignment, Path('data') / pid)
     pt_count = sum(row['role'] == 'PT' for row in rows)
     npt_count = sum(row['role'] == 'NPT' for row in rows)
     print(f'Wrote {pt_count} PT and {npt_count} NPT appearances to {key_path}')

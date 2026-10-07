@@ -201,12 +201,11 @@ if gui_yes 'Show the debug/testing screen during trials? Choose No for participa
 else
   debug_overlay=false
 fi
-participant_number="${participant_id##*_}"
-if (( 10#$participant_number % 2 )); then
-  planned_block_order='Animals, then Objects'
-else
-  planned_block_order='Objects, then Animals'
-fi
+planned_block_order="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'from pathlib import Path; from participant_setup import planned_block_order, data_directories; order, count = planned_block_order(data_directories(Path("data"))); print("Animals, then Objects" if order[0] == "animate" else "Objects, then Animals")')" || {
+  rm -f -- "$report"
+  gui_error 'Could not calculate the planned block order.'
+  exit 1
+}
 gui_yes "Preflight checks are complete. Start $participant_id?\n\nPlanned block order: $planned_block_order\nThe participant plan will be created when the experiment starts." || { rm -f -- "$report"; gui_info 'Preflight passed. The experiment was not started.'; exit 0; }
 export AV_STUDY_PREFLIGHT_REPORT="$report"
 export AV_STUDY_DEBUG_OVERLAY="$debug_overlay"
