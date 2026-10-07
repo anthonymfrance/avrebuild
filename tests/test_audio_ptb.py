@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from audio_timing import backend_start_time, ptb_to_session, resolve_trial_audio
+from audio_ptb import backend_start_time, ptb_to_session, resolve_trial_audio
 
 
 def sound_with_status(status):

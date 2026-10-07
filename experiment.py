@@ -19,7 +19,9 @@ import config
 from config import BLOCK_LABELS, TARGET_ROLES, TRIAL_DURATION, VISUAL_DURATION
 from participant_setup import create_participant_plan, derive_rng
 from session_io import load_timeline, save_session, sha256_file, sync_participant
-from audio_timing import AUDIO_START_SOURCE, backend_start_time, ptb_to_session, resolve_trial_audio
+from audio_ptb import (
+    AUDIO_START_SOURCE, backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio,
+)
 from scoring import (
     classify_press, finalize_targets, inter_trial_row, session_false_alarms, trial_feedback,
 )
@@ -36,113 +38,6 @@ KEY_TO_CORNER = {
     key: corner for corner, keys in RESPONSE_KEYS.items() for key in keys
 }
 ALL_KEYS = list(KEY_TO_CORNER) + ['space', 'escape']
-
-
-def _patch_ptb_output_channels(ptb_audio, target_channels=2):
-    """Limit virtual PortAudio device profiles to the study's stereo output."""
-    original_get_devices = ptb_audio.get_devices
-    if getattr(original_get_devices, '_av_study_patched', False):
-        return
-
-    def get_devices_with_stereo_limit(*args, **kwargs):
-        profiles = original_get_devices(*args, **kwargs)
-        for profile in profiles:
-            try:
-                output_channels = int(profile.get('NrOutputChannels', 0))
-            except (TypeError, ValueError):
-                continue
-            if output_channels > target_channels:
-                profile['NrOutputChannels'] = float(target_channels)
-        return profiles
-
-    get_devices_with_stereo_limit._av_study_patched = True
-    ptb_audio.get_devices = get_devices_with_stereo_limit
-
-
-def _patch_ptb_scalar_latency_argument(ptb_audio):
-    """Adapt PsychoPy's one-item latency list to this PTB binding's scalar API."""
-    original_stream = ptb_audio.Stream
-    if getattr(original_stream, '_av_study_scalar_latency', False):
-        return
-
-    def stream_with_scalar_latency(*args, **kwargs):
-        if 'latency_class' in kwargs:
-            latency = kwargs['latency_class']
-            if isinstance(latency, (list, tuple)) and len(latency) == 1:
-                kwargs['latency_class'] = latency[0]
-        elif len(args) >= 3:
-            latency = args[2]
-            if isinstance(latency, (list, tuple)) and len(latency) == 1:
-                args = (*args[:2], latency[0], *args[3:])
-        return original_stream(*args, **kwargs)
-
-    stream_with_scalar_latency._av_study_scalar_latency = True
-    ptb_audio.Stream = stream_with_scalar_latency
-
-
-def _open_ptb_speaker(ptb_audio, speaker_device_class):
-    """Open one explicit stereo-capable PTB speaker for the full session."""
-    _patch_ptb_output_channels(ptb_audio)
-    _patch_ptb_scalar_latency_argument(ptb_audio)
-    profiles = ptb_audio.get_devices()
-    outputs = [
-        profile for profile in profiles
-        if int(profile.get('NrOutputChannels', 0)) >= 2
-    ]
-    if not outputs:
-        raise RuntimeError(
-            'PTB found no stereo output devices. Device profiles: '
-            f'{profiles!r}. Check the Linux audio server and output device.'
-        )
-
-    requested = config.AUDIO_SPEAKER
-    if requested in {'', 'default', 'None'} and config.AUDIO_DEVICE not in {'', 'default', 'None'}:
-        requested = config.AUDIO_DEVICE
-    if requested in {'', 'default', 'None'}:
-        def default_route_rank(profile):
-            name = str(profile.get('DeviceName', '')).lower()
-            host_api = str(profile.get('HostAudioAPIName', '')).lower()
-            if 'jack' in host_api:
-                if 'built-in audio analog stereo' in name:
-                    return 0
-                if 'built-in audio' in name:
-                    return 1
-                return 2
-            if 'pipewire' in name:
-                return 3
-            if 'pulse' in name:
-                return 4
-            if name in {'default', 'sysdefault'}:
-                return 5 if name == 'default' else 6
-            return 7
-
-        chosen = min(outputs, key=default_route_rank)
-    else:
-        chosen = next(
-            (profile for profile in outputs if profile.get('DeviceName') == requested),
-            None,
-        )
-        if chosen is None:
-            available = [profile.get('DeviceName') for profile in outputs]
-            raise RuntimeError(
-                f'Configured PTB speaker {requested!r} is unavailable. '
-                f'Stereo output devices: {available!r}.'
-            )
-
-    try:
-        speaker = speaker_device_class(
-            index=int(chosen['DeviceIndex']), latencyClass=config.AUDIO_LATENCY_MODE,
-        )
-    except Exception as exc:
-        raise RuntimeError(
-            f"PTB could not open '{chosen.get('DeviceName')}' "
-            f"(index {chosen.get('DeviceIndex')}, channels "
-            f"{chosen.get('NrOutputChannels')}, host API "
-            f"{chosen.get('HostAudioAPIName')}, rate "
-            f"{chosen.get('DefaultSampleRate')} Hz): {type(exc).__name__}: {exc}. "
-            f'Available output profiles: {outputs!r}'
-        ) from exc
-    return speaker, chosen
 
 
 def _finite_number(value, label):
@@ -257,7 +152,7 @@ def run(args):
             f'PsychoPy Clock and PTB GetSecs do not share a time base (offset {clock_offset:.6f} s); '
             'audio timestamps cannot be converted to session time.'
         )
-    shared_speaker, speaker_profile = _open_ptb_speaker(ptb_audio, SpeakerDevice)
+    shared_speaker, speaker_profile = open_ptb_speaker(ptb_audio, SpeakerDevice)
 
     window = None
     session_dir = None
