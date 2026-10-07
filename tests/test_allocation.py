@@ -3,6 +3,7 @@ import json
 import pytest
 
 import participant_setup
+from session_io import sha256_file
 from participant_setup import PlanGenerationError, next_participant_id, planned_block_order
 from timeline_key import PlacementFailure
 
@@ -71,3 +72,4 @@ def test_failure_retries_with_new_seed_and_records_failed_seed(tmp_path, monkeyp
     stored = json.loads((participant_dir / 'participant_metadata.json').read_text())
     assert stored['plan_attempts'] == 2
     assert stored['failed_plan_seeds'] == [100]
+    assert stored['timeline_sha256'] == sha256_file(timeline_path)

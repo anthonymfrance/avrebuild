@@ -115,13 +115,6 @@ fi
 
 session_type="${XDG_SESSION_TYPE:-unknown}"
 
-if gui_yes 'Is Num Lock turned on? The experiment will also ask you to verify the four numpad response keys.'; then
-  add_row '✅' 'Num Lock' 'On (confirmed by RA)'
-else
-  add_row '❌' 'Num Lock' 'RA confirmed Num Lock is off'
-  fatal=1
-fi
-
 display_info=''
 if command -v xrandr >/dev/null 2>&1; then
   display_info="$(xrandr --current 2>&1 || true)"
@@ -208,7 +201,7 @@ report="$(mktemp "${TMPDIR:-/tmp}/av-preflight-${participant_id}.XXXXXX")"
 } > "$report"
 add_row '✅' 'Preflight report' 'Will be saved in the participant folder after launch'
 
-summary="Review the checks below. Yellow means the lab server must be mounted before continuing."
+summary="Review the checks below. Red items must be fixed before starting. Yellow items need a manual check; if the lab server is unavailable you will be asked to confirm local-only storage. The experiment checks the four numpad keys and the sound before creating the participant plan."
 zenity --list --title='AV study preflight checklist' --width=900 --height=480 \
   --text="$summary\n\nParticipant: $participant_id" \
   --column='Status' --column='Check' --column='Result' --print-column=2 \

@@ -23,7 +23,8 @@ from pathlib import Path
 import config
 from stimulus_split import ANIMATE, INANIMATE
 from timeline_key import FIELDS as TIMELINE_FIELDS
-from participant_setup import create_participant_plan
+from participant_setup import create_participant_plan, derive_rng
+from session_io import sha256_file
 from session_io import copy_participant_tree
 from audio_timing import AUDIO_START_SOURCE, backend_start_time, ptb_to_session, resolve_trial_audio
 from scoring import (
@@ -429,7 +430,7 @@ def read_and_validate_timeline(path):
     return path, rows, assets, first_order, trials_by_block
 
 
-def make_backgrounds(window, visual, np, Image):
+def make_backgrounds(window, visual, np, Image, rng):
     """Build cached Fourier phase-randomized backgrounds before the task."""
     source_path = ROOT / config.BG_SOURCE_FILE
     image = np.asarray(Image.open(source_path).convert('L'), dtype=np.float32)
@@ -437,7 +438,7 @@ def make_backgrounds(window, visual, np, Image):
     magnitude = np.abs(spectrum)
     backgrounds = []
     for _ in range(20):
-        phase = np.random.uniform(-np.pi, np.pi, spectrum.shape)
+        phase = rng.uniform(-np.pi, np.pi, spectrum.shape)
         frame = np.real(np.fft.ifft2(np.fft.ifftshift(magnitude * np.exp(1j * phase))))
         low, high = float(frame.min()), float(frame.max())
         normalized = np.zeros_like(frame) if high <= low else (frame - low) / (high - low)
@@ -584,9 +585,9 @@ def run(args):
     if not report_source or not Path(report_source).is_file():
         raise FileNotFoundError('Preflight report is missing. Start the experiment from preflight.sh.')
     report_text = Path(report_source).read_text(encoding='utf-8')
-    if f'participant_id={args.pid}' not in report_text:
-        raise ValueError('Preflight report participant ID does not match the requested participant.')
     preflight_report = _parse_preflight_report(report_text)
+    if preflight_report.get('participant_id') != args.pid:
+        raise ValueError('Preflight report participant ID does not match the requested participant.')
     if 'display_refresh_hz' not in preflight_report:
         raise ValueError('Preflight report does not contain the xrandr display refresh rate.')
     display_refresh_hz = _finite_number(
@@ -801,21 +802,32 @@ def run(args):
 
         # The participant ID and plan are consumed only after both hardware checks pass.
         timeline_path, plan_snapshot = create_participant_plan(ROOT / 'data', args.pid)
+        shutil.copyfile(report_source, pid_dir / 'preflight_report.txt')
         Path(report_source).unlink(missing_ok=True)
         participant_metadata_path = pid_dir / 'participant_metadata.json'
         timeline_path, rows, assets, block_order, trials_by_block = read_and_validate_timeline(timeline_path)
+        timeline_sha256 = sha256_file(timeline_path)
         metadata.update({
             'timeline_path': str(timeline_path),
-            'timeline_sha256': hashlib.sha256(timeline_path.read_bytes()).hexdigest(),
+            'timeline_sha256': timeline_sha256,
+            'timeline_sha256_at_generation': plan_snapshot['timeline_sha256'],
+            'timeline_sha256_verified': timeline_sha256 == plan_snapshot['timeline_sha256'],
             'timeline_order': block_order,
-            'timeline_used_unchanged': True,
             'seed': plan_snapshot['seed'],
             'participant_metadata_file': participant_metadata_path.name,
-            'participant_metadata_sha256': hashlib.sha256(
-                participant_metadata_path.read_bytes()
-            ).hexdigest(),
+            'participant_metadata_sha256': sha256_file(participant_metadata_path),
+            'preflight_report_file': 'preflight_report.txt',
+            'background_rng': "numpy default_rng(derive_rng(seed, 'background').getrandbits(128))",
         })
-        backgrounds = make_backgrounds(window, visual, np, Image)
+        if not metadata['timeline_sha256_verified']:
+            raise RuntimeError(
+                f'{timeline_path} changed after generation (sha256 {timeline_sha256} != '
+                f"{plan_snapshot['timeline_sha256']}); refusing to run a modified plan."
+            )
+        backgrounds = make_backgrounds(
+            window, visual, np, Image,
+            np.random.default_rng(derive_rng(plan_snapshot['seed'], 'background').getrandbits(128)),
+        )
         image_cache = {
             stimulus: visual.ImageStim(
                 window, image=str(path), size=config.IMAGE_SIZE,
@@ -1068,12 +1080,19 @@ def run(args):
                                 if actual_request_session > sound_target + 1e-6:
                                     row['timing_flags'] = 'audio_schedule_late'
 
-                        if row['event_type'] != 'visual':
+                        if row['event_type'] != 'visual' or row['response_status'] == 'not_presented':
                             continue
                         onset = row['_actual_onset']
                         planned = row['_planned_runtime']
                         if onset is None and next_flip_session >= planned:
                             time_from_onset = max(0.0, next_flip_session - planned)
+                            if time_from_onset >= VISUAL_DURATION:
+                                # A stall skipped this visual's entire display period.
+                                row['response_status'] = 'not_presented'
+                                row['timing_flags'] = ';'.join(filter(None, [
+                                    row['timing_flags'], 'visual_stalled',
+                                ]))
+                                continue
                             visual_onsets_this_flip.append(row)
                         elif onset is not None:
                             time_from_onset = next_flip_session - onset

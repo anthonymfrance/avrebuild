@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import config
+from session_io import sha256_file
 from slotting_key import build_slotting_key, write_slotting_key
 from stimulus_split import read_stimulus_assignment, split_pool
 from timeline_key import (
@@ -178,6 +179,7 @@ def create_participant_plan(data_dir: Path, participant_id: str) -> tuple[Path, 
             'completed_session_count_at_allocation': completed_count,
             'plan_attempts': len(failed_seeds) + 1,
             'failed_plan_seeds': failed_seeds,
+            'timeline_sha256': sha256_file(temp_dir / 'timeline_key.csv'),
             'generated_utc': datetime.now(timezone.utc).isoformat(),
             'git_commit': git_commit,
             'config': {
