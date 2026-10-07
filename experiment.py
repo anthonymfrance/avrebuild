@@ -24,6 +24,7 @@ import config
 from stimulus_split import ANIMATE, INANIMATE
 from timeline_key import FIELDS as TIMELINE_FIELDS
 from participant_setup import create_participant_plan
+from session_io import copy_participant_tree
 
 
 ROOT = Path(os.environ.get('AV_STUDY_DIR', Path(__file__).resolve().parent)).resolve()
@@ -595,43 +596,10 @@ def copy_participant_data_to_server(participant_id):
 
     local_participant_dir = ROOT / 'data' / participant_id
     destination = Path(server_root) / data_path / participant_id
-    copied, failed = [], []
-
-    def digest(path):
-        hasher = hashlib.sha256()
-        with Path(path).open('rb') as source:
-            for chunk in iter(lambda: source.read(1024 * 1024), b''):
-                hasher.update(chunk)
-        return hasher.hexdigest()
-
-    try:
-        for source_dir, _, filenames in os.walk(local_participant_dir):
-            relative = Path(source_dir).relative_to(local_participant_dir)
-            target_dir = destination / relative
-            target_dir.mkdir(parents=True, exist_ok=True)
-            for filename in filenames:
-                source = Path(source_dir) / filename
-                target = target_dir / filename
-                try:
-                    shutil.copyfile(source, target)
-                    if digest(source) != digest(target):
-                        failed.append(f'{source.name}: checksum mismatch')
-                    else:
-                        copied.append(str(target.relative_to(destination)))
-                except OSError as exc:
-                    failed.append(f'{source.name}: {type(exc).__name__}: {exc}')
-        return {
-            'status': 'copied' if not failed else 'partial',
-            'destination': str(destination),
-            'verified_files': copied,
-            'failures': failed,
-        }
-    except OSError as exc:
-        return {
-            'status': 'failed', 'destination': str(destination),
-            'reason': f'{type(exc).__name__}: {exc}',
-            'verified_files': copied, 'failures': failed,
-        }
+    result = copy_participant_tree(local_participant_dir, destination)
+    if result['status'] == 'collision':
+        print(f"🚨 SERVER DATA COLLISION for {participant_id}: {result.get('reason', result.get('failures'))}")
+    return result
 
 
 def run(args):
