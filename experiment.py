@@ -25,6 +25,10 @@ from stimulus_split import ANIMATE, INANIMATE
 from timeline_key import FIELDS as TIMELINE_FIELDS
 from participant_setup import create_participant_plan
 from session_io import copy_participant_tree
+from scoring import (
+    classify_press, finalize_targets, inter_trial_row, session_false_alarms,
+    trial_feedback, trial_summary,
+)
 
 
 ROOT = Path(os.environ.get('AV_STUDY_DIR', Path(__file__).resolve().parent)).resolve()
@@ -533,7 +537,7 @@ def save_session(session_dir, events, keys, trials, metadata):
         'response_status', 'response_correct', 'response_key', 'response_session_time',
         'rt_from_actual_onset', 'rt_from_planned_onset', 'timing_flags',
         'key', 'classification', 'associated_event_id', 'matched_event_ids',
-        'target_matches', 'correct', 'response_window_overlap',
+        'target_matches', 'correct', 'response_window_overlap', 'trial_complete',
     ]
     log_rows = []
     for event in events:
@@ -563,6 +567,7 @@ def save_session(session_dir, events, keys, trials, metadata):
             'response_window_overlap': key.get('response_window_overlap', ''),
             'rt_from_actual_onset': key.get('rt_from_actual_onset', ''),
             'rt_from_planned_onset': key.get('rt_from_planned_onset', ''),
+            'trial_complete': key.get('trial_complete', ''),
         }
         log_rows.append(row)
     log_rows.sort(key=lambda row: (
@@ -575,12 +580,7 @@ def save_session(session_dir, events, keys, trials, metadata):
         0 if row.get('event_type') != 'keypress' else 1,
     ))
     _atomic_csv(session_dir / 'event_log.csv', event_fields, log_rows)
-    metadata['trial_summary'] = {
-        'trial_count': len(trials),
-        'miss_count': sum(int(row.get('miss_count', 0) or 0) for row in trials),
-        'long_frame_count': sum(int(row.get('long_frame_count', 0) or 0) for row in trials),
-        'frame_count': sum(int(row.get('frame_count', 0) or 0) for row in trials),
-    }
+    metadata['trial_summary'] = trial_summary(trials)
     metadata['last_saved_utc'] = datetime.now(timezone.utc).isoformat()
     temp_path = session_dir / '.session_metadata.json.tmp'
     temp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding='utf-8')
@@ -916,12 +916,19 @@ def run(args):
             units='pix', autoLog=False,
         )
 
+        last_block, last_trial = '', ''
+
         def continuation(message):
             window_text.text = message + '\n\nPress SPACE to continue. Press ESCAPE to stop.'
             while True:
                 window_text.draw()
                 window.flip()
                 presses = kb.getKeys(keyList=ALL_KEYS, waitRelease=False, clear=True)
+                for key in presses:
+                    if key.name in KEY_TO_CORNER:
+                        key_rows.append(inter_trial_row(
+                            key.name, KEY_TO_CORNER[key.name], float(key.rt), last_block, last_trial,
+                        ))
                 if any(key.name == 'escape' for key in presses):
                     key = next(key for key in presses if key.name == 'escape')
                     key_rows.append({
@@ -929,19 +936,9 @@ def run(args):
                         'classification': 'abort', 'matched_event_ids': '',
                         'target_matches': '', 'correct': '',
                         'response_window_overlap': False,
-                        'block': '', 'trial': '',
+                        'block': last_block, 'trial': last_trial,
                     })
                     return False
-                for key in presses:
-                    if key.name in KEY_TO_CORNER:
-                        key_rows.append({
-                            'session_time': float(key.rt), 'key': key.name,
-                            'corner': KEY_TO_CORNER[key.name],
-                            'classification': 'false_alarm', 'matched_event_ids': '',
-                            'target_matches': '', 'correct': False,
-                            'response_window_overlap': False,
-                            'block': '', 'trial': '',
-                        })
                 if any(key.name == 'space' for key in presses):
                     return True
 
@@ -983,10 +980,11 @@ def run(args):
                     dict(row) for row in rows
                     if row['block'] == block and row['trial'] == trial
                 ]
+                trial_key_start = len(key_rows)
                 current_trial_events = trial_events
-                current_trial_row = None
                 trial_start = session_clock.getTime()
                 trial_visuals = [row for row in trial_events if row['event_type'] == 'visual']
+                trial_targets = [row for row in trial_visuals if row['role'] in TARGET_ROLES]
                 for row in trial_events:
                     row.update({
                         'runtime_planned_onset': trial_start + row['trial_onset'],
@@ -1139,79 +1137,37 @@ def run(args):
                             aborted = True
                             break
                         key_time = float(press.rt)
-                        if press.name not in KEY_TO_CORNER:
-                            key_rows.append({
-                                'session_time': key_time, 'key': press.name,
-                                'corner': '', 'classification': 'false_alarm',
-                                'matched_event_ids': '', 'target_matches': '',
-                                'correct': False, 'response_window_overlap': False,
-                                'block': block, 'trial': trial,
-                            })
-                            continue
-                        active_targets = [
-                            event for event in trial_visuals
-                            if event['_actual_onset'] is not None
-                            and event['role'] in TARGET_ROLES
-                            and event['_actual_onset'] <= key_time
-                            <= event['_actual_onset'] + config.RESPONSE_WINDOW
-                        ]
-                        unscored_targets = [
-                            event for event in active_targets if event['response_status'] == 'pending'
-                        ]
-                        matching = [
-                            event for event in unscored_targets
-                            if KEY_TO_CORNER[press.name] == event['corner']
-                        ]
-                        if len(active_targets) > 1:
-                            for event in active_targets:
-                                event['timing_flags'] = ';'.join(filter(None, [
-                                    event['timing_flags'], 'actual_response_windows_overlap',
-                                ]))
-                        if matching:
-                            chosen = min(matching, key=lambda event: event['_actual_onset'])
-                            classification = 'hit'
+                        key_row, chosen = classify_press(
+                            press.name, KEY_TO_CORNER.get(press.name), key_time,
+                            trial_targets, config.RESPONSE_WINDOW,
+                        )
+                        key_row.update({'block': block, 'trial': trial})
+                        key_rows.append(key_row)
+                        if key_row['response_window_overlap']:
+                            for event in trial_targets:
+                                if event['event_id'] in key_row['matched_event_ids'].split('|'):
+                                    event['timing_flags'] = ';'.join(filter(None, [
+                                        event['timing_flags'], 'actual_response_windows_overlap',
+                                    ]))
+                        if chosen is not None:
                             chosen['response_status'] = 'hit'
                             chosen['response_correct'] = True
                             chosen['response_key'] = press.name
                             chosen['response_session_time'] = key_time
-                            chosen['rt_from_actual_onset'] = key_time - chosen['_actual_onset']
-                            chosen['rt_from_planned_onset'] = key_time - chosen['_planned_runtime']
+                            chosen['rt_from_actual_onset'] = key_row['rt_from_actual_onset']
+                            chosen['rt_from_planned_onset'] = key_row['rt_from_planned_onset']
                             fixation_green_until = key_time + config.FIXATION_FLASH_DUR
-                        else:
-                            classification = 'false_alarm'
-                        key_rows.append({
-                            'session_time': key_time,
-                            'key': press.name,
-                            'corner': KEY_TO_CORNER[press.name],
-                            'classification': classification,
-                            'matched_event_ids': '|'.join(event['event_id'] for event in active_targets),
-                            'target_matches': '|'.join(event['event_id'] for event in matching),
-                            'correct': classification == 'hit',
-                            'response_window_overlap': len(active_targets) > 1,
-                            'block': block, 'trial': trial,
-                            'associated_event_id': chosen['event_id'] if matching else '',
-                            'rt_from_actual_onset': key_time - chosen['_actual_onset'] if matching else '',
-                            'rt_from_planned_onset': key_time - chosen['_planned_runtime'] if matching else '',
-                        })
                     if aborted:
                         break
 
-                    for event in trial_visuals:
-                        if (event['role'] in TARGET_ROLES and event['response_status'] == 'pending'
+                    for event in trial_targets:
+                        if (event['response_status'] == 'pending'
                                 and event['_actual_onset'] is not None
                                 and session_clock.getTime() > event['_actual_onset'] + config.RESPONSE_WINDOW):
                             event['response_status'] = 'miss'
                             event['response_correct'] = False
-                for event in trial_visuals:
-                    if event['role'] in TARGET_ROLES and event['response_status'] == 'pending':
-                        if event['_actual_onset'] is None:
-                            event['response_status'] = 'not_presented'
-                            event['timing_flags'] = ';'.join(filter(None, [
-                                event['timing_flags'], 'trial_ended_before_visual_onset',
-                            ]))
-                        else:
-                            event['response_status'] = 'miss'
-                            event['response_correct'] = False
+                trial_complete = not aborted
+                finalize_targets(trial_targets, trial_complete)
                 trial_end = session_clock.getTime()
                 long_frames = [
                     interval for interval in frame_intervals
@@ -1226,27 +1182,20 @@ def run(args):
                     'mean_frame_interval': statistics.fmean(frame_intervals) if frame_intervals else '',
                     'median_frame_interval': statistics.median(frame_intervals) if frame_intervals else '',
                     'max_frame_interval': max(frame_intervals, default=''),
-                    'miss_count': sum(event['response_status'] == 'miss' for event in trial_visuals),
+                    'miss_count': sum(event['response_status'] == 'miss' for event in trial_targets),
+                    'trial_complete': trial_complete,
                 }
                 trial_rows.append(current_trial_row)
+                for row in trial_events:
+                    row['trial_complete'] = trial_complete
+                trial_keys = key_rows[trial_key_start:]
+                for key_row in trial_keys:
+                    key_row['trial_complete'] = trial_complete
                 all_events.extend(trial_events)
                 current_trial_events = None
-                current_trial_row = None
+                last_block, last_trial = block, trial
                 save_session(session_dir, all_events, key_rows, trial_rows, metadata)
-                with (session_dir / 'event_log.csv').open(newline='', encoding='utf-8') as saved_log:
-                    saved_rows = list(csv.DictReader(saved_log))
-                trial_log_rows = [
-                    row for row in saved_rows
-                    if row.get('block') == block and str(row.get('trial')) == str(trial)
-                ]
-                trial_hits = sum(
-                    row.get('event_type') == 'visual' and row.get('role') in TARGET_ROLES
-                    and row.get('response_status') == 'hit' for row in trial_log_rows
-                )
-                trial_false_alarms = sum(
-                    row.get('event_type') == 'keypress' and row.get('classification') == 'false_alarm'
-                    for row in trial_log_rows
-                )
+                trial_hits, trial_false_alarms = trial_feedback(trial_targets, trial_keys)
                 if aborted or not continuation(
                     f'{BLOCK_LABELS[block]} — Trial {trial} complete.\n'
                     f'Correct hits: {trial_hits}\nFalse alarms: {trial_false_alarms} '
@@ -1270,7 +1219,7 @@ def run(args):
                     if event['event_type'] == 'visual' and event['role'] in TARGET_ROLES
                 ]
                 valid_hits = sum(event['response_status'] == 'hit' for event in target_events)
-                false_alarms = sum(row['classification'] == 'false_alarm' for row in key_rows)
+                false_alarms = session_false_alarms(key_rows)
                 completion_text = visual.TextStim(
                     window, text=(
                         'Study complete — thank you!\n\n'
@@ -1314,10 +1263,22 @@ def run(args):
                 print(f"⚠️ Server copy {sync_result['status']}; local data remains at {session_dir}.")
     finally:
         if session_dir is not None and current_trial_events is not None:
-            # An interrupted trial is not a complete observation; discard it while
-            # retaining prior fully completed trials in the local session record.
+            # An error interrupted a trial: keep its rows marked trial_complete=False
+            # (pending targets become 'incomplete') so they never count as misses.
+            finalize_targets(
+                [row for row in current_trial_events
+                 if row['event_type'] == 'visual' and row['role'] in TARGET_ROLES],
+                complete=False,
+            )
+            for row in current_trial_events + key_rows[trial_key_start:]:
+                row['trial_complete'] = False
+            all_events.extend(current_trial_events)
+            trial_rows.append({
+                'block': current_trial_events[0]['block'],
+                'trial': current_trial_events[0]['trial'],
+                'trial_complete': False,
+            })
             current_trial_events = None
-            current_trial_row = None
             metadata.setdefault('completion_status', 'aborted_or_error')
             metadata['ended_utc'] = datetime.now(timezone.utc).isoformat()
             save_session(session_dir, all_events, key_rows, trial_rows, metadata)
