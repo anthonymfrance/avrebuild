@@ -19,6 +19,16 @@ from scoring import trial_summary
 from timeline_key import FIELDS
 
 
+def operator_warn(pid_dir, message):
+    """Print an operator warning and append it to <pid_dir>/operator_warnings.txt for preflight.sh."""
+    print(message)
+    try:
+        with (Path(pid_dir) / 'operator_warnings.txt').open('a', encoding='utf-8') as output:
+            output.write(message + '\n')
+    except OSError as exc:
+        print(f'⚠️ Could not record operator warning in {pid_dir}: {exc}')
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open('rb') as source:
@@ -315,7 +325,7 @@ def copy_participant_data_to_server(root, participant_id):
     destination = Path(server_root) / data_path / participant_id
     result = copy_participant_tree(local_participant_dir, destination)
     if result['status'] == 'collision':
-        print(f"🚨 SERVER DATA COLLISION for {participant_id}: {result.get('reason', result.get('failures'))}")
+        operator_warn(local_participant_dir, f"🚨 SERVER DATA COLLISION for {participant_id}: {result.get('reason', result.get('failures'))}")
     return result
 
 
@@ -335,6 +345,7 @@ def _foreign_session_reason(remote_metadata: Path, metadata):
 
 def sync_participant(root, participant_id, session_dir, metadata, save):
     """Push the participant folder, then re-copy the final session metadata."""
+    pid_dir = Path(root) / 'data' / participant_id
     sync_result = copy_participant_data_to_server(root, participant_id)
     metadata['server_sync'] = sync_result
     save()
@@ -345,7 +356,7 @@ def sync_participant(root, participant_id, session_dir, metadata, save):
         if foreign:
             sync_result.update({'status': 'collision', 'reason': foreign})
             save()
-            print(f'🚨 SERVER DATA COLLISION for {participant_id}: {foreign}')
+            operator_warn(pid_dir, f'🚨 SERVER DATA COLLISION for {participant_id}: {foreign}')
         else:
             try:
                 shutil.copyfile(local_metadata, remote_metadata)
@@ -355,10 +366,10 @@ def sync_participant(root, participant_id, session_dir, metadata, save):
                 metadata['server_sync']['status'] = 'partial'
                 metadata['server_sync']['failures'].append(f'session_metadata.json: {exc}')
                 save()
-                print(f'⚠️ Server copy completed, but final metadata update failed: {exc}')
+                operator_warn(pid_dir, f'⚠️ Server copy completed, but final metadata update failed: {exc}')
     if sync_result['status'] == 'copied':
         print(f"✅ Full participant folder copied and verified on server: {sync_result['destination']}")
     elif sync_result['status'] == 'local_only':
-        print(f"⚠️ Participant data remains local at {session_dir}; no server was mounted at preflight.")
+        operator_warn(pid_dir, f"⚠️ Participant data remains local at {session_dir}; no server was mounted at preflight.")
     else:
-        print(f"⚠️ Server copy {sync_result['status']}; local data remains at {session_dir}.")
+        operator_warn(pid_dir, f"⚠️ Server copy {sync_result['status']}; local data remains at {session_dir}.")

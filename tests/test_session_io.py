@@ -45,6 +45,13 @@ def test_remote_metadata_of_same_session_is_updated(tmp_path, monkeypatch):
     assert remote['server_sync']['status'] == 'copied'
 
 
+def test_operator_warn_prints_and_appends(tmp_path, capsys):
+    session_io.operator_warn(tmp_path, 'first warning')
+    session_io.operator_warn(tmp_path, 'second warning')
+    assert (tmp_path / 'operator_warnings.txt').read_text() == 'first warning\nsecond warning\n'
+    assert capsys.readouterr().out == 'first warning\nsecond warning\n'
+
+
 def test_server_participant_collision_preserves_destination_and_local(tmp_path):
     local = tmp_path / 'local' / 'participant_01'
     server = tmp_path / 'server' / 'participant_01'

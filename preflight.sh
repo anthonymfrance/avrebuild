@@ -233,7 +233,16 @@ gui_yes "Preflight checks are complete. Start $participant_id?\n\nPlanned block 
 export AV_STUDY_PREFLIGHT_REPORT="$report"
 export AV_STUDY_DEBUG_OVERLAY="$debug_overlay"
 runner_log="$(mktemp "${TMPDIR:-/tmp}/av-experiment-${participant_id}.XXXXXX")"
+warnings_file="$study_dir/data/$participant_id/operator_warnings.txt"
+show_operator_warnings() {
+  zenity --text-info --title="AV study operator warnings — $participant_id" --width=760 --height=420 \
+    --filename="$warnings_file" || true
+}
 if pw-jack env LD_PRELOAD="$pipewire_jack_lib" "$python_bin" "$study_dir/experiment.py" "$participant_id" >"$runner_log" 2>&1; then
+  if [[ -s "$warnings_file" ]]; then
+    cp -- "$runner_log" "$study_dir/data/$participant_id/runner.log"
+    show_operator_warnings
+  fi
   rm -f -- "$runner_log"
   if [[ ! -d "$study_dir/data/$participant_id" ]]; then
     gui_info "The runner stopped during the numpad or sound check. No plan was created and $participant_id was not used."
@@ -248,6 +257,9 @@ else
   fi
   error_tail="$(tail -n 18 -- "$runner_log")"
   rm -f -- "$runner_log"
+  if [[ -s "$warnings_file" ]]; then
+    show_operator_warnings
+  fi
   gui_error "The experiment runner exited with status $run_status.\n\n$error_tail\n\nFull log: $log_copy"
   exit "$run_status"
 fi

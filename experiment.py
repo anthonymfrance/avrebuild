@@ -18,7 +18,7 @@ import config
 from config import BLOCK_LABELS, TARGET_ROLES
 from participant_setup import create_participant_plan, derive_rng
 import screens
-from session_io import load_timeline, save_session, sha256_file, sync_participant
+from session_io import load_timeline, operator_warn, save_session, sha256_file, sync_participant
 from audio_ptb import (
     AUDIO_START_SOURCE, assign_sound_slots, backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio,
 )
@@ -180,9 +180,6 @@ def run(args):
             'long_frame_threshold_seconds': 1.2 * frame_period,
             'display_refresh_differs_from_xrandr': abs(measured_refresh_hz - display_refresh_hz) > 1.0,
         })
-        if abs(measured_refresh_hz - display_refresh_hz) > 1.0:
-            print(f'⚠️ Measured refresh {measured_refresh_hz:.2f} Hz differs from xrandr '
-                  f'{display_refresh_hz:.2f} Hz by more than 1 Hz.')
         test_tone = sound.Sound(
             440, secs=0.8, stereo=True, speaker=shared_speaker, autoLog=False,
         )
@@ -230,12 +227,16 @@ def run(args):
         }
         test_tone_start = backend_start_time(test_tone, requested_ptb=0.0)
         metadata['sound_check']['backend_start_ptb_time'] = test_tone_start
-        if test_tone_start is None:
-            print(f'⚠️ PTB reported no audio start time ({AUDIO_START_SOURCE}) for the sound check; '
-                  "audio timing will fall back to requested times (audio_timing_source='requested_only').")
 
         # The participant ID and plan are consumed only after both hardware checks pass.
         timeline_path, plan_snapshot = create_participant_plan(ROOT / 'data', args.pid)
+        # Earlier warnings wait until here: creating pid_dir sooner would consume the ID.
+        if metadata['display_refresh_differs_from_xrandr']:
+            operator_warn(pid_dir, f'⚠️ Measured refresh {measured_refresh_hz:.2f} Hz differs from xrandr '
+                          f'{display_refresh_hz:.2f} Hz by more than 1 Hz.')
+        if test_tone_start is None:
+            operator_warn(pid_dir, f'⚠️ PTB reported no audio start time ({AUDIO_START_SOURCE}) for the sound check; '
+                          "audio timing will fall back to requested times (audio_timing_source='requested_only').")
         shutil.copyfile(report_source, pid_dir / 'preflight_report.txt')
         Path(report_source).unlink(missing_ok=True)
         participant_metadata_path = pid_dir / 'participant_metadata.json'
