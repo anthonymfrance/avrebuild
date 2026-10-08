@@ -212,8 +212,10 @@ def rest_break(window, kb, visual, clock, duration_seconds=120):
             text.text = 'Rest break complete.\n\nPress SPACE to continue. Press ESCAPE to stop.'
         text.draw()
         window.flip()
-        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+        presses = kb.getKeys(keyList=['space', 's', 'escape'], waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
             return False
         if remaining == 0 and any(key.name == 'space' for key in presses):
+            return True
+        if remaining > 0 and any(key.name == 's' for key in presses):
             return True

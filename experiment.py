@@ -379,7 +379,17 @@ def run(args):
                     aborted = True
                     break
             if not aborted and block_index < len(block_order) - 1:
-                aborted = not screens.rest_break(window, kb, visual, session_clock)
+                rest_start_time = session_clock.getTime()
+                break_skipped = screens.rest_break(window, kb, visual, session_clock)
+                break_duration = session_clock.getTime() - rest_start_time
+                metadata['break_skip_info'] = {
+                    'break_number': block_index + 1,
+                    'break_duration_seconds': break_duration,
+                    'break_was_skipped': break_skipped,
+                    'break_duration_seconds_full': 120,  # 2 minutes = 120 seconds
+                }
+                if not break_skipped:
+                    aborted = not break_skipped
             if aborted:
                 break
 
