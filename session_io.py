@@ -319,6 +319,20 @@ def copy_participant_data_to_server(root, participant_id):
     return result
 
 
+def _foreign_session_reason(remote_metadata: Path, metadata):
+    """Why the server session_metadata.json is not this session's, or '' if it is (or is absent)."""
+    if not remote_metadata.exists():
+        return ''
+    try:
+        remote = json.loads(remote_metadata.read_text(encoding='utf-8'))
+        identity = (remote['started_utc'], remote['seed'])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return f'Could not verify server session_metadata.json: {exc}; preserved.'
+    if identity != (metadata.get('started_utc'), metadata.get('seed')):
+        return 'Server session_metadata.json has a different started_utc or seed; preserved.'
+    return ''
+
+
 def sync_participant(root, participant_id, session_dir, metadata, save):
     """Push the participant folder, then re-copy the final session metadata."""
     sync_result = copy_participant_data_to_server(root, participant_id)
@@ -327,15 +341,21 @@ def sync_participant(root, participant_id, session_dir, metadata, save):
     if sync_result['status'] == 'copied':
         remote_metadata = Path(sync_result['destination']) / session_dir.name / 'session_metadata.json'
         local_metadata = session_dir / 'session_metadata.json'
-        try:
-            shutil.copyfile(local_metadata, remote_metadata)
-            if hashlib.sha256(local_metadata.read_bytes()).hexdigest() != hashlib.sha256(remote_metadata.read_bytes()).hexdigest():
-                raise OSError('session metadata checksum mismatch')
-        except OSError as exc:
-            metadata['server_sync']['status'] = 'partial'
-            metadata['server_sync']['failures'].append(f'session_metadata.json: {exc}')
+        foreign = _foreign_session_reason(remote_metadata, metadata)
+        if foreign:
+            sync_result.update({'status': 'collision', 'reason': foreign})
             save()
-            print(f'⚠️ Server copy completed, but final metadata update failed: {exc}')
+            print(f'🚨 SERVER DATA COLLISION for {participant_id}: {foreign}')
+        else:
+            try:
+                shutil.copyfile(local_metadata, remote_metadata)
+                if hashlib.sha256(local_metadata.read_bytes()).hexdigest() != hashlib.sha256(remote_metadata.read_bytes()).hexdigest():
+                    raise OSError('session metadata checksum mismatch')
+            except OSError as exc:
+                metadata['server_sync']['status'] = 'partial'
+                metadata['server_sync']['failures'].append(f'session_metadata.json: {exc}')
+                save()
+                print(f'⚠️ Server copy completed, but final metadata update failed: {exc}')
     if sync_result['status'] == 'copied':
         print(f"✅ Full participant folder copied and verified on server: {sync_result['destination']}")
     elif sync_result['status'] == 'local_only':
