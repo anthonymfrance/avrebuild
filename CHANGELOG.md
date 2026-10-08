@@ -59,10 +59,28 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
     trial_runner). No behavior change. A simulated-PsychoPy smoke run (abort, complete, and an
     injected mid-trial crash) produced identical `event_log.csv` and metadata before and after
     each commit.
+15. **Sound pool** (`51f33e0`). Each stimulus has `SOUND_POOL_SIZE = 2` `Sound` objects, built
+    before the session. `audio_ptb.assign_sound_slots` assigns them round-robin per stimulus in
+    planned-onset order, so a play is never scheduled on an object that is still sounding. The
+    schedule-ahead lead is `config.SOUND_SCHEDULE_LEAD = 0.5`. Timeline generation and timing
+    constants are unchanged. The start-time reader and its `>= requested - 0.05 s` check still
+    read the object that was played. Tests (`tests/test_sound_pool.py`) cover 50 `build_plan`
+    seeds: with the pool, every play is scheduled at least 0.05 s after the previous play on the
+    same object ended. With `pool_size=1`, or with a mutated assignment, the check fails.
+16. **Remote session metadata** (`3ccbdda`). `sync_participant` rewrites the server
+    `session_metadata.json` only if it has the same `started_utc` and `seed` (or is absent).
+    Otherwise it is preserved and the sync status becomes `collision`.
+17. **Operator warnings** (`caa16ce`). `session_io.operator_warn(pid_dir, message)` prints and
+    appends to `data/<pid>/operator_warnings.txt`. Every operator warning goes through it. The
+    refresh-mismatch and sound-check warnings are emitted right after plan creation, because the
+    participant folder does not exist before then. After the runner exits, preflight.sh shows a
+    non-empty warnings file in a zenity dialog and keeps the runner log
+    (`data/<pid>/runner.log` on success, `launch_error.log` on failure as before).
 
 ## Behavior changes
 - New columns: `trial_complete` (event, key, and trial rows); `realized_soa_seconds` and
-  `soa_error_seconds` (event rows); `audio_requested_only_count` (trial rows).
+  `soa_error_seconds` (event rows); `audio_requested_only_count` (trial rows); `sound_slot`
+  (sound rows).
 - New values: response status `incomplete`, `not_presented`; key classification `inter_trial`;
   audio source `requested_only`; flags `visual_stalled`, `audio_start_unreported`,
   `trial_aborted_before_audio_start_report`.
@@ -85,17 +103,10 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
 - In a real `event_log.csv`, `audio_backend_start_ptb_time`, `audio_backend_start_session_time`,
   and `realized_soa_seconds` are populated, and `requested_only` is rare or absent.
 - preflight.sh selects the correct xrandr output on the lab machine's multi-monitor setup.
-- Operator `print()` warnings (refresh mismatch, missing sound-check start time) actually reach
-  the operator.
+- Operator warnings (refresh mismatch, missing sound-check start time) appear in the
+  post-run warnings dialog.
+- In a real `event_log.csv`, consecutive plays of the same stimulus use different `sound_slot`
+  values, and every sound row has an audio start time.
 
 ## Known issues (not fixed, need a decision)
-- **Same-stimulus sound restart.** One cached `Sound` per stimulus is scheduled up to 0.5 s
-  ahead. In the sample plan, 20 of 390 sounds start less than 1.5 s after the previous play of the
-  same stimulus (minimum gap 1.203 s). PsychPortAudio force-restarts a still-playing sound, which
-  truncates the earlier one. Fix: one `Sound` per event or a small pool per stimulus.
-- **Remote metadata overwrite.** `sync_participant` rewrites the remote `session_metadata.json`
-  after copying.
-- **Operator warnings are hidden.** `print()` output goes to the runner log, which preflight.sh
-  deletes on success.
-- **Screen choice.** `screen=0` is not guaranteed to be the primary xrandr output; the
-  `window.size` check only partly covers this.
+- None.
