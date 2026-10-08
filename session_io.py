@@ -29,6 +29,31 @@ def operator_warn(pid_dir, message):
         print(f'⚠️ Could not record operator warning in {pid_dir}: {exc}')
 
 
+def json_default(obj):
+    """Convert NumPy bool_/integer/floating and ndarray; reject anything else."""
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+    if np is not None:
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+    raise TypeError(f'Object of type {type(obj).__name__} is not JSON serializable')
+
+
+def _python_scalar(value):
+    """NumPy scalars become Python values so CSV cells are not NumPy reprs."""
+    if type(value).__module__ == 'numpy':
+        return value.tolist()
+    return value
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open('rb') as source:
@@ -244,7 +269,10 @@ def _atomic_csv(path, fieldnames, rows):
         with os.fdopen(fd, 'w', newline='', encoding='utf-8') as output:
             writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
             writer.writeheader()
-            writer.writerows(rows)
+            writer.writerows(
+                {column: _python_scalar(value) for column, value in row.items()}
+                for row in rows
+            )
             output.flush()
             os.fsync(output.fileno())
         os.replace(temp_name, path)
@@ -310,7 +338,10 @@ def save_session(session_dir, events, keys, trials, metadata):
     metadata['trial_summary'] = trial_summary(trials)
     metadata['last_saved_utc'] = datetime.now(timezone.utc).isoformat()
     temp_path = session_dir / '.session_metadata.json.tmp'
-    temp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding='utf-8')
+    temp_path.write_text(
+        json.dumps(metadata, indent=2, sort_keys=True, default=json_default),
+        encoding='utf-8',
+    )
     os.replace(temp_path, session_dir / 'session_metadata.json')
 
 

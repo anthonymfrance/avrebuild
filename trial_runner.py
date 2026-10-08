@@ -44,7 +44,7 @@ def run_trial(
     Returns (trial_events, trial_keys, trial_row, aborted).
     """
     aborted = False
-    trial_start = session_clock.getTime()
+    trial_start = float(session_clock.getTime())
     trial_visuals = [row for row in trial_events if row['event_type'] == 'visual']
     trial_targets = [row for row in trial_visuals if row['role'] in TARGET_ROLES]
     for row in trial_events:
@@ -78,11 +78,11 @@ def run_trial(
              if event['role'] in TARGET_ROLES and event['_actual_onset'] is not None),
             default=trial_end_target,
         )
-        if session_clock.getTime() >= max(trial_end_target, response_end):
+        if float(session_clock.getTime()) >= max(trial_end_target, response_end):
             break
-        now = session_clock.getTime()
-        next_flip_session = window.getFutureFlipTime(clock=session_clock)
-        next_flip_ptb = window.getFutureFlipTime(clock='ptb')
+        now = float(session_clock.getTime())
+        next_flip_session = float(window.getFutureFlipTime(clock=session_clock))
+        next_flip_ptb = float(window.getFutureFlipTime(clock='ptb'))
 
         backgrounds[int(max(0.0, now - trial_start) / config.BG_UPDATE_RATE) % len(backgrounds)].draw()
         fixation.lineColor = (
@@ -99,7 +99,7 @@ def run_trial(
             if row['event_type'] == 'sound' and not row['_audio_scheduled']:
                 sound_target = row['_planned_runtime']
                 lead = sound_target - next_flip_session
-                if lead <= config.SOUND_SCHEDULE_LEAD:
+                if bool(lead <= config.SOUND_SCHEDULE_LEAD):
                     # If a late frame consumed the requested lead, schedule
                     # at the next available PTB time and retain the deviation.
                     actual_request_session = max(sound_target, next_flip_session + 0.03)
@@ -109,16 +109,16 @@ def run_trial(
                     row['audio_requested_session_time'] = actual_request_session
                     row['audio_requested_ptb_time'] = requested_ptb
                     row['audio_timing_source'] = 'PTB scheduled playback'
-                    if actual_request_session > sound_target + 1e-6:
+                    if bool(actual_request_session > sound_target + 1e-6):
                         row['timing_flags'] = 'audio_schedule_late'
 
             if row['event_type'] != 'visual' or row['response_status'] == 'not_presented':
                 continue
             onset = row['_actual_onset']
             planned = row['_planned_runtime']
-            if onset is None and next_flip_session >= planned:
+            if onset is None and bool(next_flip_session >= planned):
                 time_from_onset = max(0.0, next_flip_session - planned)
-                if time_from_onset >= VISUAL_DURATION:
+                if bool(time_from_onset >= VISUAL_DURATION):
                     # A stall skipped this visual's entire display period.
                     row['response_status'] = 'not_presented'
                     row['timing_flags'] = ';'.join(filter(None, [
@@ -130,7 +130,7 @@ def run_trial(
                 time_from_onset = next_flip_session - onset
             else:
                 continue
-            if 0 <= time_from_onset < VISUAL_DURATION:
+            if bool(0 <= time_from_onset < VISUAL_DURATION):
                 stim = image_cache[row['stimulus']]
                 stim.pos = (float(row['x']), float(row['y']))
                 stim.opacity = (
@@ -139,7 +139,7 @@ def run_trial(
                 stim.draw()
 
         flip_default = window.flip()
-        flip_session = (
+        flip_session = float(
             convert_default_clock(session_clock, flip_default, logging)
             if flip_default is not None else session_clock.getTime()
         )
@@ -152,8 +152,8 @@ def run_trial(
             if row['_actual_onset'] is None:
                 row['_actual_onset'] = flip_session
                 row['actual_onset'] = flip_session
-                row['onset_deviation'] = flip_session - row['_planned_runtime']
-                if abs(row['onset_deviation']) > config.VISUAL_ONSET_FLAG_FRAMES * frame_period:
+                row['onset_deviation'] = float(flip_session - row['_planned_runtime'])
+                if bool(abs(row['onset_deviation']) > config.VISUAL_ONSET_FLAG_FRAMES * frame_period):
                     row['timing_flags'] = 'visual_onset_deviation'
                 if row['role'] in TARGET_ROLES:
                     for other in trial_visuals:
@@ -165,7 +165,7 @@ def run_trial(
                             row['_actual_onset'] + config.RESPONSE_WINDOW,
                             other['_actual_onset'] + config.RESPONSE_WINDOW,
                         )
-                        if overlap_start < overlap_end:
+                        if bool(overlap_start < overlap_end):
                             for target in (row, other):
                                 target['timing_flags'] = ';'.join(filter(None, [
                                     target['timing_flags'],
@@ -184,10 +184,10 @@ def run_trial(
                         reported_ptb, session_clock.getLastResetTime(),
                     )
                     row['actual_onset'] = row['audio_backend_start_session_time']
-                    row['onset_deviation'] = (
+                    row['onset_deviation'] = float(
                         row['audio_backend_start_session_time'] - row['_planned_runtime']
                     )
-                    if abs(row['onset_deviation']) > config.AUDIO_ONSET_FLAG_THRESHOLD:
+                    if bool(abs(row['onset_deviation']) > config.AUDIO_ONSET_FLAG_THRESHOLD):
                         row['timing_flags'] = ';'.join(filter(None, [
                             row['timing_flags'], 'audio_playback_deviation',
                         ]))
@@ -232,16 +232,16 @@ def run_trial(
         for event in trial_targets:
             if (event['response_status'] == 'pending'
                     and event['_actual_onset'] is not None
-                    and session_clock.getTime() > event['_actual_onset'] + config.RESPONSE_WINDOW):
+                    and bool(float(session_clock.getTime()) > event['_actual_onset'] + config.RESPONSE_WINDOW)):
                 event['response_status'] = 'miss'
                 event['response_correct'] = False
     trial_complete = not aborted
     finalize_targets(trial_targets, trial_complete)
     audio_requested_only = resolve_trial_audio(trial_events, config.FADE_IN_DUR, trial_complete)
-    trial_end = session_clock.getTime()
+    trial_end = float(session_clock.getTime())
     long_frames = [
         interval for interval in frame_intervals
-        if interval > 1.2 * frame_period
+        if bool(interval > 1.2 * frame_period)
     ]
     trial_row = {
         'block': block, 'trial': trial,

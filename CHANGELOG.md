@@ -78,6 +78,10 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
     participant folder does not exist before then. After the runner exits, preflight.sh shows a
     non-empty warnings file in a zenity dialog and keeps the runner log
     (`data/<pid>/runner.log` on success, `launch_error.log` on failure as before).
+18. **NumPy metadata is JSON-safe**. PsychoPy comparisons and clock/refresh values that
+    land in metadata or event/trial/key rows are stored as Python `bool`/`float`/`int`.
+    `session_io.json_default` converts NumPy bool, integer, floating, and ndarray values in
+    session and participant metadata writes. CSV cells coerce NumPy scalars to Python values.
 
 ## Behavior changes
 - New columns: `trial_complete` (event, key, and trial rows); `realized_soa_seconds` and

@@ -30,11 +30,11 @@ def classify_press(key_name, corner, key_time, targets, response_window):
         'classification': 'hit' if chosen else 'false_alarm',
         'matched_event_ids': '|'.join(target['event_id'] for target in active),
         'target_matches': '|'.join(target['event_id'] for target in matching),
-        'correct': chosen is not None,
-        'response_window_overlap': len(active) > 1,
+        'correct': bool(chosen is not None),
+        'response_window_overlap': bool(len(active) > 1),
         'associated_event_id': chosen['event_id'] if chosen else '',
-        'rt_from_actual_onset': key_time - chosen['_actual_onset'] if chosen else '',
-        'rt_from_planned_onset': key_time - chosen['_planned_runtime'] if chosen else '',
+        'rt_from_actual_onset': float(key_time - chosen['_actual_onset']) if chosen else '',
+        'rt_from_planned_onset': float(key_time - chosen['_planned_runtime']) if chosen else '',
     }
     return row, chosen
 

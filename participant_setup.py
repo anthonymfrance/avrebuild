@@ -14,7 +14,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import config
-from session_io import config_snapshot, sha256_file
+from session_io import config_snapshot, json_default, sha256_file
 from slotting_key import build_slotting_key, write_slotting_key
 from stimulus_split import split_pool
 from timeline_key import (
@@ -204,7 +204,7 @@ def create_participant_plan(data_dir: Path, participant_id: str) -> tuple[Path, 
             },
         }
         (temp_dir / 'participant_metadata.json').write_text(
-            json.dumps(snapshot, indent=2, sort_keys=True), encoding='utf-8',
+            json.dumps(snapshot, indent=2, sort_keys=True, default=json_default), encoding='utf-8',
         )
         os.rename(temp_dir, participant_dir)
         return participant_dir / 'timeline_key.csv', snapshot

@@ -1,5 +1,8 @@
 import json
 
+import pytest
+
+import participant_setup
 import session_io
 from session_io import copy_participant_tree
 
@@ -111,3 +114,60 @@ def test_same_participant_sync_copies_only_missing_or_matching_files(tmp_path):
     assert result['status'] == 'copied'
     assert (server / 'existing.txt').read_text() == 'same'
     assert (server / 'new.txt').read_text() == 'new data'
+
+
+def test_json_default_numpy_scalars_and_rejects_unknown():
+    np = pytest.importorskip('numpy')
+    assert session_io.json_default(np.bool_(True)) is True
+    assert session_io.json_default(np.bool_(False)) is False
+    assert type(session_io.json_default(np.int64(4))) is int
+    assert session_io.json_default(np.int64(4)) == 4
+    assert type(session_io.json_default(np.float64(1.5))) is float
+    assert session_io.json_default(np.float64(1.5)) == 1.5
+    assert session_io.json_default(np.array([1, 2])) == [1, 2]
+    with pytest.raises(TypeError):
+        session_io.json_default(object())
+
+
+def test_save_session_writes_numpy_metadata_as_json(tmp_path):
+    np = pytest.importorskip('numpy')
+    metadata = {
+        'display_refresh_differs_from_xrandr': np.bool_(True),
+        'display_refresh_hz': np.float64(59.5),
+        'audio_clock_offset_check_seconds': np.float64(0.001),
+        'seed': np.int64(7),
+        'window_size': np.array([1920, 1080]),
+    }
+    events = [{
+        'event_type': 'visual',
+        'actual_onset': np.float64(1.25),
+        'response_correct': np.bool_(True),
+    }]
+    session_io.save_session(tmp_path, events, [], [], metadata)
+    stored = json.loads((tmp_path / 'session_metadata.json').read_text())
+    assert stored['display_refresh_differs_from_xrandr'] is True
+    assert stored['display_refresh_hz'] == 59.5
+    assert stored['audio_clock_offset_check_seconds'] == 0.001
+    assert stored['seed'] == 7
+    assert stored['window_size'] == [1920, 1080]
+    log = (tmp_path / 'event_log.csv').read_text()
+    assert '1.25' in log
+    assert 'True' in log
+
+
+def test_participant_metadata_write_accepts_numpy(tmp_path, monkeypatch):
+    np = pytest.importorskip('numpy')
+    monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
+    monkeypatch.delenv('AV_STUDY_SERVER_DATA_PATH', raising=False)
+    monkeypatch.setattr(participant_setup, 'config_snapshot', lambda: {
+        'flag': np.bool_(False),
+        'n': np.int64(2),
+        'hz': np.float64(60.5),
+        'size': np.array([1920, 1080]),
+    })
+    timeline_path, _snapshot = participant_setup.create_participant_plan(tmp_path, 'participant_01')
+    stored = json.loads((timeline_path.parent / 'participant_metadata.json').read_text())
+    assert stored['config']['flag'] is False
+    assert stored['config']['n'] == 2
+    assert stored['config']['hz'] == 60.5
+    assert stored['config']['size'] == [1920, 1080]

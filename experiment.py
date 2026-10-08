@@ -114,7 +114,7 @@ def run(args):
         ) from exc
 
     session_clock = core.Clock()
-    clock_offset = (
+    clock_offset = float(
         ptb_to_session(ptb.GetSecs(), session_clock.getLastResetTime()) - session_clock.getTime()
     )
     if abs(clock_offset) > 0.005:
@@ -171,14 +171,17 @@ def run(args):
         )
         if not measured_refresh_hz:
             raise RuntimeError('Could not measure a stable display refresh rate with getActualFrameRate().')
+        measured_refresh_hz = float(measured_refresh_hz)
         frame_period = 1.0 / measured_refresh_hz
         metadata.update({
             'window_size': list(window_size),
             'display_refresh_hz': measured_refresh_hz,
             'display_refresh_rate_source': 'window.getActualFrameRate (~0.5 s of flips)',
-            'visual_onset_flag_threshold_seconds': config.VISUAL_ONSET_FLAG_FRAMES * frame_period,
-            'long_frame_threshold_seconds': 1.2 * frame_period,
-            'display_refresh_differs_from_xrandr': abs(measured_refresh_hz - display_refresh_hz) > 1.0,
+            'visual_onset_flag_threshold_seconds': float(config.VISUAL_ONSET_FLAG_FRAMES * frame_period),
+            'long_frame_threshold_seconds': float(1.2 * frame_period),
+            'display_refresh_differs_from_xrandr': bool(
+                abs(measured_refresh_hz - display_refresh_hz) > 1.0
+            ),
         })
         test_tone = sound.Sound(
             440, secs=0.8, stereo=True, speaker=shared_speaker, autoLog=False,

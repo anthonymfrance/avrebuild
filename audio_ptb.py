@@ -28,12 +28,18 @@ def backend_start_time(sound_obj, requested_ptb):
         return None
     if not isinstance(status, dict):
         return None
-    value = status.get('StartTime')
-    if not isinstance(value, (int, float)) or value <= 0:
+    raw = status.get('StartTime')
+    if isinstance(raw, (str, bytes, bool)):
         return None
-    if value < requested_ptb - START_TOLERANCE:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
         return None
-    return float(value)
+    if value <= 0:
+        return None
+    if value < float(requested_ptb) - START_TOLERANCE:
+        return None
+    return value
 
 
 def assign_sound_slots(sound_events, pool_size):
@@ -53,7 +59,7 @@ def assign_sound_slots(sound_events, pool_size):
 
 def ptb_to_session(ptb_time, session_reset_ptb):
     """Convert a PTB GetSecs time to the session clock (Clock.getLastResetTime base)."""
-    return ptb_time - session_reset_ptb
+    return float(ptb_time) - float(session_reset_ptb)
 
 
 def resolve_trial_audio(trial_events, fade_in, complete=True):
@@ -85,7 +91,7 @@ def resolve_trial_audio(trial_events, fade_in, complete=True):
         visual = visuals.get(sound['source_event_id'])
         if visual is None or visual['_actual_onset'] is None:
             continue
-        realized = visual['_actual_onset'] + fade_in - audio_onset
+        realized = float(visual['_actual_onset']) + float(fade_in) - audio_onset
         visual['realized_soa_seconds'] = realized
         visual['soa_error_seconds'] = realized - float(sound['soa'])
     return requested_only
