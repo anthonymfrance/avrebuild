@@ -71,7 +71,9 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
     `session_metadata.json` only if it has the same `started_utc` and `seed` (or is absent).
     Otherwise it is preserved and the sync status becomes `collision`.
 17. **Operator warnings** (`caa16ce`). `session_io.operator_warn(pid_dir, message)` prints and
-    appends to `data/<pid>/operator_warnings.txt`. Every operator warning goes through it. The
+    appends to `data/<pid>/operator_warnings.txt`. It is used only for anomalies: refresh-rate
+    mismatch, missing sound-check audio start time, and server sync `partial`, `failed`, or
+    `collision`. Local-only storage stays a plain print (status `local_only`). The
     refresh-mismatch and sound-check warnings are emitted right after plan creation, because the
     participant folder does not exist before then. After the runner exits, preflight.sh shows a
     non-empty warnings file in a zenity dialog and keeps the runner log

@@ -52,6 +52,30 @@ def test_operator_warn_prints_and_appends(tmp_path, capsys):
     assert capsys.readouterr().out == 'first warning\nsecond warning\n'
 
 
+def test_local_only_sync_is_not_an_operator_warning(tmp_path, monkeypatch):
+    monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
+    monkeypatch.delenv('AV_STUDY_SERVER_DATA_PATH', raising=False)
+    session_dir = tmp_path / 'data' / 'participant_01' / 'session_01'
+    session_dir.mkdir(parents=True)
+    metadata = {}
+    session_io.sync_participant(tmp_path, 'participant_01', session_dir, metadata, lambda: None)
+    assert metadata['server_sync']['status'] == 'local_only'
+    assert not (tmp_path / 'data' / 'participant_01' / 'operator_warnings.txt').exists()
+
+
+def test_collision_sync_is_an_operator_warning(tmp_path, monkeypatch):
+    session_dir = tmp_path / 'data' / 'participant_01' / 'session_01'
+    session_dir.mkdir(parents=True)
+    monkeypatch.setattr(session_io, 'copy_participant_data_to_server', lambda root, pid: {
+        'status': 'collision', 'destination': str(tmp_path / 'server'),
+        'verified_files': [], 'failures': [],
+    })
+    metadata = {}
+    session_io.sync_participant(tmp_path, 'participant_01', session_dir, metadata, lambda: None)
+    warnings = (tmp_path / 'data' / 'participant_01' / 'operator_warnings.txt').read_text()
+    assert 'collision' in warnings
+
+
 def test_server_participant_collision_preserves_destination_and_local(tmp_path):
     local = tmp_path / 'local' / 'participant_01'
     server = tmp_path / 'server' / 'participant_01'

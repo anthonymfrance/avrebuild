@@ -370,6 +370,6 @@ def sync_participant(root, participant_id, session_dir, metadata, save):
     if sync_result['status'] == 'copied':
         print(f"✅ Full participant folder copied and verified on server: {sync_result['destination']}")
     elif sync_result['status'] == 'local_only':
-        operator_warn(pid_dir, f"⚠️ Participant data remains local at {session_dir}; no server was mounted at preflight.")
+        print(f"Participant data remains local at {session_dir}; no server was mounted at preflight.")
     else:
         operator_warn(pid_dir, f"⚠️ Server copy {sync_result['status']}; local data remains at {session_dir}.")
