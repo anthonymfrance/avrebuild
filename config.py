@@ -72,7 +72,8 @@ RESPONSE_WINDOW = 1.5
 # --- Background ---
 BG_NOISE_OPACITY = 0.3
 BG_SOURCE_FILE = 'otherblobs.png'
-BG_UPDATE_RATE = 0.4
+BG_UPDATE_RATE = 0.2
+BG_SEED = 0xA1D0B04A
 
 # --- Images ---
 IMAGE_SIZE = (200, 200)

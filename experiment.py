@@ -258,11 +258,11 @@ def run(args):
             'participant_metadata_file': participant_metadata_path.name,
             'participant_metadata_sha256': sha256_file(participant_metadata_path),
             'preflight_report_file': 'preflight_report.txt',
-            'background_rng': "numpy default_rng(derive_rng(seed, 'background').getrandbits(128))",
+            'background_rng': f"numpy default_rng({config.BG_SEED})",
         })
         backgrounds = make_backgrounds(
             window, visual, np, Image,
-            np.random.default_rng(derive_rng(plan_snapshot['seed'], 'background').getrandbits(128)),
+            np.random.default_rng(config.BG_SEED),
         )
         image_cache = {
             stimulus: visual.ImageStim(
