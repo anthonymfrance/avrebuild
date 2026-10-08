@@ -35,7 +35,7 @@ def convert_default_clock(clock, default_time, logging):
 
 def run_trial(
     *, window, kb, session_clock, logging, block, trial, trial_events, trial_keys,
-    sound_cache, image_cache, backgrounds, fixation, overlay, frame_period, metadata,
+    sound_pool, image_cache, backgrounds, fixation, overlay, frame_period, metadata,
 ):
     """Run one trial on prepared copies of its timeline rows.
 
@@ -64,7 +64,7 @@ def run_trial(
             '_audio_scheduled': False, '_audio_obj': None,
         })
         if row['event_type'] == 'sound':
-            row['_audio_obj'] = sound_cache[row['stimulus']]
+            row['_audio_obj'] = sound_pool[row['stimulus']][row['sound_slot']]
     frame_intervals = []
     last_flip = None
     fixation_green_until = -1.0
@@ -99,7 +99,7 @@ def run_trial(
             if row['event_type'] == 'sound' and not row['_audio_scheduled']:
                 sound_target = row['_planned_runtime']
                 lead = sound_target - next_flip_session
-                if lead <= 0.5:
+                if lead <= config.SOUND_SCHEDULE_LEAD:
                     # If a late frame consumed the requested lead, schedule
                     # at the next available PTB time and retain the deviation.
                     actual_request_session = max(sound_target, next_flip_session + 0.03)

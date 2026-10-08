@@ -59,6 +59,8 @@ AUDIO_DEVICE = 'default'
 AUDIO_SPEAKER = 'default'
 SOUND_DUR = 1.0
 MIN_AUDIO_GAP = 0.2
+SOUND_POOL_SIZE = 2          # Sound objects per stimulus, used round-robin
+SOUND_SCHEDULE_LEAD = 0.5    # seconds before planned onset that play(when=...) is called
 
 # --- Timing flags ---
 VISUAL_ONSET_FLAG_FRAMES = 1.0          # flag visual onsets later/earlier than this many frame periods

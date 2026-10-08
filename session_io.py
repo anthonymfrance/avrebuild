@@ -249,7 +249,7 @@ def save_session(session_dir, events, keys, trials, metadata):
         'actual_session_time_seconds',
         'actual_minus_planned_seconds',
         'audio_requested_session_time', 'audio_requested_ptb_time', 'audio_backend_start_ptb_time',
-        'audio_backend_start_session_time', 'audio_timing_source',
+        'audio_backend_start_session_time', 'audio_timing_source', 'sound_slot',
         'realized_soa_seconds', 'soa_error_seconds',
         'response_status', 'response_correct', 'response_key', 'response_session_time',
         'rt_from_actual_onset', 'rt_from_planned_onset', 'timing_flags',

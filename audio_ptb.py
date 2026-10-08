@@ -36,6 +36,21 @@ def backend_start_time(sound_obj, requested_ptb):
     return float(value)
 
 
+def assign_sound_slots(sound_events, pool_size):
+    """Return {event_id: pool slot}, round-robin per stimulus in planned-onset order.
+
+    Scheduling a Sound that is still playing restarts it, so consecutive plays
+    of one stimulus must use different pool objects.
+    """
+    plays = {}
+    slots = {}
+    for event in sorted(sound_events, key=lambda row: float(row['global_onset'])):
+        count = plays.get(event['stimulus'], 0)
+        slots[event['event_id']] = count % pool_size
+        plays[event['stimulus']] = count + 1
+    return slots
+
+
 def ptb_to_session(ptb_time, session_reset_ptb):
     """Convert a PTB GetSecs time to the session clock (Clock.getLastResetTime base)."""
     return ptb_time - session_reset_ptb

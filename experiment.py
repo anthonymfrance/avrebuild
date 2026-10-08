@@ -20,7 +20,7 @@ from participant_setup import create_participant_plan, derive_rng
 import screens
 from session_io import load_timeline, save_session, sha256_file, sync_participant
 from audio_ptb import (
-    AUDIO_START_SOURCE, backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio,
+    AUDIO_START_SOURCE, assign_sound_slots, backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio,
 )
 from scoring import finalize_targets, session_false_alarms, trial_feedback
 from trial_runner import run_trial
@@ -267,15 +267,22 @@ def run(args):
             )
             for stimulus, path in assets['images'].items()
         }
-        sound_cache = {
-            stimulus: sound.Sound(
-                str(path), speaker=shared_speaker,
-                stereo=True, preBuffer=-1, autoLog=False,
-            )
+        sound_pool = {
+            stimulus: [
+                sound.Sound(
+                    str(path), speaker=shared_speaker,
+                    stereo=True, preBuffer=-1, autoLog=False,
+                )
+                for _ in range(config.SOUND_POOL_SIZE)
+            ]
             for stimulus, path in assets['sounds'].items()
         }
-        if not sound_cache:
+        if not sound_pool:
             raise RuntimeError('Timeline has no sounds.')
+        sound_rows = [row for row in rows if row['event_type'] == 'sound']
+        slots = assign_sound_slots(sound_rows, config.SOUND_POOL_SIZE)
+        for row in sound_rows:
+            row['sound_slot'] = slots[row['event_id']]
 
         debug_lines, pt_soa_by_block = screens.plan_summary(args.pid, rows, block_order, trials_by_block)
         debug_overlay_enabled = os.environ.get('AV_STUDY_DEBUG_OVERLAY', 'false').lower() == 'true'
@@ -337,7 +344,7 @@ def run(args):
                 trial_events, trial_keys, trial_row, aborted = run_trial(
                     window=window, kb=kb, session_clock=session_clock, logging=logging,
                     block=block, trial=trial, trial_events=trial_events, trial_keys=trial_keys,
-                    sound_cache=sound_cache, image_cache=image_cache, backgrounds=backgrounds,
+                    sound_pool=sound_pool, image_cache=image_cache, backgrounds=backgrounds,
                     fixation=fixation, frame_period=frame_period, metadata=metadata,
                     overlay=(debug_overlay, (
                         f'{args.pid} | {BLOCK_LABELS[block]} | trial {trial}\n'
@@ -434,7 +441,9 @@ def run(args):
         Path(report_source).unlink(missing_ok=True)
         if window is not None:
             window.close()
-        sounds_to_close = list(locals().get('sound_cache', {}).values())
+        sounds_to_close = [
+            sound_obj for pool in locals().get('sound_pool', {}).values() for sound_obj in pool
+        ]
         if locals().get('test_tone') is not None:
             sounds_to_close.append(test_tone)
         for sound_obj in sounds_to_close:
