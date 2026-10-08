@@ -56,9 +56,9 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
 13. **Dead code** (`9a57870`). Removed `_solve_trial`, `stats['last_failure']`,
     `read_slotting_key`, `read_stimulus_assignment`, and unused imports and variables.
 14. **Split `run()`** (`e5e1147` session_io, `5161545` audio_ptb, `22be35d` screens, `4d68fd6`
-    trial_runner). No behavior change. A simulated-PsychoPy smoke run (abort, complete, and an
-    injected mid-trial crash) produced identical `event_log.csv` and metadata before and after
-    each commit.
+    trial_runner). Intended to change no behavior. No automated test covers
+    experiment.py/trial_runner.py/screens.py (PsychoPy cannot be imported in tests). Behavior
+    preservation of the split is unverified until the pilot.
 15. **Sound pool** (`51f33e0`). Each stimulus has `SOUND_POOL_SIZE = 2` `Sound` objects, built
     before the session. `audio_ptb.assign_sound_slots` assigns them round-robin per stimulus in
     planned-onset order, so a play is never scheduled on an object that is still sounding. The
@@ -107,6 +107,8 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
   post-run warnings dialog.
 - In a real `event_log.csv`, consecutive plays of the same stimulus use different `sound_slot`
   values, and every sound row has an audio start time.
+- Item 14 split: run one normal full session and one session aborted with ESC mid-trial. Compare
+  the `event_log.csv` columns and the `trial_complete` values against this changelog.
 
 ## Known issues (not fixed, need a decision)
 - None.
