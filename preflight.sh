@@ -147,6 +147,8 @@ while IFS= read -r connected_line; do
   [[ -n "$connected_line" ]] && add_row 'ℹ️' 'Connected output' "$connected_line"
 done < <(sed -n 's/^connected=//p' <<< "$display_summary")
 expected_mode="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print("%dx%d" % tuple(config.WINDOW_SIZE))')" || expected_mode=''
+expected_refresh="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print(config.REQUIRED_REFRESH_HZ)')" || expected_refresh=''
+refresh_tol="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print(config.REFRESH_TOLERANCE_HZ)')" || refresh_tol=''
 if [[ -z "$active_mode" ]]; then
   add_row '❌' 'Experiment display mode' 'Could not read the active mode of a connected output with xrandr'
   fatal=1
@@ -160,7 +162,14 @@ else
   add_row '✅' 'Experiment display mode' "$display_output at $active_mode (matches config.WINDOW_SIZE)"
 fi
 
-if [[ -n "$display_refresh_hz" ]]; then
+if [[ -n "$display_refresh_hz" && -n "$expected_refresh" && -n "$refresh_tol" ]]; then
+  if awk -v hz="$display_refresh_hz" -v expected="$expected_refresh" -v tolerance="$refresh_tol" 'BEGIN { exit (hz >= expected - tolerance && hz <= expected + tolerance) ? 0 : 1 }'; then
+    add_row '✅' 'Required refresh rate' "${display_refresh_hz} Hz (within ${refresh_tol} Hz of required ${expected_refresh} Hz)"
+  else
+    add_row '❌' 'Required refresh rate' "${display_refresh_hz} Hz is outside ${refresh_tol} Hz of required ${expected_refresh} Hz"
+    fatal=1
+  fi
+elif [[ -n "$display_refresh_hz" ]]; then
   add_row '✅' 'Reported refresh rate' "${display_refresh_hz} Hz (active xrandr mode)"
 else
   add_row '❌' 'Reported refresh rate' 'Could not read a refresh frequency from the active xrandr mode'
