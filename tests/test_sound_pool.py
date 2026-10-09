@@ -3,7 +3,6 @@ from audio_ptb import assign_sound_slots
 from participant_setup import build_plan
 
 SEEDS = range(50)
-MARGIN = 0.05
 
 
 def plan_sounds(seed):
@@ -14,27 +13,37 @@ def plan_sounds(seed):
 PLANS = [plan_sounds(seed) for seed in SEEDS]
 
 
-def restart_violations(sounds, slots):
-    """Plays scheduled while the previous play on the same Sound object is still sounding."""
-    last_end = {}
+def late_request_violations(sounds, slots):
+    """Plays whose play(when=...) request cannot keep the planned lead.
+
+    The trial runner requests each play as early as its pooled Sound object is
+    free: the previous play on that object must have ended plus
+    config.SOUND_POOL_RESTART_MARGIN. The pool assignment must keep every
+    request at least config.SOUND_REQUEST_LEAD ahead of its onset, so a frame
+    stall cannot push it into audio_schedule_late territory.
+    """
+    free_at = {}
     violations = []
     for event in sorted(sounds, key=lambda row: row['global_onset']):
         key = (event['stimulus'], slots[event['event_id']])
-        scheduled_at = event['global_onset'] - config.SOUND_SCHEDULE_LEAD
-        if key in last_end and scheduled_at - last_end[key] < MARGIN:
+        onset = float(event['global_onset'])
+        if free_at.get(key, float('-inf')) + config.SOUND_REQUEST_LEAD > onset:
             violations.append(event['event_id'])
-        last_end[key] = event['global_onset'] + config.SOUND_DUR
+        free_at[key] = onset + config.SOUND_DUR + config.SOUND_POOL_RESTART_MARGIN
     return violations
 
 
-def test_pool_never_restarts_a_playing_sound():
+def test_pool_keeps_every_request_ahead_of_its_onset():
     for sounds in PLANS:
         slots = assign_sound_slots(sounds, config.SOUND_POOL_SIZE)
-        assert restart_violations(sounds, slots) == []
+        assert late_request_violations(sounds, slots) == []
 
 
-def test_single_sound_per_stimulus_restarts_on_some_plan():
-    assert any(restart_violations(sounds, assign_sound_slots(sounds, 1)) for sounds in PLANS)
+def test_single_sound_per_stimulus_shrinks_the_lead_on_some_plan():
+    assert any(
+        late_request_violations(sounds, assign_sound_slots(sounds, 1))
+        for sounds in PLANS
+    )
 
 
 def mutated_assign(sounds, pool_size, slot_of, order_key):
@@ -54,7 +63,8 @@ def test_round_robin_mutations_are_caught():
     ]
     for slot_of, order_key in mutants:
         assert any(
-            restart_violations(sounds, mutated_assign(sounds, config.SOUND_POOL_SIZE, slot_of, order_key))
+            late_request_violations(
+                sounds, mutated_assign(sounds, config.SOUND_POOL_SIZE, slot_of, order_key))
             for sounds in PLANS
         )
 

@@ -345,15 +345,28 @@ def save_session(session_dir, events, keys, trials, metadata):
     os.replace(temp_path, session_dir / 'session_metadata.json')
 
 
-def copy_participant_data_to_server(root, participant_id):
-    """Copy the local participant folder to the configured share and verify files."""
+def server_data_directory():
+    """Resolve the same server data root for allocation and backup."""
     server_root = os.environ.get('AV_STUDY_SERVER_ROOT')
     data_path = os.environ.get('AV_STUDY_SERVER_DATA_PATH')
-    if not server_root or not data_path:
+    if data_path:
+        path = Path(data_path)
+        if path.is_absolute():
+            return path
+        if server_root:
+            return Path(server_root) / path
+        return None  # A relative share path needs its mount root.
+    return Path(server_root) / 'data' if server_root else None
+
+
+def copy_participant_data_to_server(root, participant_id):
+    """Copy the local participant folder to the configured share and verify files."""
+    server_data = server_data_directory()
+    if server_data is None:
         return {'status': 'local_only', 'reason': 'server was not mounted at preflight'}
 
     local_participant_dir = Path(root) / 'data' / participant_id
-    destination = Path(server_root) / data_path / participant_id
+    destination = server_data / participant_id
     result = copy_participant_tree(local_participant_dir, destination)
     if result['status'] == 'collision':
         operator_warn(local_participant_dir, f"🚨 SERVER DATA COLLISION for {participant_id}: {result.get('reason', result.get('failures'))}")

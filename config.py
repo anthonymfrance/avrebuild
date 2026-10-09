@@ -4,7 +4,7 @@ Derived constants (computed from constants above them) are allowed so every
 module shares one definition."""
 
 # --- Stimulus split ---
-TRIALS_PER_PT = 15   # trials in which each PT is the active PT (per block)
+TRIALS_PER_PT = 2   # trials in which each PT is the active PT (per block)
 PT_COUNT_PER_BLOCK = 2
 PD_COUNT_PER_BLOCK = 2
 
@@ -18,7 +18,7 @@ PD_SOA_MAX = 1.5
 TRIAL_PT_RANGE = (2, 3)
 TRIAL_NPT_RANGE = (3, 8)
 TRIAL_PD_RANGE = (3, 5)
-TRIAL_NPD_RANGE = (11, 17)
+TRIAL_NPD_RANGE = (20, 28) #used to be 11 - 15
 MAX_PLACEMENT_ATTEMPTS = 250
 MAX_TIMELINE_ATTEMPTS = 3
 
@@ -60,14 +60,16 @@ AUDIO_SPEAKER = 'default'
 SOUND_DUR = 1.0
 MIN_AUDIO_GAP = 0.2
 SOUND_POOL_SIZE = 2          # Sound objects per stimulus, used round-robin
-SOUND_SCHEDULE_LEAD = 0.5    # seconds before planned onset that play(when=...) is called
+SOUND_POOL_RESTART_MARGIN = 0.05  # play() must land this long after the previous play on a pooled object ended
+SOUND_REQUEST_MIN_LEAD = 0.01     # seconds of future margin when a play request is already late
+SOUND_REQUEST_LEAD = 0.5          # pool sizing contract: every play must be requestable this far ahead of its onset (tests/test_sound_pool.py)
 
 # --- Timing flags ---
 VISUAL_ONSET_FLAG_FRAMES = 1.0          # flag visual onsets later/earlier than this many frame periods
 AUDIO_ONSET_FLAG_THRESHOLD = 0.005      # seconds; flag reported audio start deviations above this
 
 # --- Responses ---
-RESPONSE_WINDOW = 1.5
+RESPONSE_WINDOW = 0.9 #used to be 1.5
 
 # --- Background ---
 BG_NOISE_OPACITY = 0.3

@@ -71,6 +71,72 @@ def run_trial(
     frame_count = 0
     trial_end_target = trial_start + TRIAL_DURATION
 
+    # Audio is requested with absolute PTB start times as early as each pooled
+    # Sound object is free (the previous play on the object must have ended),
+    # so a frame stall can never delay a request that is already due.
+    sound_rows = sorted(
+        (row for row in trial_events if row['event_type'] == 'sound'),
+        key=lambda row: row['_planned_runtime'],
+    )
+    slot_free_at = {}
+
+    def capture_backend_start(row):
+        if bool(row['audio_backend_start_ptb_time']):
+            return
+        reported_ptb = backend_start_time(
+            row['_audio_obj'], float(row['audio_requested_ptb_time']),
+        )
+        if reported_ptb is None:
+            return
+        metadata['audio_start_source'] = AUDIO_START_SOURCE
+        row['audio_backend_start_ptb_time'] = reported_ptb
+        row['audio_backend_start_session_time'] = ptb_to_session(
+            reported_ptb, session_clock.getLastResetTime(),
+        )
+        row['actual_onset'] = row['audio_backend_start_session_time']
+        row['onset_deviation'] = float(
+            row['audio_backend_start_session_time'] - row['_planned_runtime']
+        )
+        if bool(abs(row['onset_deviation']) > config.AUDIO_ONSET_FLAG_THRESHOLD):
+            row['timing_flags'] = ';'.join(filter(None, [
+                row['timing_flags'], 'audio_playback_deviation',
+            ]))
+        row['audio_timing_source'] = 'PTB backend-reported startTime'
+
+    def schedule_sound(row, now):
+        sound_target = row['_planned_runtime']
+        request_session = sound_target
+        if bool(request_session <= now + config.SOUND_REQUEST_MIN_LEAD):
+            # A stall or the pooled object consumed the request window: ask
+            # for the earliest time PTB can still honor and keep the deviation.
+            request_session = now + config.SOUND_REQUEST_MIN_LEAD
+            row['timing_flags'] = ';'.join(filter(None, [
+                row['timing_flags'], 'audio_schedule_late',
+            ]))
+        # Symmetric with ptb_to_session: reported start times are converted
+        # back with the same session-clock reset.
+        requested_ptb = request_session + float(session_clock.getLastResetTime())
+        row['_audio_obj'].play(when=requested_ptb)
+        row['_audio_scheduled'] = True
+        row['audio_requested_session_time'] = request_session
+        row['audio_requested_ptb_time'] = requested_ptb
+        row['audio_timing_source'] = 'PTB scheduled playback'
+        slot_free_at[(row['stimulus'], row['sound_slot'])] = (
+            request_session + config.SOUND_DUR + config.SOUND_POOL_RESTART_MARGIN
+        )
+        capture_backend_start(row)
+
+    def issue_due_sound_requests(now):
+        for row in sound_rows:
+            if bool(row['_audio_scheduled']):
+                continue
+            key = (row['stimulus'], row['sound_slot'])
+            if bool(now < slot_free_at.get(key, float('-inf'))):
+                continue
+            schedule_sound(row, now)
+
+    issue_due_sound_requests(trial_start)
+
     while True:
         response_end = max(
             (event['_actual_onset'] + config.RESPONSE_WINDOW
@@ -82,7 +148,12 @@ def run_trial(
             break
         now = float(session_clock.getTime())
         next_flip_session = float(window.getFutureFlipTime(clock=session_clock))
-        next_flip_ptb = float(window.getFutureFlipTime(clock='ptb'))
+        # Poll backend start reports before issuing new requests so a pooled
+        # object reused for a later play cannot hide an unreported start time.
+        for row in sound_rows:
+            if bool(row['_audio_scheduled']):
+                capture_backend_start(row)
+        issue_due_sound_requests(now)
 
         backgrounds[int(max(0.0, now - trial_start) / config.BG_UPDATE_RATE) % len(backgrounds)].draw()
         fixation.lineColor = (
@@ -96,29 +167,26 @@ def run_trial(
 
         visual_onsets_this_flip = []
         for row in trial_events:
-            if row['event_type'] == 'sound' and not row['_audio_scheduled']:
-                sound_target = row['_planned_runtime']
-                lead = sound_target - next_flip_session
-                if bool(lead <= config.SOUND_SCHEDULE_LEAD):
-                    # If a late frame consumed the requested lead, schedule
-                    # at the next available PTB time and retain the deviation.
-                    actual_request_session = max(sound_target, next_flip_session + 0.03)
-                    requested_ptb = next_flip_ptb + (actual_request_session - next_flip_session)
-                    row['_audio_obj'].play(when=requested_ptb)
-                    row['_audio_scheduled'] = True
-                    row['audio_requested_session_time'] = actual_request_session
-                    row['audio_requested_ptb_time'] = requested_ptb
-                    row['audio_timing_source'] = 'PTB scheduled playback'
-                    if bool(actual_request_session > sound_target + 1e-6):
-                        row['timing_flags'] = 'audio_schedule_late'
-
             if row['event_type'] != 'visual' or row['response_status'] == 'not_presented':
                 continue
             onset = row['_actual_onset']
             planned = row['_planned_runtime']
-            if onset is None and bool(next_flip_session >= planned):
-                time_from_onset = max(0.0, next_flip_session - planned)
-                if bool(time_from_onset >= VISUAL_DURATION):
+            if onset is None:
+                # Onset on the frame nearest the planned time instead of the
+                # first frame at/after it. The upcoming flip is that frame when
+                # planned is no later than the midpoint between it and the
+                # following flip (computed from the measured previous flip, so
+                # a biased flip predictor cannot shift onsets), or when the
+                # predictor already places the flip within half a frame of
+                # planned (recovery after a stall).
+                nearest_frame_due = (
+                    last_flip is not None
+                    and bool(planned <= last_flip + 1.5 * frame_period)
+                )
+                if not (nearest_frame_due or bool(
+                        next_flip_session >= planned - frame_period / 2)):
+                    continue
+                if bool(next_flip_session - planned >= VISUAL_DURATION):
                     # A stall skipped this visual's entire display period.
                     row['response_status'] = 'not_presented'
                     row['timing_flags'] = ';'.join(filter(None, [
@@ -126,16 +194,14 @@ def run_trial(
                     ]))
                     continue
                 visual_onsets_this_flip.append(row)
-            elif onset is not None:
-                time_from_onset = next_flip_session - onset
+                # The fade ramp is anchored to the recorded onset frame.
+                time_from_onset = 0.0
             else:
-                continue
+                time_from_onset = next_flip_session - onset
             if bool(0 <= time_from_onset < VISUAL_DURATION):
                 stim = image_cache[row['stimulus']]
                 stim.pos = (float(row['x']), float(row['y']))
-                stim.opacity = (
-                    0.02 if onset is None else planned_image_alpha(time_from_onset)
-                )
+                stim.opacity = planned_image_alpha(time_from_onset)
                 stim.draw()
 
         flip_default = window.flip()
@@ -171,27 +237,6 @@ def run_trial(
                                     target['timing_flags'],
                                     'actual_response_windows_overlap',
                                 ]))
-
-        for row in trial_events:
-            if row['event_type'] == 'sound' and row['_audio_scheduled'] and not row['audio_backend_start_ptb_time']:
-                reported_ptb = backend_start_time(
-                    row['_audio_obj'], float(row['audio_requested_ptb_time']),
-                )
-                if reported_ptb is not None:
-                    metadata['audio_start_source'] = AUDIO_START_SOURCE
-                    row['audio_backend_start_ptb_time'] = reported_ptb
-                    row['audio_backend_start_session_time'] = ptb_to_session(
-                        reported_ptb, session_clock.getLastResetTime(),
-                    )
-                    row['actual_onset'] = row['audio_backend_start_session_time']
-                    row['onset_deviation'] = float(
-                        row['audio_backend_start_session_time'] - row['_planned_runtime']
-                    )
-                    if bool(abs(row['onset_deviation']) > config.AUDIO_ONSET_FLAG_THRESHOLD):
-                        row['timing_flags'] = ';'.join(filter(None, [
-                            row['timing_flags'], 'audio_playback_deviation',
-                        ]))
-                    row['audio_timing_source'] = 'PTB backend-reported startTime'
 
         presses = kb.getKeys(waitRelease=False, clear=True)
         for press in presses:
@@ -235,6 +280,15 @@ def run_trial(
                     and bool(float(session_clock.getTime()) > event['_actual_onset'] + config.RESPONSE_WINDOW)):
                 event['response_status'] = 'miss'
                 event['response_correct'] = False
+    if aborted:
+        # Sounds are requested well ahead of their onsets, so an aborted trial
+        # can hold plays that have not started yet; cancel them so they cannot
+        # sound during the screens that follow.
+        for row in sound_rows:
+            if (bool(row['_audio_scheduled'])
+                    and not row['audio_backend_start_session_time']
+                    and bool(float(row['audio_requested_session_time']) > float(session_clock.getTime()))):
+                row['_audio_obj'].stop()
     trial_complete = not aborted
     finalize_targets(trial_targets, trial_complete)
     audio_requested_only = resolve_trial_audio(trial_events, config.FADE_IN_DUR, trial_complete)

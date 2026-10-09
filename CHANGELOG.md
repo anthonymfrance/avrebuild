@@ -116,5 +116,31 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
 - Item 14 split: run one normal full session and one session aborted with ESC mid-trial. Compare
   the `event_log.csv` columns and the `trial_complete` values against this changelog.
 
+## Timing optimization pass (planned vs actual onset alignment)
+
+Baseline across 9 pilot sessions (1604 visuals): visual `onset_deviation` mean +8.8 ms, median
++7.5 ms (frame quantization plus an early-biased flip predictor); sound deviation 0.00 ms;
+`soa_error_seconds` inherited the visual bias (mean +8.3 ms).
+
+- Visual onsets now snap to the frame **nearest** the planned time instead of the first frame at
+  or after it. The decision uses the measured previous flip (`planned <= last_flip + 1.5 *
+  frame_period`) with a `getFutureFlipTime` fallback for stall recovery, so a biased predictor
+  cannot shift onsets (tests: `tests/test_trial_runner.py`). Expected: deviation within ±½ frame,
+  zero mean.
+- The fade ramp is anchored to the recorded onset frame, so `realized_soa_seconds` shares its
+  reference with the displayed opacity. Opacity stays deterministic from onset (metadata
+  `visual_fade_profile`), not logged per frame.
+- All sounds of a trial are requested at trial start with absolute PTB times
+  (`play(when=...)`), and a pooled object is re-requested only after its previous play ended
+  plus `config.SOUND_POOL_RESTART_MARGIN`. A late request uses
+  `config.SOUND_REQUEST_MIN_LEAD = 0.01` (was a 0.03 s pad inside a 0.5 s scheduling window)
+  and keeps the `audio_schedule_late` flag. `SOUND_SCHEDULE_LEAD` is replaced by
+  `SOUND_REQUEST_LEAD`, the pool sizing contract checked in `tests/test_sound_pool.py`.
+- An aborted trial cancels plays that were requested but not started, so early requests cannot
+  sound during later screens.
+- Verify in pilot: visual `onset_deviation` mean near 0 (was +8.8 ms), exact
+  `audio_backend_start_*` values, zero-mean `soa_error_seconds`, and no `audio_schedule_late`
+  flags in a clean session.
+
 ## Known issues (not fixed, need a decision)
 - None.

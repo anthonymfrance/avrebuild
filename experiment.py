@@ -141,6 +141,15 @@ def run(args):
         'audio_latency_mode': config.AUDIO_LATENCY_MODE,
         'audio_device_profile': speaker_profile,
         'audio_timing_note': 'PTB software-reported playback timing; no physical loopback measurement.',
+        'audio_scheduling': 'play(when=...) requested as early as each pooled Sound object is free; absolute PTB start times',
+        'visual_fade_profile': {
+            'fade_in_seconds': config.FADE_IN_DUR,
+            'peak_hold_seconds': config.PEAK_HOLD_DUR,
+            'fade_out_seconds': config.FADE_OUT_DUR,
+            'anchor': 'actual_onset',
+            'first_frame_opacity': 0.02,
+            'note': 'opacity is deterministic from time since recorded onset; see trial_runner.planned_image_alpha',
+        },
         'audio_start_source': None,
         'audio_clock_conversion': 'session_time = PTB time - session_clock.getLastResetTime()',
         'audio_clock_offset_check_seconds': clock_offset,
@@ -381,16 +390,16 @@ def run(args):
                     break
             if not aborted and block_index < len(block_order) - 1:
                 rest_start_time = session_clock.getTime()
-                break_skipped = screens.rest_break(window, kb, visual, session_clock)
+                break_outcome = screens.rest_break(window, kb, visual, session_clock)
                 break_duration = session_clock.getTime() - rest_start_time
                 metadata['break_skip_info'] = {
                     'break_number': block_index + 1,
                     'break_duration_seconds': break_duration,
-                    'break_was_skipped': break_skipped,
+                    'break_was_skipped': break_outcome == 'skipped',
+                    'break_outcome': break_outcome,
                     'break_duration_seconds_full': 120,  # 2 minutes = 120 seconds
                 }
-                if not break_skipped:
-                    aborted = not break_skipped
+                aborted = break_outcome == 'aborted'
             if aborted:
                 break
 

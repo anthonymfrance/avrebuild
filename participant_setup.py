@@ -14,7 +14,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import config
-from session_io import config_snapshot, json_default, sha256_file
+from session_io import config_snapshot, json_default, server_data_directory, sha256_file
 from slotting_key import build_slotting_key, write_slotting_key
 from stimulus_split import split_pool
 from timeline_key import (
@@ -81,12 +81,9 @@ def next_participant_id(data_dir: Path) -> str:
 def data_directories(data_dir):
     """Return local and configured server data roots, without duplicates."""
     data_dirs = [Path(data_dir)]
-    server_data = os.environ.get('AV_STUDY_SERVER_DATA_PATH')
-    server_root = os.environ.get('AV_STUDY_SERVER_ROOT')
-    if server_data:
-        data_dirs.append(Path(server_data))
-    elif server_root:
-        data_dirs.append(Path(server_root) / 'data')
+    server_data = server_data_directory()
+    if server_data is not None:
+        data_dirs.append(server_data)
     unique = []
     for root in data_dirs:
         if root not in unique:

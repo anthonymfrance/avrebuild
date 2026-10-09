@@ -8,6 +8,53 @@ from participant_setup import PlanGenerationError, next_participant_id, planned_
 from timeline_key import PlacementFailure
 
 
+@pytest.mark.parametrize('path_kind', ['relative', 'absolute', 'default'])
+def test_server_only_id_and_completion_use_backup_root(tmp_path, monkeypatch, path_kind):
+    import session_io
+
+    local = tmp_path / 'local' / 'data'
+    server = tmp_path / 'share'
+    monkeypatch.setenv('AV_STUDY_SERVER_ROOT', str(server))
+    if path_kind == 'default':
+        monkeypatch.delenv('AV_STUDY_SERVER_DATA_PATH', raising=False)
+        destination = server / 'data'
+    else:
+        destination = server / 'Experiments' / 'study' / 'data'
+        monkeypatch.setenv('AV_STUDY_SERVER_DATA_PATH',
+                           'Experiments/study/data' if path_kind == 'relative' else str(destination))
+    session = destination / 'participant_01' / 'session_01'
+    session.mkdir(parents=True)
+    (session / 'session_metadata.json').write_text(json.dumps({'completion_status': 'completed'}))
+    assert next_participant_id(local) == 'participant_02'
+    assert planned_block_order(participant_setup.data_directories(local)) == (['inanimate', 'animate'], 1)
+    assert session_io.server_data_directory() == destination
+
+    participant = local / 'participant_02'
+    participant.mkdir(parents=True)
+    (participant / 'participant_metadata.json').write_text(json.dumps({'seed': 123}))
+    result = session_io.copy_participant_data_to_server(local.parent, 'participant_02')
+    assert result['status'] == 'copied'
+    assert result['destination'] == str(destination / 'participant_02')
+    assert (destination / 'participant_02' / 'participant_metadata.json').read_bytes() == (
+        participant / 'participant_metadata.json').read_bytes()
+
+
+def test_absolute_server_data_path_without_mount_root(tmp_path, monkeypatch):
+    monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
+    monkeypatch.setenv('AV_STUDY_SERVER_DATA_PATH', str(tmp_path / 'server'))
+    (tmp_path / 'server' / 'participant_01').mkdir(parents=True)
+    assert next_participant_id(tmp_path / 'local') == 'participant_02'
+
+
+def test_relative_server_path_without_mount_root_is_not_a_local_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
+    monkeypatch.setenv('AV_STUDY_SERVER_DATA_PATH', 'Experiments/study/data')
+    (tmp_path / 'Experiments/study/data/participant_01').mkdir(parents=True)
+    assert participant_setup.data_directories(tmp_path / 'local') == [tmp_path / 'local']
+    assert next_participant_id(tmp_path / 'local') == 'participant_01'
+
+
 def test_empty_participant_folder_is_occupied(tmp_path):
     (tmp_path / 'participant_01').mkdir()
     assert next_participant_id(tmp_path) == 'participant_02'

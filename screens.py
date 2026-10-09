@@ -236,7 +236,7 @@ def continuation(window, kb, text, message, key_rows, block, trial):
 
 
 def rest_break(window, kb, visual, clock, duration_seconds=120):
-    """Timed rest; SPACE continues only after it ends. False if ESCAPE."""
+    """Return 'completed', 'skipped', or 'aborted'; SPACE waits for the timer."""
     text = _text(window, visual, height=30)
     rest_start = clock.getTime()
     while True:
@@ -252,8 +252,8 @@ def rest_break(window, kb, visual, clock, duration_seconds=120):
         window.flip()
         presses = kb.getKeys(keyList=['space', 's', 'escape'], waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
-            return False
+            return 'aborted'
         if remaining == 0 and any(key.name == 'space' for key in presses):
-            return True
+            return 'completed'
         if remaining > 0 and any(key.name == 's' for key in presses):
-            return True
+            return 'skipped'
