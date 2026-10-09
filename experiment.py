@@ -373,8 +373,9 @@ def run(args):
                 trial_hits, trial_false_alarms = trial_feedback(trial_targets, trial_keys)
                 if aborted or not continuation(
                     f'{BLOCK_LABELS[block]} — Trial {trial} complete.\n'
-                    f'Correct hits: {trial_hits}\nFalse alarms: {trial_false_alarms} '
-                    '(please minimize these).'
+                    f'Correct hits: {trial_hits}\n'
+                    f'Misses: {trial_row["miss_count"]}\n'
+                    f'False alarms: {trial_false_alarms} (please minimize these).'
                 ):
                     aborted = True
                     break
@@ -411,9 +412,10 @@ def run(args):
                         f'Participant: {args.pid}\n'
                         f'Target appearances: {len(target_events)}\n'
                         f'Valid hits: {valid_hits}\n'
+                        f'Misses: {sum(event["response_status"] == "miss" for event in target_events)}\n'
                         f'False alarms: {false_alarms}\n\n'
                         f'Data saved in:\n{session_dir}\n\n'
-                        'Press SPACE to finish.'
+                        'Please inform the experiment lead that you have finished.'
                     ), color='white', height=26,
                     wrapWidth=window.size[0] * 0.8, units='pix', autoLog=False,
                 )
