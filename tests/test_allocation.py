@@ -1,4 +1,7 @@
 import json
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -74,6 +77,28 @@ def test_block_order_counts_completed_sessions(tmp_path):
     order, count = planned_block_order([tmp_path])
     assert count == 1
     assert order == ['inanimate', 'animate']
+
+
+@pytest.mark.parametrize('size', [50, 100, 200])
+def test_supported_image_sizes_generate_valid_plans(size):
+    # Set config before imports, just as editing config before launch does.
+    result = subprocess.run(
+        [sys.executable, '-c', f'''
+import config
+config.IMAGE_SIZE = ({size}, {size})
+from participant_setup import build_plan
+from timeline_key import _position_bounds
+_, _, timeline, _, _ = build_plan(7, ['animate', 'inanimate'])
+x_min, x_max, y_min, y_max = _position_bounds(config.WINDOW_SIZE, config.IMAGE_SIZE)
+visuals = [row for row in timeline if row['event_type'] == 'visual']
+assert visuals
+for row in visuals:
+    assert x_min <= abs(row['x']) <= x_max
+    assert y_min <= abs(row['y']) <= y_max
+'''],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_build_plan_follows_block_order():

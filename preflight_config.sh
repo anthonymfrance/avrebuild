@@ -5,4 +5,4 @@
 
 # The legacy study runner's GVFS SMB mount and data destination.
 PREFLIGHT_SERVER_MOUNT_GLOB='smb-share:server=psyc-files.ucsc.edu,share=jamal*'
-PREFLIGHT_SERVER_DATA_PATH='Experiments/Anthony/AudioVisualSpatiotemporalStudy-codex-sanji-runtime-bundle/data'
+PREFLIGHT_SERVER_DATA_PATH='Experiments/Anthony/data'

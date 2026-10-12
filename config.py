@@ -78,7 +78,7 @@ BG_UPDATE_RATE = 0.2
 BG_SEED = 0xA1D0B04A
 
 # --- Images ---
-IMAGE_SIZE = (200, 200)
+IMAGE_SIZE = (100, 100) #was at 200, 200
 MAX_OPACITY = 1.0
 
 # --- Fixation ---

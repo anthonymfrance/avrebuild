@@ -73,15 +73,9 @@ sys.exit(0 if any(
     pipewire_jack_ready=1
   fi
 fi
-participant_id="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'from pathlib import Path; from participant_setup import next_participant_id; print(next_participant_id(Path("data")))')" || {
-  gui_error 'Could not determine the next participant ID.'
-  exit 1
-}
-
 rows=()
 add_row() { rows+=("$1" "$2" "$3"); }
 fatal=0
-add_row '✅' 'Participant ID' "$participant_id (next available)"
 add_row '✅' 'Experiment runtime' "$python_bin"
 if (( pipewire_jack_ready )); then
   add_row '✅' 'PTB audio route' 'PipeWire JACK exposes the built-in headphone output'
@@ -197,6 +191,14 @@ else
   unset AV_STUDY_SERVER_ROOT AV_STUDY_SERVER_DATA_PATH || true
 fi
 
+# Allocate only after configuring storage: the runner checks these same local
+# and server roots after the hardware checks, so a local-only ID may be stale.
+participant_id="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'from pathlib import Path; from participant_setup import next_participant_id; print(next_participant_id(Path("data")))')" || {
+  gui_error 'Could not determine the next participant ID.'
+  exit 1
+}
+add_row '✅' 'Participant ID' "$participant_id (next available)"
+
 report="$(mktemp "${TMPDIR:-/tmp}/av-preflight-${participant_id}.XXXXXX")"
 {
   printf 'measured_at=%s\n' "$(date --iso-8601=seconds)"
@@ -260,12 +262,19 @@ if pw-jack env LD_PRELOAD="$pipewire_jack_lib" "$python_bin" "$study_dir/experim
   fi
 else
   run_status=$?
-  log_copy="$study_dir/data/$participant_id/launch_error.log"
+  # Keep the temporary log if no plan exists; do not create a participant
+  # folder just for diagnostics, since any such folder consumes its ID.
+  log_copy="$runner_log"
   if [[ -d "$study_dir/data/$participant_id" ]]; then
-    cp -- "$runner_log" "$log_copy"
+    participant_log="$study_dir/data/$participant_id/launch_error.log"
+    if cp -- "$runner_log" "$participant_log"; then
+      log_copy="$participant_log"
+    fi
   fi
   error_tail="$(tail -n 18 -- "$runner_log")"
-  rm -f -- "$runner_log"
+  if [[ "$log_copy" != "$runner_log" ]]; then
+    rm -f -- "$runner_log"
+  fi
   if [[ -s "$warnings_file" ]]; then
     show_operator_warnings
   fi
