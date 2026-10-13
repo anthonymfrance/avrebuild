@@ -86,6 +86,9 @@ os.execv({sys.executable!r}, [{sys.executable!r}] + args)
     pid = 'participant_03' if mounted else 'participant_02'
     assert recorded['pid'] == pid
     assert f'participant_id={pid}\n' in recorded['report']
+    # The debug-screen choice is recorded so debug sessions stay identifiable
+    # after the fact (the fake zenity accepts every dialog).
+    assert 'debug_overlay=true\n' in recorded['report']
     if mounted:
         reported_root = next(line.split('=', 1)[1] for line in recorded['report'].splitlines()
                              if line.startswith('server_root='))

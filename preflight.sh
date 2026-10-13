@@ -199,17 +199,9 @@ participant_id="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bi
 }
 add_row '✅' 'Participant ID' "$participant_id (next available)"
 
+# Created before the checklist so its early exits can remove it, and filled in
+# after the debug-screen question so the report records that operator choice.
 report="$(mktemp "${TMPDIR:-/tmp}/av-preflight-${participant_id}.XXXXXX")"
-{
-  printf 'measured_at=%s\n' "$(date --iso-8601=seconds)"
-  printf 'study_dir=%s\nparticipant_id=%s\n' "$study_dir" "$participant_id"
-  printf 'session_type=%s\ndisplay_output=%s\nactive_mode=%s\ndisplay_refresh_hz=%s\n' "$session_type" "$display_output" "$active_mode" "$display_refresh_hz"
-  printf 'audio_route=%s\npipewire_jack_library=%s\n' 'PTB via PipeWire JACK' "$pipewire_jack_lib"
-  printf 'audio_balance=%s\naudio_balance_status=%s\n' "${audio_balance:-unknown}" "$audio_balance_status"
-  printf 'server_mounted=%s\n' "$([[ -n "$server_root" && -w "$server_root" ]] && printf true || printf false)"
-  [[ -z "$server_root" ]] || printf 'server_root=%s\nserver_data_path=%s\n' "$server_root" "$PREFLIGHT_SERVER_DATA_PATH"
-  printf '\nConnected display modes:\n%s\n' "$display_info"
-} > "$report"
 add_row '✅' 'Preflight report' 'Will be saved in the participant folder after launch'
 
 summary="Review the checks below. Red items must be fixed before starting. Yellow items need a manual check; if the lab server is unavailable you will be asked to confirm local-only storage. The experiment checks the four numpad keys and the sound before creating the participant plan."
@@ -235,6 +227,20 @@ if gui_yes 'Show the debug/testing screen during trials? Choose No for participa
 else
   debug_overlay=false
 fi
+
+# Written here rather than with the checklist above so the saved report (and the
+# session metadata parsed from it) records whether the debug overlay ran.
+{
+  printf 'measured_at=%s\n' "$(date --iso-8601=seconds)"
+  printf 'study_dir=%s\nparticipant_id=%s\n' "$study_dir" "$participant_id"
+  printf 'session_type=%s\ndisplay_output=%s\nactive_mode=%s\ndisplay_refresh_hz=%s\n' "$session_type" "$display_output" "$active_mode" "$display_refresh_hz"
+  printf 'audio_route=%s\npipewire_jack_library=%s\n' 'PTB via PipeWire JACK' "$pipewire_jack_lib"
+  printf 'audio_balance=%s\naudio_balance_status=%s\n' "${audio_balance:-unknown}" "$audio_balance_status"
+  printf 'debug_overlay=%s\n' "$debug_overlay"
+  printf 'server_mounted=%s\n' "$([[ -n "$server_root" && -w "$server_root" ]] && printf true || printf false)"
+  [[ -z "$server_root" ]] || printf 'server_root=%s\nserver_data_path=%s\n' "$server_root" "$PREFLIGHT_SERVER_DATA_PATH"
+  printf '\nConnected display modes:\n%s\n' "$display_info"
+} > "$report"
 planned_block_order="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'from pathlib import Path; from participant_setup import planned_block_order, data_directories; order, count = planned_block_order(data_directories(Path("data"))); print("Animals, then Objects" if order[0] == "animate" else "Objects, then Animals")')" || {
   rm -f -- "$report"
   gui_error 'Could not calculate the planned block order.'

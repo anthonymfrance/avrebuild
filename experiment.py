@@ -299,6 +299,13 @@ def run(args):
 
         debug_lines, pt_soa_by_block = screens.plan_summary(args.pid, rows, block_order, trials_by_block)
         debug_overlay_enabled = os.environ.get('AV_STUDY_DEBUG_OVERLAY', 'false').lower() == 'true'
+        metadata['debug_overlay_enabled'] = debug_overlay_enabled
+        metadata['debug_overlay_note'] = (
+            'Operator plan screen and per-frame overlay were shown; an extra stimulus is drawn '
+            'on every flip and the pre-trial screen sequence differs.'
+            if debug_overlay_enabled else
+            'Participant-facing run; no operator plan screen or per-frame overlay.'
+        )
         if debug_overlay_enabled and not screens.operator_screen(window, kb, visual, debug_lines):
             return
         if not screens.instructions(window, kb, visual):
