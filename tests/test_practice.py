@@ -85,3 +85,22 @@ def test_corner_xy_is_the_same_place_inside_its_quadrant():
         assert abs(y) + half < 540
         sx, sy = config.CORNER_SIGNS[corner]
         assert x * sx > half and y * sy > half
+
+
+def test_practice_shapes_jitter_within_their_corners():
+    assert len(practice.PACED_OFFSETS) == len(practice.PACED)
+    half = config.IMAGE_SIZE[0] / 2
+    positions = []
+    for index, (_, _, corner) in enumerate(practice.PACED):
+        offset = practice.PACED_OFFSETS[index]
+        assert offset != (0, 0)
+        x, y = practice.corner_xy(1920, 1080, corner, offset)
+        positions.append((corner, (x, y)))
+        assert abs(x) + half < 960
+        assert abs(y) + half < 540
+        sx, sy = config.CORNER_SIGNS[corner]
+        assert x * sx > half and y * sy > half
+    top_left = [pos for corner, pos in positions if corner == 'top_left']
+    assert len(set(top_left)) == len(top_left)
+    for step in practice.COACHED:
+        assert all(offset != (0, 0) for _, _, offset in step['shapes'])

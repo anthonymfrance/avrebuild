@@ -20,10 +20,13 @@ KEY_NUMBER = {
 
 # Circles are targets, squares are distractors. Onsets are seconds from the
 # paced-round start. Gaps stay wider than the hit window plus the late window.
+# Small fixed offsets from the quadrant center, in pixels. They keep the shapes
+# from always appearing in exactly the same spot while staying identical for
+# every participant. Values stay well inside each quadrant.
 COACHED = (
     {
         'prompt': 'A circle is a target.\nThis one is in the top-right. Press 5.',
-        'shapes': (('target', 'top_right'),),
+        'shapes': (('target', 'top_right', (30, -25)),),
         'expect': 'top_right',
     },
     {
@@ -32,12 +35,15 @@ COACHED = (
             'Do not press a number key.\n'
             'Press SPACE to continue.'
         ),
-        'shapes': (('distractor', 'bottom_left'),),
+        'shapes': (('distractor', 'bottom_left', (-35, 30)),),
         'expect': None,
     },
     {
         'prompt': 'Press only for the circle.\nThe circle is in the top-left. Press 4.',
-        'shapes': (('target', 'top_left'), ('distractor', 'bottom_right')),
+        'shapes': (
+            ('target', 'top_left', (-25, -35)),
+            ('distractor', 'bottom_right', (40, 25)),
+        ),
         'expect': 'top_left',
     },
 )
@@ -48,12 +54,20 @@ PACED = (
     (5.6, 'distractor', 'top_left'),
     (7.2, 'target', 'top_left'),
 )
+PACED_OFFSETS = (
+    (25, 20),
+    (-30, -25),
+    (35, -30),
+    (-40, 25),
+    (20, -35),
+)
 
 
-def corner_xy(width, height, corner):
-    """Fixed center of a practice shape. Same place for every participant."""
+def corner_xy(width, height, corner, offset=(0, 0)):
+    """Fixed center of a practice shape, moved by a fixed per-event offset."""
     sx, sy = config.CORNER_SIGNS[corner]
-    return (sx * width * 0.32, sy * height * 0.28)
+    dx, dy = offset
+    return (sx * width * 0.32 + dx, sy * height * 0.28 + dy)
 
 
 def paced_targets(events=PACED):
@@ -164,8 +178,8 @@ def _frame(window, fixation, text, shapes, caption, green):
 def _coached(window, kb, clock, fixation, text, stims, step):
     width, height = window.size
     placed = [
-        (stims[kind], corner_xy(width, height, corner))
-        for kind, corner in step['shapes']
+        (stims[kind], corner_xy(width, height, corner, offset))
+        for kind, corner, offset in step['shapes']
     ]
     notice = ''
     expect = step['expect']
@@ -194,7 +208,7 @@ def _coached(window, kb, clock, fixation, text, stims, step):
 
 
 def _miss_notice(pressed, expect, shapes):
-    if any(kind == 'distractor' and corner == pressed for kind, corner in shapes):
+    if any(kind == 'distractor' and corner == pressed for kind, corner, _ in shapes):
         return 'That corner has a square. Squares are not targets.'
     label = expect.replace('_', '-')
     return (
@@ -240,11 +254,12 @@ def _paced(window, kb, clock, fixation, text, stims):
     while float(clock.getTime()) - t0 < paced_end():
         now = float(clock.getTime()) - t0
         drawn = []
-        for onset, kind, corner in PACED:
+        for index, (onset, kind, corner) in enumerate(PACED):
             age = now - onset
             if 0 <= age < VISUAL_DURATION:
                 drawn.append((
-                    stims[kind], corner_xy(width, height, corner), planned_image_alpha(age),
+                    stims[kind], corner_xy(width, height, corner, PACED_OFFSETS[index]),
+                    planned_image_alpha(age),
                 ))
         _frame(
             window, fixation, text, drawn, 'Circles only.',
