@@ -9,6 +9,8 @@ import sys
 
 import pytest
 
+import config
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,6 +43,7 @@ def test_launcher_uses_final_storage_roots_and_preserves_failure_log(tmp_path, m
     dialogs = tmp_path / 'dialogs.jsonl'
     pactl_log = tmp_path / 'pactl.jsonl'
     capture = tmp_path / 'runner.json'
+    expected_volume = f'{config.SYSTEM_VOLUME_PERCENT}%'
     executable(commands / 'zenity', f'''#!{sys.executable}
 import json, sys
 with open({str(dialogs)!r}, 'a') as output:
@@ -51,7 +54,7 @@ import json, sys
 with open({str(pactl_log)!r}, 'a') as output:
     output.write(json.dumps(sys.argv[1:]) + '\\n')
 if sys.argv[1:2] == ['get-sink-volume']:
-    print('Volume: front-left: 49152 /  75% / -7.50 dB,   front-right: 49152 /  75% / -7.50 dB')
+    print('Volume: front-left: 49152 /  {expected_volume} / -7.50 dB,   front-right: 49152 /  {expected_volume} / -7.50 dB')
     print('        balance 0.00')
 else:
     print('balance 0.00')
@@ -104,8 +107,8 @@ os.execv({sys.executable!r}, [{sys.executable!r}] + args)
                              if line.startswith('server_root='))
         assert Path(reported_root).resolve() == server
     pactl_calls = [json.loads(line) for line in pactl_log.read_text().splitlines()]
-    assert ['set-sink-volume', '@DEFAULT_SINK@', '75%'] in pactl_calls
-    assert f'system_volume_percent=75\n' in recorded['report']
+    assert ['set-sink-volume', '@DEFAULT_SINK@', expected_volume] in pactl_calls
+    assert f'system_volume_percent={config.SYSTEM_VOLUME_PERCENT}\n' in recorded['report']
     assert 'system_volume_status=pinned\n' in recorded['report']
     messages = [json.loads(line) for line in dialogs.read_text().splitlines()]
     error = next(args for args in messages if '--error' in args)
