@@ -8,8 +8,9 @@ import random
 import re
 import secrets
 import shutil
+import socket
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType
 
@@ -62,33 +63,194 @@ def build_plan(seed, block_order, count_ranges=None, diagnostics=None):
     return assignment, slotting_rows, timeline, required, stats
 
 
-def next_participant_id(data_dir: Path) -> str:
-    """Return the lowest unused participant number, formatted with at least 2 digits."""
-    data_dirs = data_directories(data_dir)
+CLAIM_DIR_NAME = '.claims'
+CLAIM_SUFFIX = '.lock'
+CLAIM_WRITE_GRACE_SECONDS = 60
+
+
+def data_directories(data_dir):
+    """Return local and configured server data roots, without duplicates."""
+    local = Path(data_dir).resolve()
+    data_dirs = [local]
+    server_data = server_data_directory()
+    if server_data is not None:
+        server_data = Path(server_data).resolve()
+        if server_data != local:
+            data_dirs.append(server_data)
+    return data_dirs
+
+
+def _claim_filename(participant_id):
+    return f'{participant_id}{CLAIM_SUFFIX}'
+
+
+def _claim_number(path):
+    match = PARTICIPANT_PATTERN.fullmatch(Path(path).stem)
+    return int(match.group(1)) if match else None
+
+
+def _read_claim(path):
+    try:
+        claim = json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return claim if isinstance(claim, dict) else None
+
+
+def _claim_is_expired(claim, path):
+    """Expired or abandoned claims may be reclaimed; a fresh partial write is not."""
+    if not claim or not claim.get('started_utc'):
+        try:
+            age = datetime.now(timezone.utc).timestamp() - Path(path).stat().st_mtime
+        except OSError:
+            return False
+        return age > CLAIM_WRITE_GRACE_SECONDS
+    try:
+        started_at = datetime.fromisoformat(str(claim['started_utc']))
+    except ValueError:
+        return True
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - started_at > timedelta(
+        hours=config.PARTICIPANT_CLAIM_TTL_HOURS
+    )
+
+
+def _occupied_participant_numbers(data_dirs):
+    """Participant folders plus live claims in every visible data root."""
     numbers = set()
-    for root in data_dirs:
+    for root in map(Path, data_dirs):
         if root.is_dir():
             for entry in root.iterdir():
                 match = PARTICIPANT_PATTERN.fullmatch(entry.name)
                 if match:
                     numbers.add(int(match.group(1)))
+        claim_dir = root / CLAIM_DIR_NAME
+        if not claim_dir.is_dir():
+            continue
+        for claim_path in claim_dir.glob(f'participant_*{CLAIM_SUFFIX}'):
+            number = _claim_number(claim_path)
+            if number is None:
+                continue
+            if _claim_is_expired(_read_claim(claim_path), claim_path):
+                try:
+                    claim_path.unlink()
+                except OSError:
+                    numbers.add(number)
+                continue
+            numbers.add(number)
+    return numbers
+
+
+def next_participant_id(data_dir: Path) -> str:
+    """Return the lowest participant number not used locally, on the server, or claimed."""
+    numbers = _occupied_participant_numbers(data_directories(data_dir))
     number = 1
     while number in numbers:
         number += 1
     return f'participant_{number:02d}'
 
 
-def data_directories(data_dir):
-    """Return local and configured server data roots, without duplicates."""
-    data_dirs = [Path(data_dir)]
+def _shared_claim_root(data_dir, data_dirs):
+    """Reserve on the lab share when it is available, otherwise locally."""
     server_data = server_data_directory()
     if server_data is not None:
-        data_dirs.append(server_data)
-    unique = []
-    for root in data_dirs:
-        if root not in unique:
-            unique.append(root)
-    return unique
+        server_data = Path(server_data).resolve()
+        if server_data in data_dirs:
+            return server_data
+    return Path(data_dir).resolve()
+
+
+def claim_next_participant_id(data_dir: Path) -> dict:
+    """Atomically reserve the lowest free participant ID on the shared data root.
+
+    The claim file is created with O_EXCL, so two devices starting at the same
+    time cannot both reserve the same participant number. The claim records the
+    participant ID, the allocating process, the host, and the UTC start time.
+    """
+    data_dir = Path(data_dir).resolve()
+    data_dirs = data_directories(data_dir)
+    claim_root = _shared_claim_root(data_dir, data_dirs)
+    claim_dir = claim_root / CLAIM_DIR_NAME
+    claim_dir.mkdir(parents=True, exist_ok=True)
+    number = participant_number(next_participant_id(data_dir))
+    while True:
+        participant_id = f'participant_{number:02d}'
+        if any((Path(root) / participant_id).exists() for root in data_dirs):
+            number += 1
+            continue
+        token = secrets.token_hex(16)
+        claim_path = claim_dir / _claim_filename(participant_id)
+        payload = {
+            'participant_id': participant_id,
+            'pid': os.getpid(),
+            'host': socket.gethostname(),
+            'started_utc': datetime.now(timezone.utc).isoformat(),
+            'token': token,
+        }
+        try:
+            descriptor = os.open(
+                claim_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644
+            )
+        except FileExistsError:
+            number += 1
+            continue
+        try:
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as output:
+                json.dump(payload, output, sort_keys=True)
+                output.write('\n')
+                output.flush()
+                os.fsync(output.fileno())
+        except Exception:
+            claim_path.unlink(missing_ok=True)
+            raise
+        return {
+            'participant_id': participant_id,
+            'path': str(claim_path),
+            'token': token,
+        }
+
+
+def verify_participant_claim(claim_path, participant_id, token):
+    """Return the claim payload, or raise when it is missing, stale, or foreign."""
+    path = Path(claim_path)
+    claim = _read_claim(path)
+    if claim is None:
+        raise ValueError(f'Participant claim is missing or unreadable: {path}')
+    if claim.get('participant_id') != participant_id:
+        raise ValueError(
+            f'Participant claim is for {claim.get("participant_id")!r}, not {participant_id!r}.'
+        )
+    if not token or claim.get('token') != token:
+        raise ValueError(f'Participant claim token does not match for {participant_id}.')
+    if _claim_is_expired(claim, path):
+        raise ValueError(f'Participant claim for {participant_id} expired; run preflight again.')
+    return claim
+
+
+def release_participant_claim(claim_path, token):
+    """Remove a claim only when the caller owns it."""
+    path = Path(claim_path)
+    claim = _read_claim(path)
+    if claim is None or claim.get('token') != token:
+        return False
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    try:
+        path.parent.rmdir()
+    except OSError:
+        pass  # Another claim is still present; keep the directory.
+    return True
+
+
+def release_participant_claim_if_unused(data_dir, claim_path, token, participant_id):
+    """Release a preflight claim when no participant folder was ever created."""
+    data_dirs = data_directories(data_dir)
+    if any((Path(root) / participant_id).exists() for root in data_dirs):
+        return False
+    return release_participant_claim(claim_path, token)
 
 
 def planned_block_order(data_dirs):
@@ -120,16 +282,27 @@ def participant_number(participant_id: str) -> int:
     return int(match.group(1))
 
 
-def create_participant_plan(data_dir: Path, participant_id: str) -> tuple[Path, dict]:
+def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> tuple[Path, dict]:
     """Reserve the participant folder and create all immutable session plans."""
     data_dir = Path(data_dir).resolve()
+    data_dirs = data_directories(data_dir)
     number = participant_number(participant_id)
-    expected_id = next_participant_id(data_dir)
-    if participant_id != expected_id:
-        raise FileExistsError(
-            f'Next available participant is {expected_id}; requested {participant_id}. '
-            'Run preflight again to refresh the participant ID.'
-        )
+    if claim is not None:
+        verify_participant_claim(claim['path'], participant_id, claim['token'])
+        existing = [str(Path(root) / participant_id) for root in data_dirs
+                    if (Path(root) / participant_id).exists()]
+        if existing:
+            raise FileExistsError(
+                f'{participant_id} already exists at {", ".join(existing)}; '
+                'participant data is never overwritten.'
+            )
+    else:
+        expected_id = next_participant_id(data_dir)
+        if participant_id != expected_id:
+            raise FileExistsError(
+                f'Next available participant is {expected_id}; requested {participant_id}. '
+                'Run preflight again to refresh the participant ID.'
+            )
 
     participant_dir = data_dir / participant_id
     if participant_dir.exists():
@@ -139,7 +312,6 @@ def create_participant_plan(data_dir: Path, participant_id: str) -> tuple[Path, 
         raise FileExistsError(f'{temp_dir} already exists; preserve it and inspect before continuing.')
     data_dir.mkdir(parents=True, exist_ok=True)
     temp_dir.mkdir()
-    data_dirs = data_directories(data_dir)
     block_order, completed_count = planned_block_order(data_dirs)
     used_seeds = set()
     for root in data_dirs:

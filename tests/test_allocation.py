@@ -1,13 +1,21 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
 import sys
 
 import pytest
 
+import config
 import participant_setup
 from session_io import sha256_file
-from participant_setup import PlanGenerationError, next_participant_id, planned_block_order
+from participant_setup import (
+    PlanGenerationError,
+    claim_next_participant_id,
+    next_participant_id,
+    planned_block_order,
+    verify_participant_claim,
+)
 from timeline_key import PlacementFailure
 
 
@@ -132,6 +140,90 @@ def test_five_failed_seeds_leave_no_folder_and_do_not_consume_id(tmp_path, monke
     assert not (tmp_path / 'participant_01').exists()
     assert not (tmp_path / '.participant_01.tmp').exists()
     assert next_participant_id(tmp_path) == 'participant_01'
+
+
+def test_claims_reserve_ids_in_order_and_skip_active_claims(tmp_path, monkeypatch):
+    monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
+    monkeypatch.delenv('AV_STUDY_SERVER_DATA_PATH', raising=False)
+    first = claim_next_participant_id(tmp_path)
+    second = claim_next_participant_id(tmp_path)
+    assert first['participant_id'] == 'participant_01'
+    assert second['participant_id'] == 'participant_02'
+    assert next_participant_id(tmp_path) == 'participant_03'
+    claim_path = tmp_path / '.claims' / 'participant_01.lock'
+    assert claim_path.is_file()
+    payload = json.loads(claim_path.read_text())
+    assert payload['participant_id'] == 'participant_01'
+    assert isinstance(payload['pid'], int)
+    assert payload['token'] == first['token']
+    assert payload['host']
+    assert payload['started_utc']
+
+
+def test_claim_prefers_shared_server_root(tmp_path, monkeypatch):
+    local = tmp_path / 'local' / 'data'
+    server = tmp_path / 'server_data'
+    server.mkdir()
+    monkeypatch.setenv('AV_STUDY_SERVER_ROOT', str(tmp_path / 'share'))
+    monkeypatch.setenv('AV_STUDY_SERVER_DATA_PATH', str(server))
+    claim = claim_next_participant_id(local)
+    assert claim['path'] == str(server / '.claims' / 'participant_01.lock')
+    assert Path(claim['path']).is_file()
+    assert not (local / '.claims').exists()
+
+
+def test_expired_claim_is_reclaimed_without_skipping_numbers(tmp_path, monkeypatch):
+    monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
+    monkeypatch.delenv('AV_STUDY_SERVER_DATA_PATH', raising=False)
+    claim_dir = tmp_path / '.claims'
+    claim_dir.mkdir()
+    stale = datetime.now(timezone.utc) - timedelta(
+        hours=config.PARTICIPANT_CLAIM_TTL_HOURS + 1
+    )
+    (claim_dir / 'participant_01.lock').write_text(json.dumps({
+        'participant_id': 'participant_01', 'pid': 1, 'host': 'old-machine',
+        'started_utc': stale.isoformat(), 'token': 'old',
+    }))
+    assert next_participant_id(tmp_path) == 'participant_01'
+    assert not (claim_dir / 'participant_01.lock').exists()
+
+
+def test_claim_refuses_participant_folder_already_on_server(tmp_path, monkeypatch):
+    local = tmp_path / 'local' / 'data'
+    server = tmp_path / 'server_data'
+    server.mkdir()
+    monkeypatch.setenv('AV_STUDY_SERVER_ROOT', str(tmp_path / 'share'))
+    monkeypatch.setenv('AV_STUDY_SERVER_DATA_PATH', str(server))
+    claim = claim_next_participant_id(local)
+    (server / claim['participant_id']).mkdir()
+    with pytest.raises(FileExistsError, match='never overwritten'):
+        participant_setup.create_participant_plan(
+            local, claim['participant_id'], claim=claim
+        )
+
+
+def test_claim_token_and_existing_folder_are_enforced(tmp_path, monkeypatch):
+    monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
+    monkeypatch.delenv('AV_STUDY_SERVER_DATA_PATH', raising=False)
+    claim = claim_next_participant_id(tmp_path)
+    with pytest.raises(ValueError, match='token'):
+        verify_participant_claim(claim['path'], claim['participant_id'], 'wrong-token')
+    with pytest.raises(ValueError, match='token'):
+        participant_setup.create_participant_plan(
+            tmp_path, claim['participant_id'], claim={**claim, 'token': 'wrong-token'}
+        )
+    (tmp_path / claim['participant_id']).mkdir()
+    with pytest.raises(FileExistsError, match='never overwritten'):
+        participant_setup.create_participant_plan(tmp_path, claim['participant_id'], claim=claim)
+    (tmp_path / claim['participant_id']).rmdir()
+    timeline_path, _ = participant_setup.create_participant_plan(
+        tmp_path, claim['participant_id'], claim=claim
+    )
+    assert timeline_path.is_file()
+    assert participant_setup.release_participant_claim_if_unused(
+        tmp_path, claim['path'], claim['token'], claim['participant_id']
+    ) is False
+    assert Path(claim['path']).is_file()
 
 
 def test_failure_retries_with_new_seed_and_records_failed_seed(tmp_path, monkeypatch):

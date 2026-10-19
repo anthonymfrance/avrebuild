@@ -84,6 +84,40 @@ else
   fatal=1
 fi
 
+# Pin the output level so every session and every device runs at the level in
+# config.py. The experiment keeps its own playback gain at 1.0 to avoid
+# attenuating the signal twice.
+system_volume="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c '
+import config
+value = int(config.SYSTEM_VOLUME_PERCENT)
+if not 0 < value <= 100:
+    raise SystemExit(1)
+print(value)
+')" || system_volume=''
+system_volume_actual=''
+system_volume_status='unverified'
+if ! command -v pactl >/dev/null 2>&1; then
+  add_row '⚠️' 'System output volume' 'pactl is unavailable; set the output to the configured level manually'
+elif [[ -z "$system_volume" ]]; then
+  add_row '❌' 'System output volume' 'Could not read SYSTEM_VOLUME_PERCENT from config.py'
+  fatal=1
+elif pactl set-sink-volume @DEFAULT_SINK@ "${system_volume}%" >/dev/null 2>&1; then
+  system_volume_info="$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null || true)"
+  system_volume_actual="$(grep -o '[0-9]\+%' <<< "$system_volume_info" | head -n 1 | tr -d '%')"
+  if [[ -n "$system_volume_actual" && "$system_volume_actual" == "$system_volume" ]]; then
+    system_volume_status='pinned'
+    add_row '✅' 'System output volume' "${system_volume_actual}% (pinned automatically)"
+  else
+    system_volume_status='mismatch'
+    add_row '❌' 'System output volume' "Set to ${system_volume}%, but the output reports ${system_volume_actual:-an unknown level}%"
+    fatal=1
+  fi
+else
+  system_volume_status='failed'
+  add_row '❌' 'System output volume' "Could not set the default output to ${system_volume}%"
+  fatal=1
+fi
+
 # Require a centered OS output balance so the left and right headphone channels
 # receive equal levels. pactl reports a normalized balance of 0.00 at center.
 audio_balance=''
@@ -191,13 +225,38 @@ else
   unset AV_STUDY_SERVER_ROOT AV_STUDY_SERVER_DATA_PATH || true
 fi
 
-# Allocate only after configuring storage: the runner checks these same local
-# and server roots after the hardware checks, so a local-only ID may be stale.
-participant_id="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'from pathlib import Path; from participant_setup import next_participant_id; print(next_participant_id(Path("data")))')" || {
-  gui_error 'Could not determine the next participant ID.'
+# Reserve the ID on the shared server with an atomic claim. This is what stops
+# two machines from both starting participant_03. Allocation order is still the
+# lowest unused number.
+claim_output="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c '
+from pathlib import Path
+from participant_setup import claim_next_participant_id
+claim = claim_next_participant_id(Path("data"))
+print(claim["participant_id"])
+print(claim["path"])
+print(claim["token"])
+')" || {
+  gui_error 'Could not reserve the next participant ID. Check that the lab server is writable, then run preflight again.'
   exit 1
 }
-add_row '✅' 'Participant ID' "$participant_id (next available)"
+participant_id="$(sed -n '1p' <<< "$claim_output")"
+claim_path="$(sed -n '2p' <<< "$claim_output")"
+claim_token="$(sed -n '3p' <<< "$claim_output")"
+if [[ ! "$participant_id" =~ ^participant_[0-9]+$ || -z "$claim_path" || -z "$claim_token" ]]; then
+  gui_error 'Could not reserve a valid participant ID and claim.'
+  exit 1
+fi
+claim_active=1
+release_claim() {
+  PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c '
+import sys
+from pathlib import Path
+from participant_setup import release_participant_claim_if_unused
+release_participant_claim_if_unused(Path("data"), Path(sys.argv[1]), sys.argv[2], sys.argv[3])
+' "$claim_path" "$claim_token" "$participant_id" >/dev/null 2>&1 || true
+}
+trap 'if [[ "${claim_active:-0}" == 1 ]]; then release_claim; fi' EXIT
+add_row '✅' 'Participant ID' "$participant_id (reserved on the lab server)"
 
 # Created before the checklist so its early exits can remove it, and filled in
 # after the debug-screen question so the report records that operator choice.
@@ -235,6 +294,7 @@ fi
   printf 'study_dir=%s\nparticipant_id=%s\n' "$study_dir" "$participant_id"
   printf 'session_type=%s\ndisplay_output=%s\nactive_mode=%s\ndisplay_refresh_hz=%s\n' "$session_type" "$display_output" "$active_mode" "$display_refresh_hz"
   printf 'audio_route=%s\npipewire_jack_library=%s\n' 'PTB via PipeWire JACK' "$pipewire_jack_lib"
+  printf 'system_volume_percent=%s\nsystem_volume_actual=%s\nsystem_volume_status=%s\n' "$system_volume" "$system_volume_actual" "$system_volume_status"
   printf 'audio_balance=%s\naudio_balance_status=%s\n' "${audio_balance:-unknown}" "$audio_balance_status"
   printf 'debug_overlay=%s\n' "$debug_overlay"
   printf 'server_mounted=%s\n' "$([[ -n "$server_root" && -w "$server_root" ]] && printf true || printf false)"
@@ -249,6 +309,8 @@ planned_block_order="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$pyth
 gui_yes "Preflight checks are complete. Start $participant_id?\n\nPlanned block order: $planned_block_order\nThe participant plan will be created when the experiment starts." || { rm -f -- "$report"; gui_info 'Preflight passed. The experiment was not started.'; exit 0; }
 export AV_STUDY_PREFLIGHT_REPORT="$report"
 export AV_STUDY_DEBUG_OVERLAY="$debug_overlay"
+export AV_STUDY_PARTICIPANT_CLAIM="$claim_path"
+export AV_STUDY_PARTICIPANT_CLAIM_TOKEN="$claim_token"
 runner_log="$(mktemp "${TMPDIR:-/tmp}/av-experiment-${participant_id}.XXXXXX")"
 warnings_file="$study_dir/data/$participant_id/operator_warnings.txt"
 show_operator_warnings() {

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import config
 from config import BLOCK_LABELS, TARGET_ROLES
-from participant_setup import create_participant_plan, derive_rng
+from participant_setup import create_participant_plan, derive_rng, verify_participant_claim
 import screens
 from session_io import load_timeline, operator_warn, save_session, sha256_file, sync_participant
 from audio_ptb import (
@@ -93,6 +93,18 @@ def run(args):
     )
     if display_refresh_hz <= 0:
         raise ValueError('Preflight xrandr refresh rate must be positive.')
+    if 'system_volume_percent' not in preflight_report:
+        raise ValueError('Preflight report does not contain the pinned system volume.')
+    system_volume_percent = _finite_number(
+        preflight_report['system_volume_percent'], 'preflight system_volume_percent'
+    )
+    if not 0 < system_volume_percent <= 100:
+        raise ValueError('Preflight system volume must be between 1 and 100 percent.')
+    claim_path = os.environ.get('AV_STUDY_PARTICIPANT_CLAIM')
+    claim_token = os.environ.get('AV_STUDY_PARTICIPANT_CLAIM_TOKEN')
+    if not claim_path or not claim_token:
+        raise ValueError('Participant claim is missing. Start the experiment from preflight.sh.')
+    claim = verify_participant_claim(claim_path, args.pid, claim_token)
 
     try:
         import numpy as np
@@ -140,6 +152,13 @@ def run(args):
         'audio_backend_requested': config.AUDIO_BACKEND,
         'audio_latency_mode': config.AUDIO_LATENCY_MODE,
         'audio_device_profile': speaker_profile,
+        'system_volume_percent': system_volume_percent,
+        'participant_claim': {
+            'path': claim_path,
+            'host': claim.get('host'),
+            'pid': claim.get('pid'),
+            'started_utc': claim.get('started_utc'),
+        },
         'audio_timing_note': 'PTB software-reported playback timing; no physical loopback measurement.',
         'audio_scheduling': 'play(when=...) requested as early as each pooled Sound object is free; absolute PTB start times',
         'visual_fade_profile': {
@@ -193,7 +212,8 @@ def run(args):
             ),
         })
         test_tone = sound.Sound(
-            440, secs=0.8, stereo=True, speaker=shared_speaker, autoLog=False,
+            440, secs=0.8, stereo=True, speaker=shared_speaker,
+            volume=config.AUDIO_VOLUME, autoLog=False,
         )
         sound_class = type(test_tone)
         play_signature = inspect.signature(test_tone.play)
@@ -210,7 +230,7 @@ def run(args):
             raise RuntimeError('The active PTB Sound.play() does not support scheduled when= playback.')
         metadata['audio_backend_class'] = f'{sound_class.__module__}.{sound_class.__name__}'
         metadata['audio_channels_requested'] = 2
-        metadata['audio_volume'] = 1.0
+        metadata['audio_volume'] = config.AUDIO_VOLUME
         metadata['audio_speaker'] = shared_speaker.name
         try:
             from importlib.metadata import version
@@ -241,7 +261,10 @@ def run(args):
         metadata['sound_check']['backend_start_ptb_time'] = test_tone_start
 
         # The participant ID and plan are consumed only after both hardware checks pass.
-        timeline_path, plan_snapshot = create_participant_plan(ROOT / 'data', args.pid)
+        timeline_path, plan_snapshot = create_participant_plan(
+            ROOT / 'data', args.pid,
+            claim={'path': claim_path, 'token': claim_token},
+        )
         # Earlier warnings wait until here: creating pid_dir sooner would consume the ID.
         if metadata['display_refresh_differs_from_xrandr']:
             operator_warn(pid_dir, f'⚠️ Measured refresh {measured_refresh_hz:.2f} Hz differs from xrandr '
@@ -284,7 +307,8 @@ def run(args):
             stimulus: [
                 sound.Sound(
                     str(path), speaker=shared_speaker,
-                    stereo=True, preBuffer=-1, autoLog=False,
+                    stereo=True, preBuffer=-1,
+                    volume=config.AUDIO_VOLUME, autoLog=False,
                 )
                 for _ in range(config.SOUND_POOL_SIZE)
             ]
@@ -398,14 +422,14 @@ def run(args):
                     break
             if not aborted and block_index < len(block_order) - 1:
                 rest_start_time = session_clock.getTime()
-                break_outcome = screens.rest_break(window, kb, visual, session_clock)
+                break_outcome = screens.rest_break(window, kb, visual)
                 break_duration = session_clock.getTime() - rest_start_time
                 metadata['break_skip_info'] = {
                     'break_number': block_index + 1,
                     'break_duration_seconds': break_duration,
                     'break_was_skipped': break_outcome == 'skipped',
                     'break_outcome': break_outcome,
-                    'break_duration_seconds_full': 120,  # 2 minutes = 120 seconds
+                    'break_offer_seconds': 30,
                 }
                 aborted = break_outcome == 'aborted'
             if aborted:
