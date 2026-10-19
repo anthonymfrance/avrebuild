@@ -289,7 +289,7 @@ def save_session(session_dir, events, keys, trials, metadata):
         'audio_requested_session_time', 'audio_requested_ptb_time', 'audio_backend_start_ptb_time',
         'audio_backend_start_session_time', 'audio_timing_source', 'sound_slot',
         'realized_soa_seconds', 'soa_error_seconds',
-        'response_status', 'response_correct', 'response_key', 'response_session_time',
+        'response_status', 'miss_type', 'response_correct', 'response_key', 'response_session_time',
         'rt_from_actual_onset', 'rt_from_planned_onset', 'timing_flags',
         'key', 'classification', 'associated_event_id', 'matched_event_ids',
         'target_matches', 'correct', 'response_window_overlap', 'trial_complete',

@@ -37,6 +37,24 @@ def test_no_active_target_is_false_alarm():
     assert chosen is None and row['classification'] == 'false_alarm' and row['matched_event_ids'] == ''
 
 
+def test_press_in_late_window_is_late_not_hit():
+    row, chosen = classify_press('num_5', 'top_right', 11.7, [target('a', 'top_right', 10.0)], WINDOW, 0.5)
+    assert chosen['event_id'] == 'a' and row['classification'] == 'late' and row['correct'] is False
+    assert abs(row['rt_from_actual_onset'] - 1.7) < 1e-9
+
+
+def test_late_window_wrong_corner_and_after_late_window_are_false_alarms():
+    targets = [target('a', 'top_right', 10.0)]
+    assert classify_press('num_4', 'top_left', 11.7, targets, WINDOW, 0.5)[0]['classification'] == 'false_alarm'
+    assert classify_press('num_5', 'top_right', 12.1, targets, WINDOW, 0.5)[0]['classification'] == 'false_alarm'
+
+
+def test_finalized_miss_is_no_response():
+    targets = [target('a', 'top_right', 10.0)]
+    finalize_targets(targets, complete=True)
+    assert targets[0]['miss_type'] == 'no_response'
+
+
 def test_non_response_key_matches_nothing():
     row, chosen = classify_press('space', None, 10.2, [target('a', 'top_right', 10.0)], WINDOW)
     assert chosen is None and row['classification'] == 'false_alarm' and row['matched_event_ids'] == ''

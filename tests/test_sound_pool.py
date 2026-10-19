@@ -1,16 +1,20 @@
 import config
 from audio_ptb import assign_sound_slots
 from participant_setup import build_plan
+from timeline_key import PlacementFailure
 
 SEEDS = range(50)
 
 
 def plan_sounds(seed):
-    _, _, timeline, _, _ = build_plan(seed, ['animate', 'inanimate'])
+    try:
+        _, _, timeline, _, _ = build_plan(seed, ['animate', 'inanimate'])
+    except PlacementFailure:  # participant setup retries such seeds with a new one
+        return None
     return [row for row in timeline if row['event_type'] == 'sound']
 
 
-PLANS = [plan_sounds(seed) for seed in SEEDS]
+PLANS = [plan for plan in map(plan_sounds, SEEDS) if plan is not None]
 
 
 def late_request_violations(sounds, slots):

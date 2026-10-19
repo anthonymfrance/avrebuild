@@ -56,7 +56,7 @@ def run_trial(
             'audio_backend_start_session_time': '', 'audio_timing_source': '',
             'realized_soa_seconds': '', 'soa_error_seconds': '',
             'response_status': 'pending' if row['role'] in TARGET_ROLES and row['event_type'] == 'visual' else '',
-            'response_correct': '',
+            'response_correct': '', 'miss_type': '',
             'response_key': '', 'response_session_time': '',
             'rt_from_actual_onset': '', 'rt_from_planned_onset': '',
             'timing_flags': '', '_actual_onset': None,
@@ -139,7 +139,7 @@ def run_trial(
 
     while True:
         response_end = max(
-            (event['_actual_onset'] + config.RESPONSE_WINDOW
+            (event['_actual_onset'] + config.TARGET_CORNER_HOLD
              for event in trial_visuals
              if event['role'] in TARGET_ROLES and event['_actual_onset'] is not None),
             default=trial_end_target,
@@ -253,7 +253,7 @@ def run_trial(
             key_time = float(press.rt)
             key_row, chosen = classify_press(
                 press.name, KEY_TO_CORNER.get(press.name), key_time,
-                trial_targets, config.RESPONSE_WINDOW,
+                trial_targets, config.RESPONSE_WINDOW, config.LATE_WINDOW,
             )
             key_row.update({'block': block, 'trial': trial})
             trial_keys.append(key_row)
@@ -264,21 +264,25 @@ def run_trial(
                             event['timing_flags'], 'actual_response_windows_overlap',
                         ]))
             if chosen is not None:
-                chosen['response_status'] = 'hit'
-                chosen['response_correct'] = True
+                hit = key_row['classification'] == 'hit'
+                chosen['response_status'] = 'hit' if hit else 'miss'
+                chosen['miss_type'] = '' if hit else 'late'
+                chosen['response_correct'] = hit
                 chosen['response_key'] = press.name
                 chosen['response_session_time'] = key_time
                 chosen['rt_from_actual_onset'] = key_row['rt_from_actual_onset']
                 chosen['rt_from_planned_onset'] = key_row['rt_from_planned_onset']
-                fixation_green_until = key_time + config.FIXATION_FLASH_DUR
+                if hit:
+                    fixation_green_until = key_time + config.FIXATION_FLASH_DUR
         if aborted:
             break
 
         for event in trial_targets:
             if (event['response_status'] == 'pending'
                     and event['_actual_onset'] is not None
-                    and bool(float(session_clock.getTime()) > event['_actual_onset'] + config.RESPONSE_WINDOW)):
+                    and bool(float(session_clock.getTime()) > event['_actual_onset'] + config.TARGET_CORNER_HOLD)):
                 event['response_status'] = 'miss'
+                event['miss_type'] = 'no_response'
                 event['response_correct'] = False
     if aborted:
         # Sounds are requested well ahead of their onsets, so an aborted trial

@@ -108,6 +108,16 @@ def test_build_plan_follows_block_order():
     assert slotting_rows[0]['block'] == 'inanimate'
 
 
+def test_target_corner_stays_empty_through_late_window():
+    from config import TARGET_CORNER_HOLD, TARGET_ROLES
+    timeline = participant_setup.build_plan(7, ['animate', 'inanimate'])[2]
+    visuals = [row for row in timeline if row['event_type'] == 'visual']
+    for target in (row for row in visuals if row['role'] in TARGET_ROLES):
+        for other in visuals:
+            if other is not target and other['corner'] == target['corner'] and other['block'] == target['block']:
+                assert not 0 <= other['global_onset'] - target['global_onset'] < TARGET_CORNER_HOLD
+
+
 def test_five_failed_seeds_leave_no_folder_and_do_not_consume_id(tmp_path, monkeypatch):
     seeds = iter(range(100, 105))
     monkeypatch.setattr(participant_setup.secrets, 'randbits', lambda _: next(seeds))

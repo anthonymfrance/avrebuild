@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def plan(tmp_path, monkeypatch):
     monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
     monkeypatch.delenv('AV_STUDY_SERVER_DATA_PATH', raising=False)
-    monkeypatch.setattr(participant_setup.secrets, 'randbits', lambda _: 4242)
+    monkeypatch.setattr(participant_setup.secrets, 'randbits', lambda _: 7)
     with contextlib.redirect_stdout(io.StringIO()):
         timeline_path, _ = participant_setup.create_participant_plan(tmp_path, 'participant_01')
     metadata = json.loads((timeline_path.parent / 'participant_metadata.json').read_text())

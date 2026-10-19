@@ -7,13 +7,15 @@ Targets are runtime visual rows with at least event_id, corner, _actual_onset
 from __future__ import annotations
 
 
-def classify_press(key_name, corner, key_time, targets, response_window):
+def classify_press(key_name, corner, key_time, targets, response_window, late_window=0.0):
     """Score one in-trial keypress; return (key_row_fields, chosen_target_or_None).
 
     A press is a hit only for a pending target in the pressed corner whose
-    response window contains the press. Wrong corner, a repeat press on an
-    already-hit target, a press with no active target, and non-numpad keys are
-    false alarms. Targets are not modified; the caller applies the hit.
+    response window contains the press. A press in that corner during the
+    late_window right after the response window is 'late' (the target becomes a
+    late miss). Wrong corner, a repeat press on an already-answered target, a
+    press with no active target, and non-numpad keys are false alarms. Targets
+    are not modified; the caller applies the result.
     """
     active = [
         target for target in targets
@@ -24,13 +26,21 @@ def classify_press(key_name, corner, key_time, targets, response_window):
         target for target in active
         if target['corner'] == corner and target['response_status'] == 'pending'
     ]
-    chosen = min(matching, key=lambda target: target['_actual_onset']) if matching else None
+    late = [
+        target for target in targets
+        if corner and target['corner'] == corner and target['response_status'] == 'pending'
+        and target['_actual_onset'] is not None
+        and target['_actual_onset'] + response_window < key_time
+        <= target['_actual_onset'] + response_window + late_window
+    ]
+    chosen = min(matching or late, key=lambda target: target['_actual_onset'], default=None)
+    classification = 'hit' if matching else 'late' if late else 'false_alarm'
     row = {
         'session_time': key_time, 'key': key_name, 'corner': corner or '',
-        'classification': 'hit' if chosen else 'false_alarm',
+        'classification': classification,
         'matched_event_ids': '|'.join(target['event_id'] for target in active),
         'target_matches': '|'.join(target['event_id'] for target in matching),
-        'correct': bool(chosen is not None),
+        'correct': classification == 'hit',
         'response_window_overlap': bool(len(active) > 1),
         'associated_event_id': chosen['event_id'] if chosen else '',
         'rt_from_actual_onset': float(key_time - chosen['_actual_onset']) if chosen else '',
@@ -60,6 +70,7 @@ def finalize_targets(targets, complete):
             target['timing_flags'] = ';'.join(filter(None, [target['timing_flags'], flag]))
         elif complete:
             target['response_status'] = 'miss'
+            target['miss_type'] = 'no_response'
             target['response_correct'] = False
         else:
             target['response_status'] = 'incomplete'

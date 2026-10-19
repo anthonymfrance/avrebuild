@@ -70,6 +70,8 @@ AUDIO_ONSET_FLAG_THRESHOLD = 0.005      # seconds; flag reported audio start dev
 
 # --- Responses ---
 RESPONSE_WINDOW = 0.9 #used to be 1.5
+LATE_WINDOW = 0.5  # after RESPONSE_WINDOW: a press here is a late miss; the target's corner stays empty until it ends
+TARGET_CORNER_HOLD = RESPONSE_WINDOW + LATE_WINDOW
 
 # --- Background ---
 BG_NOISE_OPACITY = 0.3
