@@ -111,6 +111,9 @@ os.execv({sys.executable!r}, [{sys.executable!r}] + args)
     assert f'system_volume_percent={config.SYSTEM_VOLUME_PERCENT}\n' in recorded['report']
     assert 'system_volume_status=pinned\n' in recorded['report']
     messages = [json.loads(line) for line in dialogs.read_text().splitlines()]
+    debug_dialog = next(args for args in messages if '--ok-label=Debug run' in args)
+    assert '--cancel-label=Participant run' in debug_dialog
+    assert '--default-cancel' in debug_dialog
     error = next(args for args in messages if '--error' in args)
     text = next(arg.removeprefix('--text=') for arg in error if arg.startswith('--text='))
     log = Path(text.split('Full log: ', 1)[1])

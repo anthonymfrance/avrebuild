@@ -13,6 +13,10 @@ fi
 gui_error() { zenity --error --title='AV study preflight' --width=520 --text="$1"; }
 gui_info() { zenity --info --title='AV study preflight' --width=520 --text="$1"; }
 gui_yes() { zenity --question --title='AV study preflight' --width=560 --ok-label='Yes, continue' --cancel-label='No, stop' --text="$1"; }
+# Explicit labels stop a habitual right-hand 'continue' click from starting a
+# debug run by mistake. Participant is the default and the cancel button, so
+# Enter or closing the dialog never enables debug.
+gui_debug_choice() { zenity --question --title='AV study preflight' --width=560 --ok-label='Debug run' --cancel-label='Participant run' --default-cancel --text="$1"; }
 
 if [[ ! -d "$study_dir" || ! -f "$study_dir/config.py" || ! -f "$study_dir/experiment.py" ]]; then
   gui_error "Study directory is missing config.py or experiment.py:\n$study_dir"
@@ -281,7 +285,7 @@ if [[ -z "$server_root" || ! -w "$server_root" ]]; then
     exit 1
   fi
 fi
-if gui_yes 'Show the debug/testing screen during trials? Choose No for participant-facing trials.'; then
+if gui_debug_choice 'Run this session with the debug/testing screens?\n\nParticipant run is the safe default for real participants. Debug run shows the operator plan screen and a per-frame overlay.'; then
   debug_overlay=true
 else
   debug_overlay=false
