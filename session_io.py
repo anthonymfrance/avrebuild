@@ -288,7 +288,7 @@ def save_session(session_dir, events, keys, trials, metadata):
         'duration', 'soa', 'realized_soa_seconds', 'soa_error_seconds', 'response_window', 'timing_flags',
         'key', 'classification', 'correct', 'rt_from_actual_onset', 'rt_from_planned_onset',
         'response_session_time', 'trial_complete', 'target_matches', 'response_window_overlap',
-        'event_id', 'source_event_id', 'associated_event_id', 'matched_event_ids', 'slot_number',
+        'block_number', 'event_id', 'source_event_id', 'associated_event_id', 'matched_event_ids', 'slot_number',
         'x', 'y', 'global_onset', 'trial_onset', 'sound_slot', 'audio_timing_source',
         'audio_requested_session_time', 'audio_requested_ptb_time',
         'audio_backend_start_ptb_time', 'audio_backend_start_session_time',
@@ -322,6 +322,9 @@ def save_session(session_dir, events, keys, trials, metadata):
             'trial_complete': key.get('trial_complete', ''),
         }
         log_rows.append(row)
+    block_numbers = {block: index for index, block in enumerate(metadata.get('timeline_order', []), start=1)}
+    for row in log_rows:
+        row['block_number'] = block_numbers.get(row.get('block'), '')
     log_rows.sort(key=lambda row: (
         float(row['actual_session_time_seconds']) if row.get('actual_session_time_seconds') not in ('', None)
         else float(row['audio_requested_session_time'])

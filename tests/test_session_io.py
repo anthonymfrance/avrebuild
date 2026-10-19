@@ -138,9 +138,10 @@ def test_save_session_writes_numpy_metadata_as_json(tmp_path):
         'audio_clock_offset_check_seconds': np.float64(0.001),
         'seed': np.int64(7),
         'window_size': np.array([1920, 1080]),
+        'timeline_order': ['inanimate', 'animate'],
     }
     events = [{
-        'event_type': 'visual',
+        'event_type': 'visual', 'block': 'animate',
         'actual_onset': np.float64(1.25),
         'response_correct': np.bool_(True),
     }]
@@ -157,6 +158,7 @@ def test_save_session_writes_numpy_metadata_as_json(tmp_path):
     assert len(header) == len(set(header)) and header[:3] == ['event_index', 'block', 'trial']
     row = next(csv.DictReader(log.splitlines()))
     assert row['correct'] == 'True' and 'response_correct' not in row
+    assert row['block_number'] == '2'
 
 
 def test_participant_metadata_write_accepts_numpy(tmp_path, monkeypatch):
