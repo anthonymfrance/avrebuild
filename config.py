@@ -53,6 +53,11 @@ AUDIO_ROLES = frozenset({'PT', 'PD'})
 BLOCK_LABELS = {'animate': 'ANIMALS', 'inanimate': 'OBJECTS'}
 
 # --- Audio ---
+# Preflight pins the OS output sink to this level before every session, so the
+# participant hears the same level on every device. Keep the in-code playback
+# gain at 1.0 so the system level is not attenuated twice.
+SYSTEM_VOLUME_PERCENT = 75
+AUDIO_VOLUME = 1.0
 AUDIO_BACKEND = 'ptb'
 AUDIO_LATENCY_MODE = 2
 AUDIO_DEVICE = 'default'
@@ -93,3 +98,7 @@ FIXATION_FLASH_DUR = 0.2
 # --- Display refresh ---
 REQUIRED_REFRESH_HZ = 120
 REFRESH_TOLERANCE_HZ = 1.0
+
+# --- Cross-device participant reservation ---
+# A preflight claim older than this is treated as abandoned and can be reused.
+PARTICIPANT_CLAIM_TTL_HOURS = 12

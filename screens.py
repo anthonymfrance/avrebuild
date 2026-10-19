@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import config
@@ -235,25 +234,18 @@ def continuation(window, kb, text, message, key_rows, block, trial):
             return True
 
 
-def rest_break(window, kb, visual, clock, duration_seconds=120):
-    """Return 'completed', 'skipped', or 'aborted'; SPACE waits for the timer."""
+def rest_break(window, kb, visual):
+    """Offer an untimed break; SPACE continues and ESCAPE aborts."""
     text = _text(window, visual, height=30)
-    rest_start = clock.getTime()
+    text.text = (
+        "You can take a 30 second break here or continue if you'd like.\n\n"
+        'Press SPACE to continue when you are ready.'
+    )
     while True:
-        remaining = max(0, math.ceil(duration_seconds - (clock.getTime() - rest_start)))
-        if remaining:
-            text.text = (
-                'Time for a 2-minute break.\n\n'
-                f'Time left: {remaining // 60}:{remaining % 60:02d}\n\n'
-            )
-        else:
-            text.text = 'Your break is over.\n\nPress SPACE to continue.'
         text.draw()
         window.flip()
-        presses = kb.getKeys(keyList=['space', 's', 'escape'], waitRelease=False, clear=True)
+        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
             return 'aborted'
-        if remaining == 0 and any(key.name == 'space' for key in presses):
+        if any(key.name == 'space' for key in presses):
             return 'completed'
-        if remaining > 0 and any(key.name == 's' for key in presses):
-            return 'skipped'

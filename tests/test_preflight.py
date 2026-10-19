@@ -39,13 +39,23 @@ def test_launcher_uses_final_storage_roots_and_preserves_failure_log(tmp_path, m
     commands = tmp_path / 'bin'
     commands.mkdir()
     dialogs = tmp_path / 'dialogs.jsonl'
+    pactl_log = tmp_path / 'pactl.jsonl'
     capture = tmp_path / 'runner.json'
     executable(commands / 'zenity', f'''#!{sys.executable}
 import json, sys
 with open({str(dialogs)!r}, 'a') as output:
     output.write(json.dumps(sys.argv[1:]) + '\\n')
 ''')
-    executable(commands / 'pactl', "#!/bin/sh\nprintf 'balance 0.00\\n'\n")
+    executable(commands / 'pactl', f'''#!{sys.executable}
+import json, sys
+with open({str(pactl_log)!r}, 'a') as output:
+    output.write(json.dumps(sys.argv[1:]) + '\\n')
+if sys.argv[1:2] == ['get-sink-volume']:
+    print('Volume: front-left: 49152 /  75% / -7.50 dB,   front-right: 49152 /  75% / -7.50 dB')
+    print('        balance 0.00')
+else:
+    print('balance 0.00')
+''')
     executable(commands / 'xrandr', "#!/bin/sh\nprintf 'HDMI-1 connected primary\\n   1920x1080 120.00*+\\n'\n")
     (tmp_path / 'gvfs').mkdir()
     mount_glob = '../server' if mounted else '../missing'
@@ -90,6 +100,10 @@ os.execv({sys.executable!r}, [{sys.executable!r}] + args)
         reported_root = next(line.split('=', 1)[1] for line in recorded['report'].splitlines()
                              if line.startswith('server_root='))
         assert Path(reported_root).resolve() == server
+    pactl_calls = [json.loads(line) for line in pactl_log.read_text().splitlines()]
+    assert ['set-sink-volume', '@DEFAULT_SINK@', '75%'] in pactl_calls
+    assert f'system_volume_percent=75\n' in recorded['report']
+    assert 'system_volume_status=pinned\n' in recorded['report']
     messages = [json.loads(line) for line in dialogs.read_text().splitlines()]
     error = next(args for args in messages if '--error' in args)
     text = next(arg.removeprefix('--text=') for arg in error if arg.startswith('--text='))
@@ -103,4 +117,14 @@ os.execv({sys.executable!r}, [{sys.executable!r}] + args)
         assert not list(tmp_path.glob('av-experiment-*'))
     else:
         assert log.parent == tmp_path
-    assert sorted(path.name for path in server_data.iterdir()) == ['participant_02']
+    expected_server_entries = {'participant_02', '.claims'} if plan_created else {'participant_02'}
+    assert {path.name for path in server_data.iterdir()} == expected_server_entries
+    if plan_created:
+        claim_files = list((server_data / '.claims').glob('participant_03.lock'))
+        assert len(claim_files) == 1
+        claim = json.loads(claim_files[0].read_text())
+        assert claim['participant_id'] == 'participant_03'
+        assert isinstance(claim['pid'], int)
+        assert claim['host'] and claim['started_utc'] and claim['token']
+    else:
+        assert not (server_data / '.claims').exists()

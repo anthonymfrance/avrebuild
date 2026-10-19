@@ -49,6 +49,10 @@ PTB → PipeWire JACK → built-in analog headphone out.
    pactl get-sink-volume @DEFAULT_SINK@   # front-left and front-right equal, balance 0.00
    ```
 
+   `preflight.sh` automatically sets the default sink to
+   `config.SYSTEM_VOLUME_PERCENT` (75%) on every launch and verifies the level,
+   so output volume does not drift between sessions or devices.
+
 4. `preflight.sh` verifies the full route itself (PTB sees the JACK-built-in
    device); it is the source of truth.
 
@@ -79,6 +83,12 @@ PTB → PipeWire JACK → built-in analog headphone out.
 ## 5. Lab server mount
 
 Server destination: `Experiments/Anthony/data/participant_NN/` (see `PREFLIGHT_SERVER_DATA_PATH` in `preflight_config.sh`).
+
+Preflight reserves each participant ID with an atomic claim in
+`Experiments/Anthony/data/.claims/participant_NN.lock` before the session
+starts. The claim records the allocating PID, host, and UTC start time, so two
+lab computers cannot both run the same participant number. Abandoned claims
+expire after `config.PARTICIPANT_CLAIM_TTL_HOURS` (12 hours).
 
 ## 6. Optional (dev only)
 
