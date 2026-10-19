@@ -282,28 +282,26 @@ def _atomic_csv(path, fieldnames, rows):
 
 
 def save_session(session_dir, events, keys, trials, metadata):
-    event_fields = list(FIELDS) + [
-        'session_time_seconds', 'planned_session_time_seconds',
-        'actual_session_time_seconds',
-        'actual_minus_planned_seconds',
-        'audio_requested_session_time', 'audio_requested_ptb_time', 'audio_backend_start_ptb_time',
-        'audio_backend_start_session_time', 'audio_timing_source', 'sound_slot',
-        'realized_soa_seconds', 'soa_error_seconds',
-        'response_status', 'response_correct', 'response_key', 'response_session_time',
-        'rt_from_actual_onset', 'rt_from_planned_onset', 'timing_flags',
-        'key', 'classification', 'associated_event_id', 'matched_event_ids',
-        'target_matches', 'correct', 'response_window_overlap', 'trial_complete',
+    event_fields = [
+        'event_index', 'block', 'trial', 'order_in_trial', 'event_type', 'role', 'stimulus', 'corner',
+        'planned_session_time_seconds', 'actual_minus_planned_seconds', 'actual_session_time_seconds',
+        'duration', 'soa', 'realized_soa_seconds', 'soa_error_seconds', 'response_window', 'timing_flags',
+        'key', 'classification', 'correct', 'rt_from_actual_onset', 'rt_from_planned_onset',
+        'response_session_time', 'trial_complete', 'target_matches', 'response_window_overlap',
+        'event_id', 'source_event_id', 'associated_event_id', 'matched_event_ids', 'slot_number',
+        'x', 'y', 'global_onset', 'trial_onset', 'sound_slot', 'audio_timing_source',
+        'audio_requested_session_time', 'audio_requested_ptb_time',
+        'audio_backend_start_ptb_time', 'audio_backend_start_session_time',
     ]
     log_rows = []
     for event in events:
         row = dict(event)
         actual_time = event.get('actual_onset')
-        row['session_time_seconds'] = actual_time if actual_time not in ('', None) else ''
         row['planned_session_time_seconds'] = event.get('runtime_planned_onset', '')
         row['actual_session_time_seconds'] = actual_time if actual_time not in (None, '') else ''
         row['actual_minus_planned_seconds'] = event.get('onset_deviation', '')
         row['classification'] = event.get('response_status', '')
-        row['response_correct'] = event.get('response_correct', '')
+        row['correct'] = event.get('response_correct', '')
         row['key'] = event.get('response_key', '')
         log_rows.append(row)
     for index, key in enumerate(keys, start=1):
@@ -311,7 +309,6 @@ def save_session(session_dir, events, keys, trials, metadata):
             'event_id': key.get('event_id', f"keypress_{index:06d}"),
             'event_type': 'keypress', 'block': key.get('block', ''),
             'trial': key.get('trial', ''),
-            'session_time_seconds': key.get('session_time', ''),
             'actual_session_time_seconds': key.get('session_time', ''),
             'key': key.get('key', ''), 'corner': key.get('corner', ''),
             'classification': key.get('classification', ''),
@@ -326,7 +323,7 @@ def save_session(session_dir, events, keys, trials, metadata):
         }
         log_rows.append(row)
     log_rows.sort(key=lambda row: (
-        float(row['session_time_seconds']) if row.get('session_time_seconds') not in ('', None)
+        float(row['actual_session_time_seconds']) if row.get('actual_session_time_seconds') not in ('', None)
         else float(row['audio_requested_session_time'])
         if row.get('audio_requested_session_time') not in ('', None)
         else float(row['planned_session_time_seconds'])
