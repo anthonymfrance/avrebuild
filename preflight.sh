@@ -263,7 +263,7 @@ add_row '✅' 'Participant ID' "$participant_id (reserved on the lab server)"
 report="$(mktemp "${TMPDIR:-/tmp}/av-preflight-${participant_id}.XXXXXX")"
 add_row '✅' 'Preflight report' 'Will be saved in the participant folder after launch'
 
-summary="Review the checks below. Red items must be fixed before starting. Yellow items need a manual check; if the lab server is unavailable you will be asked to confirm local-only storage. The experiment checks the four numpad keys and the sound before creating the participant plan."
+summary="Review the checks below. Red items must be fixed before starting. Yellow items need a manual check; if the lab server is unavailable you will be asked to confirm local-only storage. The experiment shows the finger placement screen, then checks the four numpad keys and the sound before creating the participant plan."
 zenity --list --title='AV study preflight checklist' --width=900 --height=480 \
   --text="$summary\n\nParticipant: $participant_id" \
   --column='Status' --column='Check' --column='Result' --print-column=2 \
@@ -324,7 +324,7 @@ if pw-jack env LD_PRELOAD="$pipewire_jack_lib" "$python_bin" "$study_dir/experim
   fi
   rm -f -- "$runner_log"
   if [[ ! -d "$study_dir/data/$participant_id" ]]; then
-    gui_info "The runner stopped during the numpad or sound check. No plan was created and $participant_id was not used."
+    gui_info "The runner stopped during the finger placement, numpad, or sound check. No plan was created and $participant_id was not used."
   elif ! compgen -G "$study_dir/data/$participant_id/session_*" >/dev/null; then
     gui_info "The runner stopped after creating the plan for $participant_id but before the session began. That ID is now used; run preflight again for the next participant."
   fi
