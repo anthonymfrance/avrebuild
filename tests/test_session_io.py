@@ -1,3 +1,4 @@
+import csv
 import json
 
 import pytest
@@ -152,7 +153,10 @@ def test_save_session_writes_numpy_metadata_as_json(tmp_path):
     assert stored['window_size'] == [1920, 1080]
     log = (tmp_path / 'event_log.csv').read_text()
     assert '1.25' in log
-    assert 'True' in log
+    header = log.splitlines()[0].split(',')
+    assert len(header) == len(set(header)) and header[:3] == ['event_index', 'block', 'trial']
+    row = next(csv.DictReader(log.splitlines()))
+    assert row['correct'] == 'True' and 'response_correct' not in row
 
 
 def test_participant_metadata_write_accepts_numpy(tmp_path, monkeypatch):
