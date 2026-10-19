@@ -109,17 +109,22 @@ def numpad_check(window, kb, visual):
         'num_4': 'top-left (4)', 'num_5': 'top-right (5)',
         'num_1': 'bottom-left (1)', 'num_2': 'bottom-right (2)',
     }
-    text = _text(window, visual)
+    win_w, win_h = window.size
+    text = _text(window, visual, height=26, pos=(-win_w * 0.25, 0))
+    text.wrapWidth = win_w * 0.44
+    numpad = _fit_image(window, visual, _image_path(NUMPAD_IMAGE_NAME), 0.48, 0.62)
+    numpad.pos = (win_w * 0.25, 0)
     seen = set()
     while len(seen) < len(keys):
         missing = [names[key] for key in keys if key not in seen]
         text.text = (
             'Number Key Check\n\n'
-            'Press each of the four number keys shown below once.\n\n'
+            'Press each of the four number keys shown here once.\n\n'
             f'Still to check: {", ".join(missing)}\n\n'
             'If a key does not work, turn Num Lock on and try again.'
         )
         text.draw()
+        numpad.draw()
         window.flip()
         presses = kb.getKeys(keyList=list(keys) + ['escape'], waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
@@ -218,22 +223,16 @@ def operator_screen(window, kb, visual, lines):
 
 def instructions(window, kb, visual):
     """Show the task instructions; False if ESCAPE."""
-    win_w, win_h = window.size
+    win_h = window.size[1]
 
-    top_text = _text(window, visual, height=22, pos=(0, win_h * 0.18))
+    top_text = _text(window, visual, height=22, pos=(0, win_h * 0.28))
     top_text.text = INSTRUCTIONS_TOP
 
-    numpad = _fit_image(
-        window, visual, _image_path(NUMPAD_IMAGE_NAME), 0.45, 0.28,
-    )
-    numpad.pos = (0, -win_h * 0.12)
-
-    bottom_text = _text(window, visual, height=22, pos=(0, -win_h * 0.38))
+    bottom_text = _text(window, visual, height=22, pos=(0, -win_h * 0.28))
     bottom_text.text = INSTRUCTIONS_BOTTOM
 
     while True:
         top_text.draw()
-        numpad.draw()
         bottom_text.draw()
         window.flip()
         presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
