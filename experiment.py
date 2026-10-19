@@ -17,6 +17,7 @@ from pathlib import Path
 import config
 from config import BLOCK_LABELS, TARGET_ROLES
 from participant_setup import create_participant_plan, derive_rng, verify_participant_claim
+import practice
 import screens
 from session_io import load_timeline, operator_warn, save_session, sha256_file, sync_participant
 from audio_ptb import (
@@ -334,6 +335,10 @@ def run(args):
             return
         if not screens.instructions(window, kb, visual):
             return
+        practice_outcome = practice.run(window, kb, visual, fixation, session_clock)
+        if practice_outcome == 'abort':
+            return
+        metadata['practice'] = practice_outcome
 
         session_clock.reset()
         kb.clearEvents()

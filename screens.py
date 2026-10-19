@@ -50,7 +50,7 @@ INSTRUCTIONS_BOTTOM = (
     'Every time you correctly react to your target, the cross will flash green and you will gain a point or a correct hit. Aim to maximize these.\n'
     'Every time you fail to react in time, you will gain a miss. Aim to minimize these.\n'
     'If you react to the wrong corner or the wrong object type (reacting to objects in the animals block) you will gain a false alarm. Aim to minimize these.\n\n'
-    'Press SPACE to begin.'
+    'Press SPACE to start the practice.'
 )
 INSTRUCTIONS = INSTRUCTIONS_TOP + '\n\n' + INSTRUCTIONS_BOTTOM
 
