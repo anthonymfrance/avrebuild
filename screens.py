@@ -11,21 +11,23 @@ from scoring import inter_trial_row
 # Resolve the study root from this file's location, matching experiment.py's ROOT.
 _ROOT = Path(__file__).resolve().parent
 NUMPAD_IMAGE_NAME = '4-Corner Numpad Screen Visual.png'
+FINGERS_IMAGE_NAME = 'Finger Placement Screen Visual.png'
 
 
-def _numpad_image_path():
+def _image_path(name):
     """Study root first, then the directory holding the configured background image."""
     candidates = (
-        _ROOT / NUMPAD_IMAGE_NAME,
-        (_ROOT / config.BG_SOURCE_FILE).parent / NUMPAD_IMAGE_NAME,
+        _ROOT / name,
+        (_ROOT / config.BG_SOURCE_FILE).parent / name,
     )
     for path in candidates:
         if path.is_file():
             return path
     raise FileNotFoundError(
-        'Numpad screen visual not found; looked in: '
+        f'Instruction visual {name!r} not found; looked in: '
         + ', '.join(str(path) for path in candidates)
     )
+
 
 RESPONSE_KEYS = {
     'top_left': ('num_4', 'KP_Left'),
@@ -38,7 +40,6 @@ KEY_TO_CORNER = {
 }
 ALL_KEYS = list(KEY_TO_CORNER) + ['space', 'escape']
 INSTRUCTIONS_TOP = (
-    'Focus your eyes on the cross in the middle of the screen.\n\n'
     'The experiment has two parts: an animals part and an objects part. You will be told which will come first for you.\n\n'
     'During the animals task, all animals will be your targets.\n'
     'During the objects task, all objects will be your targets.\n\n'
@@ -60,6 +61,45 @@ def _text(window, visual, height=22, **kwargs):
         window, text='', color='white', height=height,
         wrapWidth=window.size[0] * 0.8, units='pix', autoLog=False, **kwargs,
     )
+
+
+def _fit_image(window, visual, path, max_fraction_w, max_fraction_h):
+    """Build an ImageStim scaled to fit the given fractions of the window."""
+    image = visual.ImageStim(window, image=str(path), units='pix', autoLog=False)
+    img_w, img_h = image.size
+    scale = min(
+        (window.size[0] * max_fraction_w) / img_w,
+        (window.size[1] * max_fraction_h) / img_h,
+        1.0,
+    )
+    image.size = (img_w * scale, img_h * scale)
+    return image
+
+
+def finger_placement(window, kb, visual):
+    """Show where to rest the fingers before the key check; False if ESCAPE."""
+    win_w, win_h = window.size
+    text = _text(window, visual, height=26, pos=(-win_w * 0.25, 0))
+    text.text = (
+        'Hand Placement\n\n'
+        'Rest your index finger between 4 and 1.\n'
+        'Rest your middle finger between 5 and 2.\n\n'
+        'Reach up for the top number or down for the bottom number in each pair.\n\n'
+        'Keep your fingers resting on the number pad between responses, so you can respond quickly.\n\n'
+        'Press SPACE when your hand is in place.'
+    )
+    text.wrapWidth = win_w * 0.44
+    image = _fit_image(window, visual, _image_path(FINGERS_IMAGE_NAME), 0.36, 0.78)
+    image.pos = (win_w * 0.25, 0)
+    while True:
+        text.draw()
+        image.draw()
+        window.flip()
+        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+        if any(key.name == 'escape' for key in presses):
+            return False
+        if any(key.name == 'space' for key in presses):
+            return True
 
 
 def numpad_check(window, kb, visual):
@@ -183,14 +223,9 @@ def instructions(window, kb, visual):
     top_text = _text(window, visual, height=22, pos=(0, win_h * 0.18))
     top_text.text = INSTRUCTIONS_TOP
 
-    image_path = _numpad_image_path()
-    numpad = visual.ImageStim(
-        window, image=str(image_path), units='pix', autoLog=False,
+    numpad = _fit_image(
+        window, visual, _image_path(NUMPAD_IMAGE_NAME), 0.45, 0.28,
     )
-    max_w, max_h = win_w * 0.45, win_h * 0.28
-    img_w, img_h = numpad.size
-    scale = min(max_w / img_w, max_h / img_h, 1.0)
-    numpad.size = (img_w * scale, img_h * scale)
     numpad.pos = (0, -win_h * 0.12)
 
     bottom_text = _text(window, visual, height=22, pos=(0, -win_h * 0.38))

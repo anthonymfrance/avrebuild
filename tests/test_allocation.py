@@ -126,6 +126,56 @@ def test_target_corner_stays_empty_through_late_window():
                 assert not 0 <= other['global_onset'] - target['global_onset'] < TARGET_CORNER_HOLD
 
 
+def test_pt_sound_never_starts_before_previous_pt_response_window_ends():
+    from config import RESPONSE_WINDOW, WINDOW_SIZE
+    from timeline_key import validate_timeline
+    # Include participant_01's seed (11356349656583725014) where lion PT #2 sound
+    # previously started during lion PT #1's visual/response window.
+    for seed in (7, 11, 11356349656583725014):
+        assignment, slotting_rows, timeline, required, _ = participant_setup.build_plan(
+            seed, ['animate', 'inanimate'],
+        )
+        sounds_by_source = {
+            row['source_event_id']: row for row in timeline if row['event_type'] == 'sound'
+        }
+        for block in ('animate', 'inanimate'):
+            pts = sorted(
+                (row for row in timeline
+                 if row['block'] == block and row['event_type'] == 'visual' and row['role'] == 'PT'),
+                key=lambda row: row['global_onset'],
+            )
+            for earlier, later in zip(pts, pts[1:]):
+                later_sound = sounds_by_source[later['event_id']]
+                assert later_sound['global_onset'] >= earlier['global_onset'] + RESPONSE_WINDOW - 1e-9
+
+    # Also verify validate_timeline rejects a timeline where a PT's sound starts
+    # before the previous PT's 0.9s response window ends (such as participant_01's
+    # original Animate Trial 3 timeline before this rule was added).
+    import csv
+    from timeline_key import prepare_slotting_rows
+    p1_dir = Path(__file__).resolve().parents[1] / 'data' / 'participant_01'
+    if (p1_dir / 'timeline_key.csv').is_file():
+        with (p1_dir / 'slotting_key.csv').open() as f:
+            p1_slotting = prepare_slotting_rows(list(csv.DictReader(f)))
+        with (p1_dir / 'timeline_key.csv').open() as f:
+            p1_rows = list(csv.DictReader(f))
+        for row in p1_rows:
+            row['trial'] = int(row['trial'])
+            row['event_index'] = int(row['event_index'])
+            row['order_in_trial'] = int(row['order_in_trial']) if row['order_in_trial'] != '' else ''
+            row['slot_number'] = int(row['slot_number'])
+            row['x'] = float(row['x']) if row['x'] != '' else ''
+            row['y'] = float(row['y']) if row['y'] != '' else ''
+            row['global_onset'] = float(row['global_onset'])
+            row['trial_onset'] = float(row['trial_onset'])
+            row['duration'] = float(row['duration'])
+            row['soa'] = float(row['soa']) if row['soa'] != '' else ''
+            row['response_window'] = float(row['response_window']) if row['response_window'] != '' else ''
+        p1_req = [r for r in p1_rows if r['event_type'] == 'visual']
+        with pytest.raises(ValueError, match='PT sound starts before previous PT response window ends'):
+            validate_timeline(p1_slotting, p1_req, p1_rows, assignment, WINDOW_SIZE)
+
+
 def test_five_failed_seeds_leave_no_folder_and_do_not_consume_id(tmp_path, monkeypatch):
     seeds = iter(range(100, 105))
     monkeypatch.setattr(participant_setup.secrets, 'randbits', lambda _: next(seeds))

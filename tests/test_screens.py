@@ -26,8 +26,23 @@ class FakeText:
         pass
 
 
+class FakeImageStim:
+    instances = []
+
+    def __init__(self, window, image, **kwargs):
+        self.window = window
+        self.image = image
+        self.size = (1728, 2304)
+        self.pos = (0, 0)
+        FakeImageStim.instances.append(self)
+
+    def draw(self):
+        pass
+
+
 class FakeVisual:
     TextStim = FakeText
+    ImageStim = FakeImageStim
 
 
 class FakeKeyboard:
@@ -51,6 +66,32 @@ def test_rest_break_is_untimed_and_space_continues():
     assert "You can take a 30 second break here or continue if you'd like." in message
     assert '2-minute' not in message
     assert 'Time left' not in message
+
+
+def test_finger_placement_shows_hand_guide_and_space_continues():
+    FakeText.instances.clear()
+    FakeImageStim.instances.clear()
+    window = FakeWindow()
+    keyboard = FakeKeyboard(['space'])
+    assert screens.finger_placement(window, keyboard, FakeVisual()) is True
+    assert keyboard.calls == 1
+    message = FakeText.instances[-1].text
+    assert 'index finger between 4 and 1' in message
+    assert 'middle finger between 5 and 2' in message
+    image = FakeImageStim.instances[-1]
+    assert image.image.endswith(screens.FINGERS_IMAGE_NAME)
+    assert image.pos[0] > 0
+    assert image.size[0] <= 1920 * 0.36 + 1
+    assert image.size[1] <= 1080 * 0.78 + 1
+
+
+def test_finger_placement_escape_aborts():
+    FakeText.instances.clear()
+    FakeImageStim.instances.clear()
+    window = FakeWindow()
+    keyboard = FakeKeyboard(['escape'])
+    assert screens.finger_placement(window, keyboard, FakeVisual()) is False
+    assert keyboard.calls == 1
 
 
 def test_rest_break_escape_aborts():

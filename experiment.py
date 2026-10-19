@@ -248,6 +248,9 @@ def run(args):
         kb = keyboard.Keyboard(clock=session_clock)
         kb.clearEvents()
 
+        if not screens.finger_placement(window, kb, visual):
+            return
+
         if not screens.numpad_check(window, kb, visual):
             return
 

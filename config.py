@@ -56,7 +56,7 @@ BLOCK_LABELS = {'animate': 'ANIMALS', 'inanimate': 'OBJECTS'}
 # Preflight pins the OS output sink to this level before every session, so the
 # participant hears the same level on every device. Keep the in-code playback
 # gain at 1.0 so the system level is not attenuated twice.
-SYSTEM_VOLUME_PERCENT = 75
+SYSTEM_VOLUME_PERCENT = 50
 AUDIO_VOLUME = 1.0
 AUDIO_BACKEND = 'ptb'
 AUDIO_LATENCY_MODE = 2

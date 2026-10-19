@@ -203,8 +203,15 @@ def _conflict(event, onset, placed):
                 return 'target response windows overlap'
         if event['stimulus'] == other['stimulus'] and end_to_onset_gap < MIN_SAME_ITEM_GAP:
             return 'minimum same-item gap'
-        if event['role'] == other['role'] == 'PT' and end_to_onset_gap < BETWEEN_PT_STIMULUS_GAP:
-            return 'between-PT stimulus gap'
+        if event['role'] == other['role'] == 'PT':
+            if end_to_onset_gap < BETWEEN_PT_STIMULUS_GAP:
+                return 'between-PT stimulus gap'
+            later_soa = event['soa'] if onset >= other['global_onset'] else next(
+                row['soa'] for row in placed
+                if row['event_type'] == 'sound' and row['source_event_id'] == other['event_id']
+            )
+            if later_onset + FADE_IN_DUR - later_soa < earlier_onset + RESPONSE_WINDOW:
+                return 'PT sound overlaps previous PT response window'
     if event['role'] in AUDIO_ROLES:
         for other in placed:
             if other['event_type'] == 'sound' and abs(sound_onset - other['global_onset']) < SOUND_DUR + MIN_AUDIO_GAP:
@@ -255,7 +262,11 @@ def _construct_trial_schedule(events, trial_start, stats):
         if previous['stimulus'] == current['stimulus']:
             separation = max(separation, VISUAL_DURATION + MIN_SAME_ITEM_GAP)
         if previous['role'] == current['role'] == 'PT':
-            separation = max(separation, VISUAL_DURATION + BETWEEN_PT_STIMULUS_GAP)
+            separation = max(
+                separation,
+                VISUAL_DURATION + BETWEEN_PT_STIMULUS_GAP,
+                RESPONSE_WINDOW + current['soa'] - FADE_IN_DUR,
+            )
         if previous['role'] in TARGET_ROLES and current['role'] in TARGET_ROLES:
             separation = max(
                 separation,
@@ -496,13 +507,17 @@ def validate_timeline(
         for left, right in zip(block_visuals, block_visuals[1:]):
             if right['global_onset'] - left['global_onset'] < MIN_VISUAL_ONSET_GAP:
                 raise ValueError(f'{block}: minimum visual onset gap violated.')
+        sounds_by_source = {r['source_event_id']: r for r in block_sounds}
         for i, left in enumerate(block_visuals):
             for right in block_visuals[i + 1:]:
                 gap = right['global_onset'] - (left['global_onset'] + VISUAL_DURATION)
                 if left['stimulus'] == right['stimulus'] and gap < MIN_SAME_ITEM_GAP:
                     raise ValueError(f'{block}: minimum same-item gap violated.')
-                if left['role'] == right['role'] == 'PT' and gap < BETWEEN_PT_STIMULUS_GAP:
-                    raise ValueError(f'{block}: between-PT gap violated.')
+                if left['role'] == right['role'] == 'PT':
+                    if gap < BETWEEN_PT_STIMULUS_GAP:
+                        raise ValueError(f'{block}: between-PT gap violated.')
+                    if sounds_by_source[right['event_id']]['global_onset'] + 1e-9 < left['global_onset'] + RESPONSE_WINDOW:
+                        raise ValueError(f'{block}: PT sound starts before previous PT response window ends.')
                 if left['role'] in TARGET_ROLES and right['role'] in TARGET_ROLES:
                     if gap < MIN_TARGET_END_TO_ONSET_GAP:
                         raise ValueError(f'{block}: minimum target end-to-onset gap violated.')
@@ -517,7 +532,6 @@ def validate_timeline(
         for left, right in zip(block_sounds, block_sounds[1:]):
             if right['global_onset'] - left['global_onset'] < SOUND_DUR + MIN_AUDIO_GAP:
                 raise ValueError(f'{block}: sound overlap or minimum audio gap violated.')
-        sounds_by_source = {r['source_event_id']: r for r in block_sounds}
         for visual in block_visuals:
             if visual['role'] in AUDIO_ROLES:
                 sound = sounds_by_source[visual['event_id']]
