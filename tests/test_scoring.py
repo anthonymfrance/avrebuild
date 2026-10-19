@@ -1,6 +1,6 @@
 from scoring import (
-    classify_press, finalize_targets, inter_trial_row, session_false_alarms,
-    trial_feedback, trial_summary,
+    classify_press, finalize_targets, inter_trial_row, response_deadline,
+    session_false_alarms, trial_feedback, trial_summary,
 )
 
 WINDOW = 1.5
@@ -26,9 +26,33 @@ def test_wrong_corner_is_false_alarm():
     assert row['matched_event_ids'] == 'a' and row['target_matches'] == ''
 
 
-def test_duplicate_press_after_hit_is_false_alarm():
+def test_second_press_in_hit_window_is_repeat_not_false_alarm():
     row, chosen = classify_press('num_5', 'top_right', 10.6, [target('a', 'top_right', 10.0, 'hit')], WINDOW)
+    assert chosen is None and row['classification'] == 'repeat' and row['associated_event_id'] == 'a'
+    assert trial_feedback([], [row]) == (0, 0) and session_false_alarms([row]) == 0
+
+
+def test_press_in_late_window_after_hit_or_late_is_repeat():
+    for status in ('hit', 'late'):
+        row, chosen = classify_press('num_5', 'top_right', 11.2, [target('a', 'top_right', 10.0, status)], 0.9, 0.5)
+        assert chosen is None and row['classification'] == 'repeat'
+
+
+def test_press_after_late_window_following_hit_is_false_alarm():
+    row, _ = classify_press('num_5', 'top_right', 11.5, [target('a', 'top_right', 10.0, 'hit')], 0.9, 0.5)
+    assert row['classification'] == 'false_alarm' and row['associated_event_id'] == ''
+
+
+def test_next_same_corner_image_ends_stalled_targets_windows():
+    stalled = target('a', 'top_right', 10.3)
+    distractor = target('d', 'top_right', 11.4)
+    visuals = [stalled, distractor]
+    assert response_deadline(stalled, visuals, 0.9, 0.5) == 11.4
+    assert classify_press('num_5', 'top_right', 11.3, [stalled], 0.9, 0.5, visuals)[0]['classification'] == 'late'
+    row, chosen = classify_press('num_5', 'top_right', 11.6, [stalled], 0.9, 0.5, visuals)
     assert chosen is None and row['classification'] == 'false_alarm'
+    stalled['response_status'] = 'hit'
+    assert classify_press('num_5', 'top_right', 11.6, [stalled], 0.9, 0.5, visuals)[0]['classification'] == 'false_alarm'
 
 
 def test_no_active_target_is_false_alarm():
@@ -37,15 +61,27 @@ def test_no_active_target_is_false_alarm():
     assert chosen is None and row['classification'] == 'false_alarm' and row['matched_event_ids'] == ''
 
 
+def test_press_in_late_window_is_late_not_hit():
+    row, chosen = classify_press('num_5', 'top_right', 11.7, [target('a', 'top_right', 10.0)], WINDOW, 0.5)
+    assert chosen['event_id'] == 'a' and row['classification'] == 'late' and row['correct'] is False
+    assert abs(row['rt_from_actual_onset'] - 1.7) < 1e-9
+
+
+def test_late_window_wrong_corner_and_after_late_window_are_false_alarms():
+    targets = [target('a', 'top_right', 10.0)]
+    assert classify_press('num_4', 'top_left', 11.7, targets, WINDOW, 0.5)[0]['classification'] == 'false_alarm'
+    assert classify_press('num_5', 'top_right', 12.1, targets, WINDOW, 0.5)[0]['classification'] == 'false_alarm'
+
+
 def test_non_response_key_matches_nothing():
     row, chosen = classify_press('space', None, 10.2, [target('a', 'top_right', 10.0)], WINDOW)
     assert chosen is None and row['classification'] == 'false_alarm' and row['matched_event_ids'] == ''
 
 
-def test_overlap_chooses_earliest_pending():
-    targets = [target('late', 'top_right', 10.5), target('early', 'top_right', 10.0)]
+def test_overlapping_same_corner_targets_go_to_the_newer_one():
+    targets = [target('second', 'top_right', 10.5), target('first', 'top_right', 10.0)]
     row, chosen = classify_press('num_5', 'top_right', 10.8, targets, WINDOW)
-    assert chosen['event_id'] == 'early' and row['response_window_overlap'] is True
+    assert chosen['event_id'] == 'second' and row['response_window_overlap'] is True
 
 
 def test_inter_trial_press_keeps_trial_and_is_not_a_false_alarm():
@@ -68,10 +104,10 @@ def test_completed_trial_pending_target_becomes_miss():
 
 
 def test_summaries_exclude_incomplete_trials():
-    trials = [{'miss_count': 2, 'frame_count': 10, 'trial_complete': True},
-              {'miss_count': 5, 'frame_count': 4, 'trial_complete': False}]
+    trials = [{'miss_count': 2, 'late_count': 1, 'frame_count': 10, 'trial_complete': True},
+              {'miss_count': 5, 'late_count': 3, 'frame_count': 4, 'trial_complete': False}]
     assert trial_summary(trials) == {
-        'trial_count': 1, 'miss_count': 2, 'long_frame_count': 0, 'frame_count': 10,
+        'trial_count': 1, 'miss_count': 2, 'late_count': 1, 'long_frame_count': 0, 'frame_count': 10,
         'audio_requested_only_count': 0,
     }
     keys = [{'classification': 'false_alarm', 'trial_complete': True},

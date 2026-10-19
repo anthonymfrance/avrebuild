@@ -24,6 +24,7 @@ from config import (
     PT_SOA_MIN,
     RESPONSE_WINDOW,
     SOUND_DUR,
+    TARGET_CORNER_HOLD,
     TRIAL_BUFFER_DUR,
     TRIAL_CONTENT_DUR,
     TRIAL_NPD_RANGE,
@@ -179,7 +180,7 @@ def _conflict(event, onset, placed):
     if event['role'] in AUDIO_ROLES:
         if sound_onset < content_start or sound_onset + SOUND_DUR > content_end:
             return 'sound exceeds trial content'
-    if event['role'] in TARGET_ROLES and onset + RESPONSE_WINDOW > trial_end:
+    if event['role'] in TARGET_ROLES and onset + TARGET_CORNER_HOLD > trial_end:
         return 'target response window exceeds trial'
     visuals = [row for row in placed if row['event_type'] == 'visual']
     for other in visuals:
@@ -191,6 +192,10 @@ def _conflict(event, onset, placed):
             return 'minimum visual onset gap'
         if event['corner'] == other['corner'] and end_to_onset_gap < 0:
             return 'same-corner overlap'
+        earlier_role = event['role'] if onset <= other['global_onset'] else other['role']
+        if (event['corner'] == other['corner'] and earlier_role in TARGET_ROLES
+                and onset_difference < TARGET_CORNER_HOLD):
+            return 'same-corner target hold'
         if event['role'] in TARGET_ROLES and other['role'] in TARGET_ROLES:
             if end_to_onset_gap < MIN_TARGET_END_TO_ONSET_GAP:
                 return 'minimum target end-to-onset gap'
@@ -227,13 +232,17 @@ def _construct_trial_schedule(events, trial_start, stats):
         sequence = []
         while remaining:
             previous = sequence[-1]['stimulus'] if sequence else None
+            # Longer lookbacks were tested and raise placement failures.
+            held = sequence[-1]['corner'] if sequence and sequence[-1]['role'] in TARGET_ROLES else None
             eligible = [
                 index for index, event in enumerate(remaining)
                 if event['stimulus'] != previous
             ]
-            # Prefer not to repeat the preceding identity, but allow it when
-            # necessary; the configured same-item interval remains enforced.
-            index = rng.choice(eligible or range(len(remaining)))
+            unheld = [index for index in eligible if remaining[index]['corner'] != held]
+            # Prefer not to repeat the preceding identity or to follow a target
+            # in its corner, but allow it when necessary; the configured
+            # same-item interval and corner hold remain enforced.
+            index = rng.choice(unheld or eligible or range(len(remaining)))
             sequence.append(remaining.pop(index))
         return sequence
 
@@ -241,6 +250,8 @@ def _construct_trial_schedule(events, trial_start, stats):
         separation = MIN_VISUAL_ONSET_GAP
         if previous['corner'] == current['corner']:
             separation = max(separation, VISUAL_DURATION)
+            if previous['role'] in TARGET_ROLES:
+                separation = max(separation, TARGET_CORNER_HOLD)
         if previous['stimulus'] == current['stimulus']:
             separation = max(separation, VISUAL_DURATION + MIN_SAME_ITEM_GAP)
         if previous['role'] == current['role'] == 'PT':
@@ -302,7 +313,7 @@ def _construct_trial_schedule(events, trial_start, stats):
                         + event['soa'] - offsets[index],
                     )
                 if event['role'] in TARGET_ROLES:
-                    upper = min(upper, trial_end - RESPONSE_WINDOW - offsets[index])
+                    upper = min(upper, trial_end - TARGET_CORNER_HOLD - offsets[index])
             if lower > upper + 1e-9:
                 continue
 
@@ -454,7 +465,7 @@ def validate_timeline(
             expected_window = RESPONSE_WINDOW if row['role'] in TARGET_ROLES else ''
             if row['response_window'] != expected_window:
                 raise ValueError(f"{row['event_id']}: response window does not match target role.")
-            if expected_window and end - row['duration'] + row['response_window'] > start + TRIAL_DURATION:
+            if expected_window and row['global_onset'] + TARGET_CORNER_HOLD > start + TRIAL_DURATION:
                 raise ValueError(f"{row['event_id']}: response window exceeds trial end.")
 
     by_block = defaultdict(list)
@@ -475,6 +486,12 @@ def validate_timeline(
                     raise ValueError(
                         f'{block} trial {trial} corner {corner}: same-corner overlap '
                         f'({len(corner_rows)} visual events in that corner).'
+                    )
+                if left['role'] in TARGET_ROLES and \
+                        right['global_onset'] - left['global_onset'] + 1e-9 < TARGET_CORNER_HOLD:
+                    raise ValueError(
+                        f'{block} trial {trial} corner {corner}: {right["event_id"]} starts '
+                        f'inside the response/late window of target {left["event_id"]}.'
                     )
         for left, right in zip(block_visuals, block_visuals[1:]):
             if right['global_onset'] - left['global_onset'] < MIN_VISUAL_ONSET_GAP:

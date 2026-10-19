@@ -2,39 +2,78 @@
 
 Targets are runtime visual rows with at least event_id, corner, _actual_onset
 (None until drawn) and response_status ('pending' until scored).
+
+Each target ends as one of:
+  hit   first press in its corner within RESPONSE_WINDOW of its onset
+  late  first press in its corner during the LATE_WINDOW after that
+  miss  no press in its corner by the end of the late window
+Each in-trial keypress is one of:
+  hit / late   the press that decided a target's outcome
+  repeat       another press in the same corner after the target was already
+               answered, before its late window ends (a double tap or finger
+               slip); logged only, never counted as a false alarm
+  false_alarm  wrong corner, a press during a distractor, a press with no
+               target on screen, a same-corner press after the late window,
+               or a non-numpad key
+A target's windows end early if the next image in its corner actually appears
+first (only after a frame stall; the timeline keeps the corner empty), so a
+press is always scored against what was on screen.
 """
 
 from __future__ import annotations
 
 
-def classify_press(key_name, corner, key_time, targets, response_window):
+def response_deadline(target, visuals, response_window, late_window):
+    """End of a target's late window, or the next same-corner onset if earlier."""
+    onset = target['_actual_onset']
+    later_onsets = [
+        visual['_actual_onset'] for visual in visuals
+        if visual['corner'] == target['corner'] and visual['_actual_onset'] is not None
+        and visual['_actual_onset'] > onset
+    ]
+    return min([onset + response_window + late_window, *later_onsets])
+
+
+def classify_press(key_name, corner, key_time, targets, response_window, late_window=0.0, visuals=None):
     """Score one in-trial keypress; return (key_row_fields, chosen_target_or_None).
 
-    A press is a hit only for a pending target in the pressed corner whose
-    response window contains the press. Wrong corner, a repeat press on an
-    already-hit target, a press with no active target, and non-numpad keys are
-    false alarms. Targets are not modified; the caller applies the hit.
+    chosen is the pending target this press decides (hit or late); repeats and
+    false alarms return None. visuals (default: targets) are all drawn images,
+    used to end a target's windows when the next image in its corner appears.
+    Targets are not modified; the caller applies the result.
     """
+    visuals = targets if visuals is None else visuals
     active = [
         target for target in targets
         if corner and target['_actual_onset'] is not None
         and target['_actual_onset'] <= key_time <= target['_actual_onset'] + response_window
     ]
-    matching = [
-        target for target in active
-        if target['corner'] == corner and target['response_status'] == 'pending'
+    in_corner = [
+        target for target in targets
+        if corner and target['corner'] == corner and target['_actual_onset'] is not None
+        and target['_actual_onset'] <= key_time
+        <= response_deadline(target, visuals, response_window, late_window)
     ]
-    chosen = min(matching, key=lambda target: target['_actual_onset']) if matching else None
+    pending = [target for target in in_corner if target['response_status'] == 'pending']
+    matching = [t for t in pending if key_time <= t['_actual_onset'] + response_window]
+    late = [t for t in pending if key_time > t['_actual_onset'] + response_window]
+    repeats = [t for t in in_corner if t['response_status'] in ('hit', 'late')]
+    by_onset = lambda target: target['_actual_onset']
+    chosen = min(matching or late, key=by_onset, default=None)
+    classification = (
+        'hit' if matching else 'late' if late else 'repeat' if repeats else 'false_alarm'
+    )
+    associated = chosen or min(repeats, key=by_onset, default=None)
     row = {
         'session_time': key_time, 'key': key_name, 'corner': corner or '',
-        'classification': 'hit' if chosen else 'false_alarm',
+        'classification': classification,
         'matched_event_ids': '|'.join(target['event_id'] for target in active),
         'target_matches': '|'.join(target['event_id'] for target in matching),
-        'correct': bool(chosen is not None),
+        'correct': classification == 'hit',
         'response_window_overlap': bool(len(active) > 1),
-        'associated_event_id': chosen['event_id'] if chosen else '',
-        'rt_from_actual_onset': float(key_time - chosen['_actual_onset']) if chosen else '',
-        'rt_from_planned_onset': float(key_time - chosen['_planned_runtime']) if chosen else '',
+        'associated_event_id': associated['event_id'] if associated else '',
+        'rt_from_actual_onset': float(key_time - associated['_actual_onset']) if associated else '',
+        'rt_from_planned_onset': float(key_time - associated['_planned_runtime']) if associated else '',
     }
     return row, chosen
 
@@ -86,6 +125,7 @@ def trial_summary(trials):
     return {
         'trial_count': len(complete),
         'miss_count': sum(int(row.get('miss_count', 0) or 0) for row in complete),
+        'late_count': sum(int(row.get('late_count', 0) or 0) for row in complete),
         'long_frame_count': sum(int(row.get('long_frame_count', 0) or 0) for row in complete),
         'frame_count': sum(int(row.get('frame_count', 0) or 0) for row in complete),
         'audio_requested_only_count': sum(

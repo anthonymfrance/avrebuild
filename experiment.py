@@ -390,6 +390,7 @@ def run(args):
                 if aborted or not continuation(
                     f'{BLOCK_LABELS[block]} — Trial {trial} complete.\n'
                     f'Correct hits: {trial_hits}\n'
+                    f'Late responses: {trial_row["late_count"]}\n'
                     f'Misses: {trial_row["miss_count"]}\n'
                     f'False alarms: {trial_false_alarms} (please minimize these).'
                 ):
@@ -428,6 +429,7 @@ def run(args):
                         f'Participant: {args.pid}\n'
                         f'Target appearances: {len(target_events)}\n'
                         f'Valid hits: {valid_hits}\n'
+                        f'Late responses: {sum(event["response_status"] == "late" for event in target_events)}\n'
                         f'Misses: {sum(event["response_status"] == "miss" for event in target_events)}\n'
                         f'False alarms: {false_alarms}\n\n'
                         f'Data saved in:\n{session_dir}\n\n'
