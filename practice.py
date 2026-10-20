@@ -1,4 +1,7 @@
-"""Hardcoded practice. Same shapes for every participant. Nothing is logged.
+"""Hardcoded practice. Same shapes for every participant.
+
+Rows are returned to the caller so practice can be saved even when it is
+skipped or aborted; nothing here writes files.
 
 PsychoPy objects are passed in; this module never imports PsychoPy.
 """
@@ -92,6 +95,17 @@ def paced_end(events=PACED):
     return last + config.RESPONSE_WINDOW + config.LATE_WINDOW + 0.3
 
 
+def _row(phase, step='', event_id='', time_seconds='', key='', corner='',
+         expected_corner='', classification='', rt_seconds='', outcome=''):
+    """One practice_log.csv row; blank fields stay blank."""
+    return {
+        'phase': phase, 'step': step, 'event_id': event_id,
+        'time_seconds': time_seconds, 'key': key, 'corner': corner,
+        'expected_corner': expected_corner, 'classification': classification,
+        'rt_seconds': rt_seconds, 'outcome': outcome,
+    }
+
+
 def intro(window, kb, visual):
     """'start', 'skipped', or 'abort'."""
     text = _text(window, visual)
@@ -99,8 +113,7 @@ def intro(window, kb, visual):
         'Practice\n\n'
         'Circles are targets. Squares are not.\n'
         'Everyone sees this same practice. It is not part of your score.\n\n'
-        'Press SPACE to start.\n'
-        'Operator: press S to skip.'
+        'Press SPACE to start.'
     )
     while True:
         text.draw()
@@ -115,17 +128,48 @@ def intro(window, kb, visual):
 
 
 def run(window, kb, visual, fixation, clock):
-    """'completed', 'skipped', or 'abort'. Draws nothing into the trial logs."""
+    """Run practice and return {'status', 'rows', 'summary'}.
+
+    status is 'completed', 'skipped', or 'abort'. rows are practice_log.csv
+    rows, collected even when the participant skips or aborts, so the caller can
+    still save what happened.
+    """
+    started = float(clock.getTime())
+    rows = []
+    summary = {
+        'status': 'completed',
+        'duration_seconds': 0.0,
+        'coached_steps': len(COACHED),
+        'coached_corrections': 0,
+        'paced_hits': 0,
+        'paced_late': 0,
+        'paced_misses': 0,
+        'paced_false_alarms': 0,
+    }
+
+    def finish(status):
+        summary['status'] = status
+        summary['duration_seconds'] = float(clock.getTime()) - started
+        return {'status': status, 'rows': rows, 'summary': summary}
+
     try:
         decision = intro(window, kb, visual)
         if decision != 'start':
-            return decision
+            rows.append(_row(
+                'intro', classification=decision, outcome='practice_not_run',
+            ))
+            return finish('abort' if decision == 'abort' else 'skipped')
         stims = _make_shapes(window, visual)
         text = _text(window, visual)
         kb.clearEvents()
-        for step in COACHED:
-            if _coached(window, kb, clock, fixation, text, stims, step) == 'abort':
-                return 'abort'
+        for step_number, step in enumerate(COACHED, start=1):
+            outcome = _coached(
+                window, kb, clock, fixation, text, stims, step, step_number, rows,
+            )
+            if outcome == 'abort':
+                return finish('abort')
+            if outcome == 'corrected':
+                summary['coached_corrections'] += 1
         if _hold(
             window, kb, text,
             'Now at the real speed.\n'
@@ -133,13 +177,19 @@ def run(window, kb, visual, fixation, clock):
             'The cross flashes green when you are correct.\n\n'
             'Press SPACE to start.',
         ) == 'abort':
-            return 'abort'
-        outcome, targets, false_alarms = _paced(window, kb, clock, fixation, text, stims)
-        if outcome == 'abort':
-            return 'abort'
+            return finish('abort')
+        paced_outcome, targets, false_alarms = _paced(
+            window, kb, clock, fixation, text, stims, rows,
+        )
+        summary['paced_false_alarms'] = false_alarms
+        summary['paced_hits'] = sum(t['response_status'] == 'hit' for t in targets)
+        summary['paced_late'] = sum(t['response_status'] == 'late' for t in targets)
+        summary['paced_misses'] = sum(t['response_status'] == 'miss' for t in targets)
+        if paced_outcome == 'abort':
+            return finish('abort')
         if _summary(window, kb, visual, targets, false_alarms) == 'abort':
-            return 'abort'
-        return 'completed'
+            return finish('abort')
+        return finish('completed')
     finally:
         fixation.lineColor = config.FIXATION_COLOR
 
@@ -175,7 +225,8 @@ def _frame(window, fixation, text, shapes, caption, green):
     window.flip()
 
 
-def _coached(window, kb, clock, fixation, text, stims, step):
+def _coached(window, kb, clock, fixation, text, stims, step, step_number, rows):
+    """One coached step. Returns 'ok', 'corrected', or 'abort'."""
     width, height = window.size
     placed = [
         (stims[kind], corner_xy(width, height, corner, offset))
@@ -183,6 +234,7 @@ def _coached(window, kb, clock, fixation, text, stims, step):
     ]
     notice = ''
     expect = step['expect']
+    corrected = False
     while True:
         caption = step['prompt'] if not notice else f"{step['prompt']}\n\n{notice}"
         _frame(
@@ -192,18 +244,41 @@ def _coached(window, kb, clock, fixation, text, stims, step):
         presses = kb.getKeys(keyList=ALL_KEYS, waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
             return 'abort'
+        number_presses = [press for press in presses if press.name in KEY_TO_CORNER]
         if expect is None:
-            if any(key.name in KEY_TO_CORNER for key in presses):
+            for press in number_presses:
+                corrected = True
+                rows.append(_row(
+                    'coached', step_number, '', float(press.rt), press.name,
+                    KEY_TO_CORNER[press.name], '', 'false_alarm', '',
+                ))
                 notice = 'That would be a false alarm. Squares are not targets.'
-            elif any(key.name == 'space' for key in presses):
-                return 'ok'
+            if any(key.name == 'space' for key in presses):
+                rows.append(_row(
+                    'coached', step_number, classification='step_result',
+                    outcome='false_alarm_prompted' if corrected else 'no_false_alarm',
+                ))
+                return 'corrected' if corrected else 'ok'
             continue
-        for press in presses:
-            corner = KEY_TO_CORNER.get(press.name)
-            if corner is None:
-                continue
+        for press in number_presses:
+            corner = KEY_TO_CORNER[press.name]
             if corner == expect:
-                return _acknowledge(window, kb, clock, fixation, text, placed)
+                rows.append(_row(
+                    'coached', step_number, '', float(press.rt), press.name,
+                    corner, expect, 'correct', '',
+                ))
+                rows.append(_row(
+                    'coached', step_number, classification='step_result',
+                    outcome='corrected' if corrected else 'first_try',
+                ))
+                if _acknowledge(window, kb, clock, fixation, text, placed) == 'abort':
+                    return 'abort'
+                return 'corrected' if corrected else 'ok'
+            corrected = True
+            rows.append(_row(
+                'coached', step_number, '', float(press.rt), press.name,
+                corner, expect, 'wrong_corner', '',
+            ))
             notice = _miss_notice(corner, expect, step['shapes'])
 
 
@@ -244,13 +319,15 @@ def _hold(window, kb, text, message):
             return 'ok'
 
 
-def _paced(window, kb, clock, fixation, text, stims):
+def _paced(window, kb, clock, fixation, text, stims, rows):
+    """Paced round. Returns ('ok'|'abort', targets, false_alarms)."""
     width, height = window.size
     targets = paced_targets()
     t0 = float(clock.getTime())
     green_until = -1.0
     false_alarms = 0
     kb.clearEvents()
+    aborted = False
     while float(clock.getTime()) - t0 < paced_end():
         now = float(clock.getTime()) - t0
         drawn = []
@@ -267,9 +344,14 @@ def _paced(window, kb, clock, fixation, text, stims):
         )
         for press in kb.getKeys(keyList=ALL_KEYS, waitRelease=False, clear=True):
             if press.name == 'escape':
-                return 'abort', targets, false_alarms
+                aborted = True
+                break
             corner = KEY_TO_CORNER.get(press.name)
             if corner is None:
+                rows.append(_row(
+                    'paced', '', '', float(press.rt) - t0, press.name, '',
+                    '', 'ignored_key', '',
+                ))
                 continue
             row, chosen = classify_press(
                 press.name, corner, float(press.rt) - t0,
@@ -277,12 +359,26 @@ def _paced(window, kb, clock, fixation, text, stims):
             )
             if chosen is not None:
                 chosen['response_status'] = row['classification']
+                chosen['response_key'] = press.name
+                chosen['rt_from_actual_onset'] = row['rt_from_actual_onset']
+            rows.append(_row(
+                'paced', '', '', float(press.rt) - t0, press.name, corner, '',
+                row['classification'], row['rt_from_actual_onset'],
+            ))
             if row['classification'] == 'hit':
                 green_until = float(press.rt) + config.FIXATION_FLASH_DUR
             elif row['classification'] == 'false_alarm':
                 false_alarms += 1
-    finalize_targets(targets, True)
-    return 'ok', targets, false_alarms
+        if aborted:
+            break
+    finalize_targets(targets, not aborted)
+    for target in targets:
+        rows.append(_row(
+            'paced', '', target['event_id'], target['_actual_onset'],
+            target.get('response_key', ''), target['corner'], target['corner'],
+            target['response_status'], target.get('rt_from_actual_onset', ''),
+        ))
+    return ('abort' if aborted else 'ok'), targets, false_alarms
 
 
 def _summary(window, kb, visual, targets, false_alarms):

@@ -130,6 +130,35 @@ def test_json_default_numpy_scalars_and_rejects_unknown():
         session_io.json_default(object())
 
 
+def test_save_session_writes_one_row_per_trial(tmp_path):
+    metadata = {'timeline_order': ['inanimate', 'animate']}
+    trials = [
+        {'block': 'animate', 'trial': 2, 'trial_complete': True, 'frame_count': 1200,
+         'long_frame_count': 1, 'max_frame_interval': 0.02, 'miss_count': 3, 'late_count': 1,
+         'trial_start_session_time': 24.0, 'trial_end_session_time': 48.0},
+        {'block': 'animate', 'trial': 1, 'trial_complete': True, 'frame_count': 1190,
+         'long_frame_count': 0, 'max_frame_interval': 0.009, 'miss_count': 0, 'late_count': 0},
+        {'block': 'inanimate', 'trial': 1, 'trial_complete': False},
+    ]
+    session_io.save_session(tmp_path, [], [], trials, metadata)
+    rows = list(csv.DictReader((tmp_path / 'trial_log.csv').open()))
+    assert [(row['block_number'], row['trial']) for row in rows] == [('1', '1'), ('2', '1'), ('2', '2')]
+    animated = {row['trial']: row for row in rows if row['block'] == 'animate'}
+    assert animated['2']['long_frame_count'] == '1' and animated['2']['miss_count'] == '3'
+    assert animated['1']['late_count'] == '0'
+    incomplete = rows[0]
+    assert incomplete['trial_complete'] == 'False' and incomplete['frame_count'] == ''
+
+
+def test_write_practice_log_keeps_skipped_practice(tmp_path):
+    rows = [{'phase': 'intro', 'classification': 'skipped', 'outcome': 'practice_not_run'}]
+    session_io.write_practice_log(tmp_path / 'practice_log.csv', rows)
+    stored = list(csv.DictReader((tmp_path / 'practice_log.csv').open()))
+    assert stored[0]['classification'] == 'skipped'
+    assert stored[0]['outcome'] == 'practice_not_run'
+    assert set(stored[0]) == set(session_io.PRACTICE_LOG_FIELDS)
+
+
 def test_save_session_writes_numpy_metadata_as_json(tmp_path):
     np = pytest.importorskip('numpy')
     metadata = {

@@ -262,6 +262,24 @@ def copy_participant_tree(local_dir: Path, destination: Path) -> dict:
         }
 
 
+TRIAL_LOG_FIELDS = [
+    'block', 'block_number', 'trial', 'trial_complete',
+    'trial_start_session_time', 'trial_end_session_time',
+    'frame_count', 'long_frame_count', 'mean_frame_interval', 'median_frame_interval',
+    'max_frame_interval', 'miss_count', 'late_count', 'audio_requested_only_count',
+]
+
+PRACTICE_LOG_FIELDS = [
+    'phase', 'step', 'event_id', 'time_seconds', 'key', 'corner',
+    'expected_corner', 'classification', 'rt_seconds', 'outcome',
+]
+
+
+def write_practice_log(path, rows):
+    """Write practice rows, including the single row for a skipped practice."""
+    _atomic_csv(path, PRACTICE_LOG_FIELDS, rows or [])
+
+
 def _atomic_csv(path, fieldnames, rows):
     path = Path(path)
     fd, temp_name = tempfile.mkstemp(prefix=f'.{path.name}.', dir=path.parent)
@@ -335,6 +353,17 @@ def save_session(session_dir, events, keys, trials, metadata):
         0 if row.get('event_type') != 'keypress' else 1,
     ))
     _atomic_csv(session_dir / 'event_log.csv', event_fields, log_rows)
+    # Per-trial stats are computed in trial_runner and were previously reduced
+    # to session totals; keep the rows so a session can be audited per trial.
+    trial_log_rows = [
+        dict(row, block_number=block_numbers.get(row.get('block'), ''))
+        for row in trials
+    ]
+    trial_log_rows.sort(key=lambda row: (
+        row['block_number'] if row['block_number'] != '' else math.inf,
+        float(row['trial']) if str(row.get('trial', '')).isdigit() else math.inf,
+    ))
+    _atomic_csv(session_dir / 'trial_log.csv', TRIAL_LOG_FIELDS, trial_log_rows)
     metadata['trial_summary'] = trial_summary(trials)
     metadata['last_saved_utc'] = datetime.now(timezone.utc).isoformat()
     temp_path = session_dir / '.session_metadata.json.tmp'

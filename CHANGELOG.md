@@ -144,3 +144,49 @@ Baseline across 9 pilot sessions (1604 visuals): visual `onset_deviation` mean +
 
 ## Known issues (not fixed, need a decision)
 - None.
+
+## 2026-10-20 pilot-prep changes
+
+- **Non-response keys are no longer false alarms** (`scoring.classify_press`). A key with no
+  response corner (SPACE, letters, modifiers) returns classification `ignored_key`, is logged, and
+  is never counted as a false alarm. New classification value: `ignored_key`. Pressing SPACE during
+  a trial used to score a false alarm, while practice ignored the same key.
+- **Participants are told the rules they are scored by** (`screens.scoring_rules`). A new screen
+  between the instructions and practice defines hit, late, miss and false alarm, with the window
+  numbers read from `config`. This closes the gap where the between-trial screen reported a "late"
+  count for a category nobody had defined. `INSTRUCTIONS_BOTTOM` now says "gain a miss or a late
+  response; the next screen explains the difference", and its last line is "Press SPACE to
+  continue." One extra screen: instructions → scoring rules → practice.
+- **Practice is saved, including when it is skipped or aborted** (`practice.run` now returns
+  `{'status', 'rows', 'summary'}`). Rows are written to `practice_log.csv`: `session_NN/practice_log.csv`
+  when a session starts, and `data/<pid>/practice_log.csv` if the run aborts during practice, where
+  no session folder exists yet. A skipped practice leaves one row with classification `skipped`.
+  `session_metadata.json` `practice` is now a dict of counts instead of a status string.
+- **The break counts down and its real duration is recorded** (`screens.rest_break`, new
+  `config.BREAK_OFFER_SECONDS = 30`). The screen continues on its own at zero, SPACE ends it early,
+  ESCAPE aborts. `session_metadata.json` now has `breaks: [{break_number, after_block,
+  offer_seconds, elapsed_seconds, ended_early, outcome}]`. `break_skip_info` is gone; its
+  `break_was_skipped` could never be true and `break_offer_seconds: 30` was recorded for a screen
+  that was not timed.
+- **Per-trial stats are persisted** as `session_NN/trial_log.csv` (`session_io.TRIAL_LOG_FIELDS`):
+  frame count, long-frame count, mean/median/max frame interval, miss and late counts, trial start
+  and end, `trial_complete`, `audio_requested_only_count`. These were computed by `run_trial` but
+  only ever reduced to session totals in `metadata['trial_summary']`, so per-trial frame health and
+  error clustering could not be audited after a session.
+- **Existing plans are refused after this change**, because `config.BREAK_OFFER_SECONDS` is part of
+  the config snapshot compared by `load_timeline`. `data/participant_01` can no longer be replayed;
+  new participants generate new plans.
+- Test that re-validated `data/participant_01/timeline_key.csv` against a hard-coded earlier seed
+  replaced with a violating timeline the test builds itself, so it no longer depends on whichever
+  plan happens to be in `data/`.
+
+### Verify in pilot
+- SPACE pressed inside a trial appears in `event_log.csv` as `ignored_key` and adds nothing to the
+  false-alarm count on the between-trial or completion screen.
+- The scoring-rules screen fits on the display without clipping and reads clearly at 24 px.
+- The break countdown reaches 0 and continues without a keypress; `breaks[0].elapsed_seconds`
+  matches wall-clock time, and `ended_early` is true when a participant presses SPACE early.
+- `practice_log.csv` exists in the session folder, and a skipped practice leaves the single
+  `skipped` row.
+- `trial_log.csv` has one row per completed or aborted trial and its `miss_count`/`late_count` sum
+  to the same totals as `trial_summary`.

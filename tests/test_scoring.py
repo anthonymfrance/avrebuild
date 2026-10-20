@@ -73,9 +73,11 @@ def test_late_window_wrong_corner_and_after_late_window_are_false_alarms():
     assert classify_press('num_5', 'top_right', 12.1, targets, WINDOW, 0.5)[0]['classification'] == 'false_alarm'
 
 
-def test_non_response_key_matches_nothing():
+def test_non_response_key_is_ignored_not_a_false_alarm():
     row, chosen = classify_press('space', None, 10.2, [target('a', 'top_right', 10.0)], WINDOW)
-    assert chosen is None and row['classification'] == 'false_alarm' and row['matched_event_ids'] == ''
+    assert chosen is None and row['classification'] == 'ignored_key' and row['matched_event_ids'] == ''
+    assert row['correct'] is False and row['associated_event_id'] == ''
+    assert session_false_alarms([row]) == 0 and trial_feedback([], [row]) == (0, 0)
 
 
 def test_overlapping_same_corner_targets_go_to_the_newer_one():

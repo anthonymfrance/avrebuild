@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import config
@@ -49,11 +50,27 @@ INSTRUCTIONS_TOP = (
 )
 INSTRUCTIONS_BOTTOM = (
     'Every time you correctly react to your target, the cross will flash green and you will gain a point or a correct hit. Aim to maximize these.\n'
-    'Every time you fail to react in time, you will gain a miss. Aim to minimize these.\n'
+    'If you do not react in time you will gain a miss or a late response; the next screen explains the difference.\n'
     'If you react to the wrong corner or the wrong object type (reacting to objects in the animals block) you will gain a false alarm. Aim to minimize these.\n\n'
-    'Press SPACE to start the practice.'
+    'Press SPACE to continue.'
 )
 INSTRUCTIONS = INSTRUCTIONS_TOP + '\n\n' + INSTRUCTIONS_BOTTOM
+
+# The four outcomes the scorer actually produces, in the participant's words.
+# Keep the numbers derived from config so the screen cannot drift from scoring.
+SCORING_RULES = (
+    'How your responses are scored\n\n'
+    f'Hit: the right number key within {config.RESPONSE_WINDOW:g} seconds of the target appearing.\n'
+    '     The cross flashes green.\n'
+    f'Late: the right number key, but after {config.RESPONSE_WINDOW:g} seconds and within '
+    f'{config.TARGET_CORNER_HOLD:g} seconds.\n'
+    '     A late response is not a miss.\n'
+    f'Miss: no key in the target\'s corner within {config.TARGET_CORNER_HOLD:g} seconds.\n'
+    'False alarm: a key in the wrong corner, a key for a picture that is not your target,\n'
+    '     or a key when no target is on screen.\n\n'
+    'Only 1, 2, 4 and 5 count as responses. Any other key is ignored.\n\n'
+    'Press SPACE to start the practice.'
+)
 
 
 def _text(window, visual, height=22, **kwargs):
@@ -242,6 +259,20 @@ def instructions(window, kb, visual):
             return True
 
 
+def scoring_rules(window, kb, visual):
+    """Explain the four scored outcomes before practice; False if ESCAPE."""
+    text = _text(window, visual, height=24)
+    text.text = SCORING_RULES
+    while True:
+        text.draw()
+        window.flip()
+        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+        if any(key.name == 'escape' for key in presses):
+            return False
+        if any(key.name == 'space' for key in presses):
+            return True
+
+
 def continuation(window, kb, text, message, key_rows, block, trial):
     """Between-trial screen. Response keys are logged as inter_trial; False if ESCAPE."""
     text.text = message + '\n\nPress SPACE to continue.'
@@ -268,18 +299,28 @@ def continuation(window, kb, text, message, key_rows, block, trial):
             return True
 
 
-def rest_break(window, kb, visual):
-    """Offer an untimed break; SPACE continues and ESCAPE aborts."""
+def rest_break(window, kb, visual, clock, duration=config.BREAK_OFFER_SECONDS):
+    """Count down a break; returns ('completed'|'aborted', seconds actually taken).
+
+    The break ends at zero, so a participant who does not press anything still
+    continues on their own. SPACE ends it early and ESCAPE aborts.
+    """
     text = _text(window, visual, height=30)
-    text.text = (
-        "You can take a 30 second break here or continue if you'd like.\n\n"
-        'Press SPACE to continue when you are ready.'
-    )
+    start = float(clock.getTime())
     while True:
+        elapsed = float(clock.getTime()) - start
+        remaining = max(0.0, duration - elapsed)
+        text.text = (
+            f'Break — the study continues on its own in {math.ceil(remaining)} seconds.\n\n'
+            'Rest your eyes and hands, then carry on when you are ready.\n\n'
+            'Press SPACE to continue now.'
+        )
         text.draw()
         window.flip()
         presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
-            return 'aborted'
+            return 'aborted', elapsed
         if any(key.name == 'space' for key in presses):
-            return 'completed'
+            return 'completed', elapsed
+        if remaining <= 0:
+            return 'completed', float(clock.getTime()) - start

@@ -19,7 +19,9 @@ from config import BLOCK_LABELS, TARGET_ROLES
 from participant_setup import create_participant_plan, derive_rng, verify_participant_claim
 import practice
 import screens
-from session_io import load_timeline, operator_warn, save_session, sha256_file, sync_participant
+from session_io import (
+    load_timeline, operator_warn, save_session, sha256_file, sync_participant, write_practice_log,
+)
 from audio_ptb import (
     AUDIO_START_SOURCE, assign_sound_slots, backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio,
 )
@@ -338,10 +340,15 @@ def run(args):
             return
         if not screens.instructions(window, kb, visual):
             return
-        practice_outcome = practice.run(window, kb, visual, fixation, session_clock)
-        if practice_outcome == 'abort':
+        if not screens.scoring_rules(window, kb, visual):
             return
-        metadata['practice'] = practice_outcome
+        practice_result = practice.run(window, kb, visual, fixation, session_clock)
+        metadata['practice'] = practice_result['summary']
+        if practice_result['status'] == 'abort':
+            # No session folder exists yet, but the participant folder does, so
+            # an abort during practice still leaves the practice rows behind.
+            write_practice_log(pid_dir / 'practice_log.csv', practice_result['rows'])
+            return
 
         session_clock.reset()
         kb.clearEvents()
@@ -360,6 +367,7 @@ def run(args):
         except (OSError, subprocess.CalledProcessError):
             metadata['git_commit'] = None
         metadata['session_dir'] = str(session_dir)
+        write_practice_log(session_dir / 'practice_log.csv', practice_result['rows'])
 
         window_text = visual.TextStim(
             window, text='', color='white', height=28,
@@ -429,16 +437,19 @@ def run(args):
                     aborted = True
                     break
             if not aborted and block_index < len(block_order) - 1:
-                rest_start_time = session_clock.getTime()
-                break_outcome = screens.rest_break(window, kb, visual)
-                break_duration = session_clock.getTime() - rest_start_time
-                metadata['break_skip_info'] = {
+                break_outcome, break_duration = screens.rest_break(
+                    window, kb, visual, session_clock,
+                )
+                # Countdown breaks always end on their own, so the outcome is only
+                # ever 'completed' or 'aborted'; the elapsed time is the real data.
+                metadata.setdefault('breaks', []).append({
                     'break_number': block_index + 1,
-                    'break_duration_seconds': break_duration,
-                    'break_was_skipped': break_outcome == 'skipped',
-                    'break_outcome': break_outcome,
-                    'break_offer_seconds': 30,
-                }
+                    'after_block': block,
+                    'offer_seconds': config.BREAK_OFFER_SECONDS,
+                    'elapsed_seconds': break_duration,
+                    'ended_early': break_duration < config.BREAK_OFFER_SECONDS,
+                    'outcome': break_outcome,
+                })
                 aborted = break_outcome == 'aborted'
             if aborted:
                 break

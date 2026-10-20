@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+import config
 import screens
 
 
@@ -64,17 +65,55 @@ class FakeKeyboard:
         return [SimpleNamespace(name=key) for key in self.keys]
 
 
-def test_rest_break_is_untimed_and_space_continues():
+class FakeClock:
+    def __init__(self, advance=0.0):
+        self.now = 0.0
+        self.advance = advance
+
+    def getTime(self):
+        self.now += self.advance
+        return self.now
+
+
+def test_rest_break_counts_down_and_space_ends_it_early():
     FakeText.instances.clear()
     window = FakeWindow()
     keyboard = FakeKeyboard(['space'])
-    assert screens.rest_break(window, keyboard, FakeVisual()) == 'completed'
+    outcome, elapsed = screens.rest_break(window, keyboard, FakeVisual(), FakeClock())
+    assert outcome == 'completed' and elapsed == 0.0
     assert keyboard.calls == 1
     assert window.flips == 1
     message = FakeText.instances[-1].text
-    assert "You can take a 30 second break here or continue if you'd like." in message
+    assert 'the study continues on its own in 30 seconds' in message
+    assert 'Press SPACE to continue now' in message
     assert '2-minute' not in message
-    assert 'Time left' not in message
+
+
+def test_rest_break_continues_by_itself_when_the_countdown_ends():
+    FakeText.instances.clear()
+    window = FakeWindow()
+    keyboard = FakeKeyboard([])
+    clock = FakeClock(advance=1.0)
+    outcome, elapsed = screens.rest_break(window, keyboard, FakeVisual(), clock)
+    assert outcome == 'completed' and elapsed >= 30
+    assert keyboard.calls > 1
+    assert 'in 0 seconds' in FakeText.instances[-1].text
+
+
+def test_scoring_rules_screen_defines_every_outcome():
+    FakeText.instances.clear()
+    FakeImageStim.instances.clear()
+    window = FakeWindow()
+    keyboard = FakeKeyboard(['space'])
+    assert screens.scoring_rules(window, keyboard, FakeVisual()) is True
+    assert keyboard.calls == 1
+    assert FakeImageStim.instances == []
+    message = FakeText.instances[-1].text
+    for word in ('Hit:', 'Late:', 'Miss:', 'False alarm:'):
+        assert word in message
+    assert f'{config.RESPONSE_WINDOW:g} seconds' in message
+    assert f'{config.TARGET_CORNER_HOLD:g} seconds' in message
+    assert 'Press SPACE to start the practice.' in message
 
 
 def test_numpad_check_shows_the_numpad_guide_and_checks_every_key():
@@ -144,6 +183,7 @@ def test_rest_break_escape_aborts():
     FakeText.instances.clear()
     window = FakeWindow()
     keyboard = FakeKeyboard(['escape'])
-    assert screens.rest_break(window, keyboard, FakeVisual()) == 'aborted'
+    outcome, _elapsed = screens.rest_break(window, keyboard, FakeVisual(), FakeClock())
+    assert outcome == 'aborted'
     assert keyboard.calls == 1
     assert window.flips == 1

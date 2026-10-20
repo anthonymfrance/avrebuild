@@ -13,8 +13,9 @@ Each in-trial keypress is one of:
                answered, before its late window ends (a double tap or finger
                slip); logged only, never counted as a false alarm
   false_alarm  wrong corner, a press during a distractor, a press with no
-               target on screen, a same-corner press after the late window,
-               or a non-numpad key
+               target on screen, or a same-corner press after the late window
+  ignored_key  a key that is not a response key (for example SPACE); logged
+               only, never scored, so a resting hand is not an error
 A target's windows end early if the next image in its corner actually appears
 first (only after a frame stall; the timeline keeps the corner empty), so a
 press is always scored against what was on screen.
@@ -42,6 +43,16 @@ def classify_press(key_name, corner, key_time, targets, response_window, late_wi
     used to end a target's windows when the next image in its corner appears.
     Targets are not modified; the caller applies the result.
     """
+    if not corner:
+        # A key with no response corner (SPACE, letters, modifiers) is not a
+        # response and must not be scored as a false alarm.
+        return {
+            'session_time': key_time, 'key': key_name, 'corner': '',
+            'classification': 'ignored_key',
+            'matched_event_ids': '', 'target_matches': '', 'correct': False,
+            'response_window_overlap': False, 'associated_event_id': '',
+            'rt_from_actual_onset': '', 'rt_from_planned_onset': '',
+        }, None
     visuals = targets if visuals is None else visuals
     active = [
         target for target in targets

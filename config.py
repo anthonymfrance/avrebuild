@@ -40,6 +40,11 @@ TRIAL_BUFFER_DUR = 2.0     # applied at both the start and the end of the trial
 TRIAL_CONTENT_DUR = 20.0
 BETWEEN_PT_STIMULUS_GAP = 0.5
 
+# --- Between-block break ---
+# The break screen counts down from this and continues on its own at zero; the
+# elapsed time a participant actually takes is recorded in session metadata.
+BREAK_OFFER_SECONDS = 30
+
 # --- Derived timing, roles, and labels ---
 VISUAL_DURATION = FADE_IN_DUR + PEAK_HOLD_DUR + FADE_OUT_DUR
 TRIAL_DURATION = 2 * TRIAL_BUFFER_DUR + TRIAL_CONTENT_DUR
