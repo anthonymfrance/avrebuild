@@ -340,6 +340,11 @@ row, all `placement_failure_within_capacity`):
 | PT (2, 3) / NPT (9, 10) | 11-13 | **100** | **6/30 (20%)** | 63.3% | **100%** |
 | PT (3, 5) / NPT (7, 8) | 10-13 | 8 | 1.7% (n=60) | 98.3% | 100% |
 | PT (3, 5) / NPT (7, 8) | 10-13 | **100** | **9/30 (30%)** | 53.3% | **99.8%** |
+| PT (3, 4) / NPT (9, 10) | 12-14 | 8 | 16% (n=100) | 72.0% | 100% |
+| PT (3, 4) / NPT (9, 10) | 12-14 | **100** | **29/30 (96.7%)** | 3.3% | **15.6%** |
+| PT (4, 5) / NPT (8, 9) | 12-14 | 8 | 20% (n=100) | 72.0% | 100% |
+| PT (4, 5) / NPT (8, 9) | 12-14 | **100** | **30/30 (100%)** | 0.0% | **0.0%** |
+| PT (3, 4) / NPT (9, 10), NPD (14, 20) | 12-14 | **100** | **15/30 (50%)** | 30.0% | **96.9%** |
 | recommended 30 s plan | 12-14 | **68** | **0/30** | 100% | 100% |
 | option A + PT (3, 5) | 12-15 | **68** | **0/30** | 100% | 100% |
 | option A + PT (3, 6) | 12-16 | **68** | **0/30** | 100% | 100% |
@@ -348,6 +353,22 @@ row, all `placement_failure_within_capacity`):
 identical to 11-13 at 8 trials (16/100 both) and collapses to a 29% chance of ever
 producing a plan when the plan is 100 trials long. Do the sweep at the plan length
 you are going to run.
+
+**12-14 targets — the range the supervisor asked for — is not reachable in a 20 s
+window either.** Measured directly, both ways of splitting it fail, and lowering
+NPD to buy room does not save it:
+
+| Split | Targets | Prevalence | Plan failures | Within 5 seeds |
+| --- | --- | --- | --- | --- |
+| PT (3, 4) / NPT (9, 10), NPD (20, 28) | 12-14 | 32% | 29/30 (96.7%) | 15.6% |
+| PT (4, 5) / NPT (8, 9), NPD (20, 28) | 12-14 | 32% | 30/30 (100%) | 0.0% |
+| PT (3, 4) / NPT (9, 10), NPD (14, 20) | 12-14 | 38% | 15/30 (50%) | 96.9% |
+
+The third row is the one worth reading: cutting NPD from 24 to 17 does halve the
+failure rate, but it still fails half the time within the 5-seed budget, and it
+pushes prevalence to 38% — nearly double the pilot's 22% — so the "more targets"
+effect would be confounded with a much easier target-detection condition. There
+is no 20 s configuration at 12-14 targets that is both generatable and clean.
 
 For the 20 s window this leaves two viable target splits at 100 trials:
 **11-13** (PT 2-3 / NPT 9-10, 100% within 5 seeds) and **10-13** (PT 3-5 / NPT 7-8,
@@ -481,7 +502,9 @@ manipulation or reported. Verified at the real plan length of 100 trials (n=30):
 
 Do not use PT (3, 5) with NPT (8, 9) (11-14 targets) here, even though it tests
 clean at 8 trials: at 100 trials it fails 28/30 and only 29% of participants would
-get a plan at all (section 3.3.4).
+get a plan at all (section 3.3.4). **12-14 targets is also out** — 96.7% and 100%
+plan failure in the two splits that produce it, and 50% if NPD is cut to 14-20,
+which would drag prevalence to 38% (section 3.3.4).
 
 Choose B if the trial is the unit of analysis and you want 50 observations per PT
 per block; choose A if you want the cadence near the pilot's 2.5 s, prevalence

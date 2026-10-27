@@ -187,6 +187,24 @@ SCENARIOS = {
             TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[8, 9],
         ),
         scenario(
+            'w20_12_14_full',
+            'the professor-asked range at full length: 12-14 targets, 100 trials, NPD 20-28',
+            **HARDER, TRIAL_PT_RANGE=[3, 4], TRIAL_NPT_RANGE=[9, 10],
+            TRIALS_PER_PT=25,
+        ),
+        scenario(
+            'w20_pt4_5_npt8_9_full',
+            '12-14 targets with PT 4-5, 100 trials, NPD 20-28',
+            **HARDER, TRIAL_PT_RANGE=[4, 5], TRIAL_NPT_RANGE=[8, 9],
+            TRIALS_PER_PT=25,
+        ),
+        scenario(
+            'w20_12_14_low_npd_full',
+            '12-14 targets with NPD lowered to 14-20 to buy placement room, 100 trials',
+            **HARDER, TRIAL_PT_RANGE=[3, 4], TRIAL_NPT_RANGE=[9, 10], TRIAL_NPD_RANGE=[14, 20],
+            TRIALS_PER_PT=25,
+        ),
+        scenario(
             'w20_11_13_full',
             '20 s option B with fewer targets: 11-13 targets, 100 trials, NPD 20-28',
             **HARDER, TRIAL_PT_RANGE=[2, 3], TRIAL_NPT_RANGE=[9, 10],
