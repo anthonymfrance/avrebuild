@@ -233,6 +233,20 @@ SCENARIOS = {
             TRIAL_PT_RANGE=[3, 6], TRIAL_NPT_RANGE=[9, 10], TRIAL_NPD_RANGE=[38, 45],
         ),
         scenario(
+            'a30_pt3_5_full',
+            'option A with PT widened to 3-5, at the real 68-trial length',
+            **HARDER, TRIAL_CONTENT_DUR=30.0,
+            TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[9, 10], TRIAL_NPD_RANGE=[38, 45],
+            TRIALS_PER_PT=FORTY_FIVE_MINUTE_TRIALS_PER_PT,
+        ),
+        scenario(
+            'a30_pt3_6_full',
+            'option A with PT widened to 3-6, at the real 68-trial length',
+            **HARDER, TRIAL_CONTENT_DUR=30.0,
+            TRIAL_PT_RANGE=[3, 6], TRIAL_NPT_RANGE=[9, 10], TRIAL_NPD_RANGE=[38, 45],
+            TRIALS_PER_PT=FORTY_FIVE_MINUTE_TRIALS_PER_PT,
+        ),
+        scenario(
             'pilot_45min_recommended',
             'the recommended plan: exposure levers, 30 s content, 12-14 targets, '
             'prevalence-matched distractors, 68 trials',

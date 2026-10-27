@@ -341,6 +341,8 @@ row, all `placement_failure_within_capacity`):
 | PT (3, 5) / NPT (7, 8) | 10-13 | 8 | 1.7% (n=60) | 98.3% | 100% |
 | PT (3, 5) / NPT (7, 8) | 10-13 | **100** | **9/30 (30%)** | 53.3% | **99.8%** |
 | recommended 30 s plan | 12-14 | **68** | **0/30** | 100% | 100% |
+| option A + PT (3, 5) | 12-15 | **68** | **0/30** | 100% | 100% |
+| option A + PT (3, 6) | 12-16 | **68** | **0/30** | 100% | 100% |
 
 **The 11-14 target split is not usable in a 20 s window at 100 trials.** It looked
 identical to 11-13 at 8 trials (16/100 both) and collapses to a 29% chance of ever
@@ -497,9 +499,12 @@ ready to step exposure down (0.15 -> 0.10 -> 0.08 s fades) or size down
 ### 4.1 Optional: widen PT to 3-5
 
 If more PT observations per session are wanted, `TRIAL_PT_RANGE = (3, 5)` is a
-verified drop-in for `(3, 4)` in option A (section 3.3.2): same 0/100 placement
-failures, targets become 12-15, sessions stay 45.3 min, and the cost is 36 extra
-sounds (~0.5 more per trial). `(3, 6)` is also free at 12-16 targets.
+verified drop-in for `(3, 4)` in option A: targets become 12-15, sessions stay
+45.3 min, and the cost is 36 extra sounds (~0.5 more per trial). Verified at the
+real 68-trial length, not just at 8 trials — 0/30 plan failures for `(3, 5)` and
+0/30 for `(3, 6)`, both 100% first try (section 3.3.4). That is 60 full plans and
+~4080 trials with no placement failure, so this one does not have the 8-trial trap
+that the 20 s option B had.
 
 In the 20 s window (option B) the equivalent move is PT (3, 5) with
 `TRIAL_NPT_RANGE = (7, 8)`, giving 10-13 targets, 9/30 failures at 100 trials and
