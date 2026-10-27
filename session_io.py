@@ -270,7 +270,7 @@ TRIAL_LOG_FIELDS = [
 ]
 
 PRACTICE_LOG_FIELDS = [
-    'phase', 'step', 'event_id', 'time_seconds', 'key', 'corner',
+    'phase', 'tier', 'step', 'event_id', 'time_seconds', 'key', 'corner',
     'expected_corner', 'classification', 'rt_seconds', 'outcome',
 ]
 

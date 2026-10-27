@@ -232,3 +232,76 @@ Baseline across 9 pilot sessions (1604 visuals): visual `onset_deviation` mean +
 - The block intro reads "any animal" in the animals block and "any object" in the objects block.
 - The recap after a trial lists all four counts with the trial's own numbers, and the practice
   summary shows the same four lines for the practice round.
+
+## 2026-10-27 practice difficulty tiers
+
+- **Practice runs three paced rounds after the coached steps: easy → medium → hard**, each behind
+  its own hold screen, then a summary that breaks the counts down per round. Easy is the previous
+  single round, unchanged (`PACED` → `EASY`).
+- **Difficulty is density and overlap, never the response window.** `RESPONSE_WINDOW` (0.9 s) is the
+  same in all three rounds and the same as the real task. Only *targets* are forbidden from sharing
+  a decision window: target onsets stay at least `RESPONSE_WINDOW` apart, exactly as
+  `timeline_key` enforces, while distractor onsets are free down to
+  `MIN_VISUAL_ONSET_GAP` (0.15 s), so squares crowd circles and each other. One measurement script
+  over the delivered scripts and all 11 published plans (88 real trials), span = first onset to the
+  last shape disappearing:
+
+  | round | items | targets | span | items/s | most on screen | gaps < 0.6 s | other onsets inside a target window | items per corner |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | easy | 5 | 3 | 7.00 s | 0.71 | 1 | 0% | 0.00 | 1/1/1/2 |
+  | medium | 12 | 4 | 8.30 s | 1.45 | 2 | 27% | 0.75 | 3/3/3/3 |
+  | hard | 20 | 4 | 12.36 s | 1.62 | 3 | 42% | 1.25 | 5/5/5/5 |
+  | *real trials (median)* | *36* (30–42) | *8* (5–11) | *18.5 s* | *1.98* | *3, up to 4* | *58%* | *1.16* | *even* |
+
+  The pile-up, not the rate, was what was missing: the previous hard round never put more than two
+  shapes on screen, while every real trial reaches three and some reach four. The hard round now
+  sits at 1.62 items/s against the real median 1.98, and matches the real count of other onsets
+  inside a target's window (1.25 against 1.16).
+- **The hard round is a real trial's own picture stream, cut to its first 12 s.** The onsets are a
+  generated schedule, chosen as the densest-sharing 12 s slice on the server (20 items, 8 "crowded"
+  gaps, 1.25 other onsets per target window). It is frozen as constants, so it is identical for
+  every participant and carries no runtime dependency on the plan it came from. Only the corners are
+  repacked: **real trials put 79.3% of targets in `FAVORED_CORNER`** (`TARGET_SPATIAL_BIAS = 0.80`;
+  distractors are spread evenly), which would leave keys 1, 2 and 4 barely trained, so the targets
+  sit one to a corner and the distractors spread 5/5/5/5. Worth confirming that bias is intended.
+- **Practice draws the real background noise.** `practice.run` now takes the `backgrounds` list
+  `experiment.py` already builds, and draws it on every frame of the coached steps and the rounds,
+  rotated at `BG_UPDATE_RATE` exactly as `run_trial` does. Practice previously drew white shapes on
+  black, which is a large part of why it looked and read easier than the task.
+- **Shapes are grey (`SHAPE_COLOR = '#B4B4B4'`), not white.** A solid white square reads far heavier
+  than a grayscale stimulus photo, and it is 27% more area than a circle of the same box. The value
+  must not be the colour name `'gray'`: PsychoPy resolves that to rgb 0.0039, essentially black.
+  Sizes are unchanged (`config.IMAGE_SIZE`), and each shape still sits at a fixed per-event offset
+  inside its quadrant, distinct within each corner.
+- **`practice_log.csv` has a `tier` column** (`session_io.PRACTICE_LOG_FIELDS`, after `phase`), and
+  paced `event_id`s are prefixed per round (`easy-0` … `hard-19`) so ids stay unique. Logs written
+  before this change still parse; the new column comes out blank.
+- **`session_metadata.json` `practice`** keeps its totals (`paced_hits`, `paced_late`,
+  `paced_misses`, `paced_false_alarms`, summed over the three rounds) and gains `tiers` (one entry
+  per round: counts, event count, duration, outcome) and `skipped_at_tier`.
+- **The operator's `s` ends practice at any round change**, not only on the intro screen: rows
+  collected so far are kept, status is `skipped`, and `skipped_at_tier` names the round that did not
+  run. `s` is still not advertised to participants.
+- **No new `config.py` constant**, so the config snapshot is unchanged and existing participant
+  plans still load. Practice is not part of the timeline.
+- Practice is longer: 34.6 s end to end with a scripted participant, against 28.9 s for the
+  committed version (same harness, so the two are comparable). The 27.7 s of visual stream is
+  carried by 5 + 12 + 20 = 37 items against 5 + 9 + 18 = 32 before, plus three participant-paced
+  hold screens.
+- Practice is still silent. The real trials carry 46–55 sounds per plan; adding them to practice is
+  a separate change.
+
+### Verify in pilot
+- All three rounds run in order after the coached steps, each starting on SPACE, over the blob
+  background: one shape at a time, then two, then the three-deep pile-up.
+- The grey shapes are clearly visible against the noise field but no longer glare white; confirm on
+  the rig and adjust `practice.SHAPE_COLOR` if they are too dim or too bright.
+- `practice_log.csv` has one `tier` per round with unique `event_id`s, and its per-round counts
+  match `session_metadata.json practice.tiers` and the per-round lines on the final screen.
+- Pressing `s` on a round hold ends practice with `status: skipped`, `skipped_at_tier` set to the
+  round that did not run, and the coached rows still saved.
+- Whether hard is now hard enough: compare the participant's hard-round misses against their first
+  real trial, which is the closest thing to a like-for-like comparison.
+- PsychoPy is not installed on the machine used for this change, so the rounds were verified through
+  the fake-clock tests in `tests/test_practice.py` (including that the background is drawn every
+  frame), not at the console.
