@@ -2,12 +2,18 @@
 
 The script is fixed for every participant (no RNG), so practice is identical
 across sessions and subjects. Everything with a config equivalent -- shape size,
-fade profile, response window, corner signs -- is read from config, so practice
-cannot drift from the real task. Only the content is hardcoded: which corner,
-target or distractor, and how densely the shapes appear.
+fade profile, response window, corner signs, background noise -- is read from
+config or from the trial runner, so practice cannot drift from the real task.
+Only the content is hardcoded: which corner, target or distractor, and how the
+pictures crowd together.
 
-Difficulty is item density, never the response window: RESPONSE_WINDOW is the
-same in all three rounds and in the real task.
+Difficulty is density and overlap, never the response window: RESPONSE_WINDOW is
+the same in all three rounds and in the real task. Only targets must not share a
+decision window (target onsets stay at least RESPONSE_WINDOW apart, exactly as
+the timeline enforces); distractors may appear as little as
+MIN_VISUAL_ONSET_GAP after anything, so squares crowd circles and each other.
+The rounds step the load up as: one picture at a time, then two on screen, then
+the three-deep pile-up of a real trial.
 
 Rows are returned to the caller so practice can be saved even when it is
 skipped or aborted; nothing here writes files.
@@ -29,6 +35,11 @@ KEY_NUMBER = {
     'bottom_left': '1',
     'bottom_right': '2',
 }
+
+# Grey, not white: a solid white shape on the dark background noise reads much
+# heavier than a grayscale stimulus photo. Named 'gray' is wrong here -- PsychoPy
+# resolves it to rgb 0.0039, essentially black -- so the value is given as hex.
+SHAPE_COLOR = '#B4B4B4'
 
 # Circles are targets, squares are distractors. Onsets are seconds from the
 # paced-round start. Gaps stay wider than the hit window plus the late window.
@@ -62,7 +73,7 @@ COACHED = (
 )
 
 # Round 1: one shape at a time, nothing else on screen while a target's window
-# is open. 5 items, 1.6 s apart.
+# is open. 5 items, 1.6 s apart, one target per corner but the last.
 EASY = (
     (0.8, 'target', 'top_right'),
     (2.4, 'distractor', 'bottom_left'),
@@ -78,75 +89,95 @@ EASY_OFFSETS = (
     (20, -35),
 )
 
-# Round 2: more pictures, closer together, but still only one on screen at a
-# time (gaps stay above VISUAL_DURATION). 9 items, 0.7-0.9 s apart.
+# Round 2: shapes start crowding each other (three of the eleven gaps are
+# shorter than the 0.6 s a shape is visible, 27%), so up to two are on screen at
+# once, and one target sits in each corner. 12 items over 8.3 s, 1.45 items/s.
 MEDIUM = (
     (0.60, 'target', 'top_right'),
-    (1.30, 'distractor', 'bottom_left'),
-    (2.10, 'target', 'top_left'),
-    (3.00, 'distractor', 'bottom_right'),
-    (3.90, 'distractor', 'top_right'),
-    (4.80, 'distractor', 'bottom_left'),
-    (5.70, 'target', 'bottom_right'),
-    (6.60, 'distractor', 'top_left'),
-    (7.40, 'target', 'top_right'),
+    (1.05, 'distractor', 'bottom_left'),
+    (1.60, 'distractor', 'bottom_right'),
+    (2.30, 'distractor', 'top_left'),
+    (3.10, 'target', 'bottom_left'),
+    (3.70, 'distractor', 'top_right'),
+    (4.25, 'distractor', 'bottom_right'),
+    (5.00, 'distractor', 'top_left'),
+    (5.80, 'target', 'top_left'),
+    (6.60, 'distractor', 'bottom_left'),
+    (7.40, 'distractor', 'top_right'),
+    (8.30, 'target', 'bottom_right'),
 )
 MEDIUM_OFFSETS = (
     (30, -25),
-    (-35, 30),
-    (-25, -35),
-    (40, 25),
-    (25, 30),
-    (-30, 20),
-    (35, -30),
-    (-40, 25),
-    (20, -35),
+    (-25, 30),
+    (35, 25),
+    (-30, -30),
+    (-35, -20),
+    (20, -38),
+    (25, -32),
+    (-20, 35),
+    (38, -15),
+    (30, -25),
+    (-15, 38),
+    (20, -38),
 )
 
-# Round 3: the real item density from a generated trial (1.4-2.2 items/s), so
-# the next shape is already fading in while the previous one fades out and each
-# target's window spans two later onsets. The gaps still respect every rule the
-# timeline enforces: MIN_VISUAL_ONSET_GAP, target onsets at least RESPONSE_WINDOW
-# apart, and a target's corner empty for TARGET_CORNER_HOLD.
+# Round 3: the picture stream of a real trial, cut to its first 20 items (12.9 s
+# from the first onset to the last shape disappearing). The onsets are a
+# generated trial's own schedule, and deliberately the densest-sharing slice on
+# the server: 20 items at 1.62 items/s, 8 of its 19 gaps shorter than a shape's
+# 0.6 s life, three shapes on screen at the busiest moment, and 1.25 other
+# onsets inside each target's 0.9 s window against 1.16 averaged over all 88 real
+# trials (which themselves run at a median 1.98 items/s and peak at 3-4 on
+# screen). Only the corners are repacked: real trials put 79% of targets in the
+# favoured corner (config.TARGET_SPATIAL_BIAS = 0.80), which would leave keys 1,
+# 2 and 4 barely trained, so the four targets sit one to a corner and the
+# distractors are spread evenly over the four quadrants. Every gap still
+# satisfies the rules the timeline enforces: MIN_VISUAL_ONSET_GAP, target onsets
+# at least RESPONSE_WINDOW apart, a target's corner empty for
+# TARGET_CORNER_HOLD, and no same-corner overlap.
 HARD = (
-    (0.50, 'target', 'top_right'),
-    (0.95, 'distractor', 'bottom_left'),
-    (1.35, 'distractor', 'bottom_right'),
-    (1.75, 'distractor', 'top_left'),
-    (2.10, 'target', 'bottom_left'),
-    (2.55, 'distractor', 'bottom_right'),
-    (2.95, 'distractor', 'top_left'),
-    (3.55, 'distractor', 'bottom_left'),
-    (3.95, 'distractor', 'top_right'),
-    (4.35, 'target', 'bottom_right'),
-    (4.75, 'distractor', 'top_left'),
-    (5.15, 'distractor', 'bottom_left'),
-    (5.55, 'distractor', 'top_right'),
-    (5.95, 'distractor', 'bottom_right'),
-    (6.35, 'target', 'top_left'),
-    (6.75, 'distractor', 'bottom_right'),
-    (7.15, 'distractor', 'bottom_left'),
-    (7.55, 'distractor', 'top_right'),
+    (0.500, 'distractor', 'bottom_left'),
+    (1.194, 'target', 'top_right'),
+    (1.398, 'distractor', 'bottom_right'),
+    (2.775, 'distractor', 'top_left'),
+    (3.526, 'target', 'top_left'),
+    (3.820, 'distractor', 'bottom_left'),
+    (5.005, 'distractor', 'top_right'),
+    (5.618, 'distractor', 'bottom_right'),
+    (6.299, 'distractor', 'top_left'),
+    (7.102, 'distractor', 'bottom_left'),
+    (7.403, 'distractor', 'top_right'),
+    (7.725, 'distractor', 'bottom_right'),
+    (8.775, 'distractor', 'top_left'),
+    (8.989, 'target', 'bottom_right'),
+    (9.286, 'distractor', 'bottom_left'),
+    (9.607, 'distractor', 'top_right'),
+    (10.645, 'distractor', 'top_left'),
+    (11.350, 'distractor', 'bottom_right'),
+    (12.034, 'target', 'bottom_left'),
+    (12.257, 'distractor', 'top_right'),
 )
 HARD_OFFSETS = (
+    (-25, 30),
     (30, -25),
-    (-35, 25),
-    (40, 20),
-    (-25, -35),
-    (-25, 35),
-    (35, -30),
-    (-40, 25),
-    (25, 20),
-    (25, 30),
-    (-20, -35),
-    (30, 20),
-    (-20, -40),
-    (-20, -30),
-    (30, 35),
-    (20, -25),
-    (-35, 20),
-    (30, -25),
-    (35, -30),
+    (38, -15),
+    (-30, -30),
+    (20, -38),
+    (35, 25),
+    (20, -38),
+    (-35, -20),
+    (35, 25),
+    (-35, -20),
+    (-30, -30),
+    (20, -38),
+    (-15, 38),
+    (25, -32),
+    (25, -32),
+    (-20, 35),
+    (-25, 30),
+    (-25, 30),
+    (-15, 38),
+    (38, -15),
 )
 
 # The order participants see, and the words they read between rounds.
@@ -170,7 +201,7 @@ TIERS = (
         'caption': 'Circles only.',
         'hold_text': (
             'Round 2 of 3: a bit faster.\n'
-            'More pictures, one after another. Still one at a time.\n\n'
+            'Pictures come closer together, so two can share the screen.\n\n'
             'Press SPACE to start.'
         ),
     },
@@ -181,7 +212,7 @@ TIERS = (
         'caption': 'Circles only.',
         'hold_text': (
             'Round 3 of 3: the real speed.\n'
-            f'Circles only. You have {config.RESPONSE_WINDOW:g} seconds.\n'
+            f'Several pictures at once. You have {config.RESPONSE_WINDOW:g} seconds.\n'
             'The cross flashes green when you are correct.\n\n'
             'Press SPACE to start.'
         ),
@@ -229,6 +260,14 @@ def _row(phase, step='', event_id='', time_seconds='', key='', corner='',
     }
 
 
+def _background_frame(backgrounds, elapsed):
+    """The background noise frame for this moment, rotated as a real trial does."""
+    if not backgrounds:
+        return None
+    index = int(max(0.0, elapsed) / config.BG_UPDATE_RATE) % len(backgrounds)
+    return backgrounds[index]
+
+
 def intro(window, kb, visual):
     """'start', 'skipped', or 'abort'."""
     text = _text(window, visual)
@@ -251,8 +290,12 @@ def intro(window, kb, visual):
             return 'start'
 
 
-def run(window, kb, visual, fixation, clock):
+def run(window, kb, visual, fixation, clock, backgrounds):
     """Run practice and return {'status', 'rows', 'summary'}.
+
+    backgrounds is the same noise field the real trials draw, rotated the same
+    way; pass the list experiment.py already builds so practice and the task
+    cannot drift apart.
 
     status is 'completed', 'skipped', or 'abort'. rows are practice_log.csv
     rows, collected even when the participant skips or aborts, so the caller can
@@ -292,6 +335,7 @@ def run(window, kb, visual, fixation, clock):
         for step_number, step in enumerate(COACHED, start=1):
             outcome = _coached(
                 window, kb, clock, fixation, text, stims, step, step_number, rows,
+                backgrounds,
             )
             if outcome == 'abort':
                 return finish('abort')
@@ -312,7 +356,7 @@ def run(window, kb, visual, fixation, clock):
                 return finish('skipped')
             tier_started = float(clock.getTime())
             outcome, targets, false_alarms = _paced(
-                window, kb, clock, fixation, text, stims, rows, tier,
+                window, kb, clock, fixation, text, stims, rows, tier, backgrounds,
             )
             hits = sum(target['response_status'] == 'hit' for target in targets)
             late = sum(target['response_status'] == 'late' for target in targets)
@@ -339,7 +383,7 @@ def run(window, kb, visual, fixation, clock):
 
 
 def _make_shapes(window, visual):
-    common = dict(fillColor='white', lineColor='white', units='pix', autoLog=False)
+    common = dict(fillColor=SHAPE_COLOR, lineColor=SHAPE_COLOR, units='pix', autoLog=False)
     return {
         'target': visual.Circle(window, radius=config.IMAGE_SIZE[0] / 2, **common),
         'distractor': visual.Rect(
@@ -357,7 +401,9 @@ def _text(window, visual, height=26):
     )
 
 
-def _frame(window, fixation, text, shapes, caption, green):
+def _frame(window, fixation, text, shapes, caption, green, background=None):
+    if background is not None:
+        background.draw()
     fixation.lineColor = config.FIXATION_HIT_COLOR if green else config.FIXATION_COLOR
     fixation.draw()
     for stim, pos, opacity in shapes:
@@ -369,7 +415,8 @@ def _frame(window, fixation, text, shapes, caption, green):
     window.flip()
 
 
-def _coached(window, kb, clock, fixation, text, stims, step, step_number, rows):
+def _coached(window, kb, clock, fixation, text, stims, step, step_number, rows,
+             backgrounds):
     """One coached step. Returns 'ok', 'corrected', or 'abort'."""
     width, height = window.size
     placed = [
@@ -384,6 +431,7 @@ def _coached(window, kb, clock, fixation, text, stims, step, step_number, rows):
         _frame(
             window, fixation, text,
             [(stim, pos, 1.0) for stim, pos in placed], caption, False,
+            _background_frame(backgrounds, clock.getTime()),
         )
         presses = kb.getKeys(keyList=ALL_KEYS, waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
@@ -418,7 +466,9 @@ def _coached(window, kb, clock, fixation, text, stims, step, step_number, rows):
                     outcome='corrected' if corrected else 'first_try',
                     tier='coached',
                 ))
-                if _acknowledge(window, kb, clock, fixation, text, placed) == 'abort':
+                if _acknowledge(
+                    window, kb, clock, fixation, text, placed, backgrounds,
+                ) == 'abort':
                     return 'abort'
                 return 'corrected' if corrected else 'ok'
             corrected = True
@@ -439,7 +489,7 @@ def _miss_notice(pressed, expect, shapes):
     )
 
 
-def _acknowledge(window, kb, clock, fixation, text, placed):
+def _acknowledge(window, kb, clock, fixation, text, placed, backgrounds):
     until_green = clock.getTime() + config.FIXATION_FLASH_DUR
     until_done = clock.getTime() + 0.8
     while clock.getTime() < until_done:
@@ -447,6 +497,7 @@ def _acknowledge(window, kb, clock, fixation, text, placed):
             window, fixation, text,
             [(stim, pos, 1.0) for stim, pos in placed], 'Correct.',
             clock.getTime() < until_green,
+            _background_frame(backgrounds, clock.getTime()),
         )
         presses = kb.getKeys(keyList=ALL_KEYS, waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
@@ -470,7 +521,7 @@ def _hold(window, kb, text, message, allow_skip=False):
             return 'ok'
 
 
-def _paced(window, kb, clock, fixation, text, stims, rows, tier):
+def _paced(window, kb, clock, fixation, text, stims, rows, tier, backgrounds):
     """One paced round. Returns ('ok'|'abort', targets, false_alarms)."""
     width, height = window.size
     events = tier['events']
@@ -494,6 +545,7 @@ def _paced(window, kb, clock, fixation, text, stims, rows, tier):
         _frame(
             window, fixation, text, drawn, tier['caption'],
             float(clock.getTime()) < green_until,
+            _background_frame(backgrounds, now),
         )
         for press in kb.getKeys(keyList=ALL_KEYS, waitRelease=False, clear=True):
             if press.name == 'escape':

@@ -144,6 +144,19 @@ def _gaps(events):
     return [later - earlier for earlier, later in zip(onsets, onsets[1:])]
 
 
+def _peak_on_screen(onsets):
+    """Most shapes sharing the screen at one instant."""
+    edges = sorted(
+        [(onset, 1) for onset in onsets]
+        + [(onset + config.VISUAL_DURATION, -1) for onset in onsets]
+    )
+    live = peak = 0
+    for _, delta in edges:
+        live += delta
+        peak = max(peak, live)
+    return peak
+
+
 def _round_facts(tier):
     events = tier['events']
     onsets = [onset for onset, _, _ in events]
@@ -151,8 +164,10 @@ def _round_facts(tier):
     return {
         'events': len(events),
         'targets': sum(kind == 'target' for _, kind, _ in events),
+        'target_corners': {corner for _, kind, corner in events if kind == 'target'},
         'span': span,
         'density': len(events) / span,
+        'peak_on_screen': _peak_on_screen(onsets),
         # Two shapes share the screen when the earlier one is still visible as
         # the later one appears. The tolerance matters: an exact
         # VISUAL_DURATION gap leaves a ~1e-16 alpha from float error.
@@ -168,7 +183,7 @@ def _round_facts(tier):
 
 
 def test_difficulty_rises_from_one_round_to_the_next():
-    """The ladder is measurable: more pictures per second, more on screen at once."""
+    """The ladder is measurable: more pictures per second, more sharing the screen."""
     easy, medium, hard = (
         _round_facts(tier) for tier in practice.TIERS
     )
@@ -178,17 +193,27 @@ def test_difficulty_rises_from_one_round_to_the_next():
     assert 1.4 <= hard['density'] <= 2.2
     assert medium['density'] < 1.4
 
-    # Nothing is ever on screen with anything else until the hard round, and
-    # every easy/medium gap is a full shape-length apart, not a hair under it.
-    assert easy['co_present'] == [] and medium['co_present'] == []
+    # One picture at a time, then two, then the three-deep pile-up of a real
+    # trial (the median real trial also peaks at three pictures on screen).
+    assert [easy['peak_on_screen'], medium['peak_on_screen'], hard['peak_on_screen']] == [1, 2, 3]
+    assert easy['co_present'] == []
     assert all(gap > config.VISUAL_DURATION + 1e-6 for gap in _gaps(practice.EASY))
-    assert all(gap > config.VISUAL_DURATION + 1e-6 for gap in _gaps(practice.MEDIUM))
-    assert hard['co_present']
+    assert len(medium['co_present']) >= 3 and len(hard['co_present']) >= 5
 
-    # A target's window is shared with 0, at most 1, then at least 2 later onsets.
+    # A target's window is shared with no picture, then with pictures, and the
+    # real stream's sharing (mean 1.16 later onsets per window over 88 trials)
+    # is visible in hard.
     assert easy['onsets_in_target_windows'] == [0] * easy['targets']
     assert max(medium['onsets_in_target_windows']) == 1
-    assert min(hard['onsets_in_target_windows']) >= 2
+    assert max(hard['onsets_in_target_windows']) >= 1
+    assert 0.8 <= sum(hard['onsets_in_target_windows']) / hard['targets'] <= 4
+
+    # Medium and hard train all four keys, which the real target bias (79% of
+    # targets in the favoured corner) would otherwise leave mostly untrained.
+    # Easy is the round that ran before this change, so it keeps its three.
+    assert medium['target_corners'] == set(config.CORNERS)
+    assert hard['target_corners'] == set(config.CORNERS)
+    assert easy['target_corners'] == set(config.CORNERS) - {'bottom_left'}
 
 
 def test_every_round_uses_the_config_stimulus_appearance():
@@ -217,8 +242,40 @@ def test_every_round_uses_the_config_stimulus_appearance():
     assert stims['target'].kwargs['radius'] == config.IMAGE_SIZE[0] / 2
     assert stims['distractor'].kwargs['width'] == config.IMAGE_SIZE[0]
     assert stims['distractor'].kwargs['height'] == config.IMAGE_SIZE[1]
+    # Grey, because a solid white shape on the dark noise field reads far
+    # heavier than a grayscale photo. Not the colour name 'gray': PsychoPy
+    # resolves that to rgb 0.0039, which is essentially black.
+    for kwargs in recorded.values():
+        assert kwargs['fillColor'] == practice.SHAPE_COLOR
+        assert kwargs['lineColor'] == practice.SHAPE_COLOR
+    assert practice.SHAPE_COLOR.startswith('#')
+    assert practice.SHAPE_COLOR.lower() not in ('#ffffff', 'gray', 'grey', 'white')
     # The practice ramp is the real trial ramp, not a copy of it.
     assert practice.planned_image_alpha is trial_runner.planned_image_alpha
+
+
+def test_practice_draws_the_real_background_noise():
+    """Practice carries the same noise field the trials draw, rotated the same way."""
+    assert practice._background_frame([], 0.0) is None
+    frames = [CountingShape(), CountingShape(), CountingShape()]
+    assert practice._background_frame(frames, 0.0) is frames[0]
+    assert practice._background_frame(frames, config.BG_UPDATE_RATE) is frames[1]
+    assert practice._background_frame(frames, 3 * config.BG_UPDATE_RATE) is frames[0]
+
+    clock = AdvancingClock()
+    window = AdvancingWindow(clock)
+    background = CountingShape()
+    rows = []
+    outcome, targets, false_alarms = practice._paced(
+        window, ScheduledKeyboard(clock, []), clock, FakeFixation(),
+        practice._text(window, FakeShapeVisual),
+        practice._make_shapes(window, FakeShapeVisual), rows, practice.TIERS[-1],
+        [background],
+    )
+    assert outcome == 'ok'
+    assert false_alarms == 0
+    assert background.draws > 10, 'the background is drawn on every frame of a round'
+    assert [target['response_status'] for target in targets] == ['miss'] * len(targets)
 
 
 class AdvancingClock:
@@ -273,6 +330,16 @@ class FakeFixation:
         pass
 
 
+class CountingShape(FakeShape):
+    """A background frame that records how often it is drawn."""
+
+    def __init__(self, window=None, **kwargs):
+        self.draws = 0
+
+    def draw(self):
+        self.draws += 1
+
+
 class FakeShapeVisual(FakeVisual):
     Circle = FakeShape
     Rect = FakeShape
@@ -302,7 +369,9 @@ def test_skipped_practice_is_reported_with_a_row():
     clock = AdvancingClock()
     window = AdvancingWindow(clock)
     keyboard = ScheduledKeyboard(clock, [(0.0, 's')])
-    result = practice.run(window, keyboard, FakeVisual(), SimpleNamespace(lineColor=None), clock)
+    result = practice.run(
+        window, keyboard, FakeVisual(), SimpleNamespace(lineColor=None), clock, [],
+    )
     assert result['status'] == 'skipped'
     assert result['summary']['status'] == 'skipped'
     assert [row['classification'] for row in result['rows']] == ['skipped']
@@ -325,7 +394,7 @@ def test_paced_round_records_hits_late_misses_and_false_alarms():
     tier = practice.TIERS[0]
     outcome, targets, false_alarms = practice._paced(
         window, keyboard, clock, fixation, practice._text(window, FakeShapeVisual),
-        stims, rows, tier,
+        stims, rows, tier, [],
     )
     assert outcome == 'ok'
     assert [target['response_status'] for target in targets] == ['hit', 'late', 'miss']
@@ -356,7 +425,7 @@ def test_every_round_scores_a_hit_for_the_key_of_the_open_target(tier):
     outcome, targets, false_alarms = practice._paced(
         window, keyboard, clock, FakeFixation(),
         practice._text(window, FakeShapeVisual),
-        practice._make_shapes(window, FakeShapeVisual), rows, tier,
+        practice._make_shapes(window, FakeShapeVisual), rows, tier, [],
     )
     assert outcome == 'ok'
     assert [target['response_status'] for target in targets] == ['hit'] * len(targets)
@@ -460,13 +529,16 @@ def test_full_practice_run_walks_the_three_rounds():
     clock = AdvancingClock()
     participant = ScriptedParticipant(
         clock,
-        miss={('easy', 4), ('medium', 6), ('hard', 14)},
+        miss={('easy', 4), ('medium', 8), ('hard', 13)},
         false_alarms={('easy', 1): 'num_2'},
     )
     fixation = FakeFixation()
+    background = CountingShape()
     result = practice.run(
         AdvancingWindow(clock), participant, ScriptedShapeVisual, fixation, clock,
+        [background],
     )
+    assert background.draws > 0, 'practice must draw the real background noise'
 
     assert result['status'] == 'completed'
     summary = result['summary']
@@ -474,7 +546,7 @@ def test_full_practice_run_walks_the_three_rounds():
     assert summary['skipped_at_tier'] == ''
     assert summary['coached_corrections'] == 0
     assert [tier['tier'] for tier in summary['tiers']] == ['easy', 'medium', 'hard']
-    assert [tier['events'] for tier in summary['tiers']] == [5, 9, 18]
+    assert [tier['events'] for tier in summary['tiers']] == [5, 12, 20]
     assert [tier['outcome'] for tier in summary['tiers']] == ['completed'] * 3
     assert [tier['hits'] for tier in summary['tiers']] == [2, 3, 3]
     assert [tier['misses'] for tier in summary['tiers']] == [1, 1, 1]
@@ -502,7 +574,7 @@ def test_skipping_at_a_round_change_keeps_the_rows_and_ends_practice():
     clock = AdvancingClock()
     participant = ScriptedParticipant(clock, skip_rounds={'easy'})
     result = practice.run(
-        AdvancingWindow(clock), participant, ScriptedShapeVisual, FakeFixation(), clock,
+        AdvancingWindow(clock), participant, ScriptedShapeVisual, FakeFixation(), clock, [],
     )
 
     assert result['status'] == 'skipped'

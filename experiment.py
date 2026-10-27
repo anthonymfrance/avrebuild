@@ -342,7 +342,9 @@ def run(args):
             return
         if not screens.scoring_rules(window, kb, visual):
             return
-        practice_result = practice.run(window, kb, visual, fixation, session_clock)
+        practice_result = practice.run(
+            window, kb, visual, fixation, session_clock, backgrounds,
+        )
         metadata['practice'] = practice_result['summary']
         if practice_result['status'] == 'abort':
             # No session folder exists yet, but the participant folder does, so
