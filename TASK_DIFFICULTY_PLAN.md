@@ -369,6 +369,43 @@ For the 20 s window this leaves two viable target splits at 100 trials:
 where a 68-trial plan with 12-14 targets has *never* failed in 2040 simulated
 trials.
 
+### 3.3.5 Is the 11-13 target recommendation maxed out? Yes - every addition fails
+
+The question worth asking: can anything be *added* to the four ranges in a 20 s
+window and still place a plan 100% of the time across 100 trials? Tested by changing
+one range at a time, 30 seeds of full 100-trial plans:
+
+| Change on PT (2,3) / NPT (9,10) / PD (3,5) / NPD (20,28) | Targets | Prevalence | Plan failures | Within 5 seeds |
+| --- | --- | --- | --- | --- |
+| none: the recommendation | 11-13 | 30% | 6/30 (20%) | **100%** |
+| NPD (22, 30) | 11-13 | 29% | 20/30 (66.7%) | 86.8% |
+| NPD (24, 32) | 11-13 | 27% | 20/30 (66.7%) | 86.8% |
+| NPD (28, 34) | 11-13 | 26% | **30/30 (100%)** | 0% |
+| PD (5, 7) | 11-13 | 29% | 23/30 (76.7%) | 73.5% |
+| PT (4,5) with NPT (7,8), same target total | 11-13 | 30% | 20/30 (66.7%) | 86.8% |
+
+**Two extra images per trial is enough to break it.** NPD (22, 30) - a rise of two
+distractors per trial over today's count - takes a plan from 100% to 86.8% within the
+retry budget. Nothing can be added in this window: the recommendation sits on the
+boundary, not near it.
+
+The two resources that are actually exhausted are different ones, which is why every
+route fails the same way:
+
+- **Targets** are limited by the corner-hold and response-window rules (3.3.3): a
+  target occupies its corner for `TARGET_CORNER_HOLD` = 1.4 s and no two targets may
+  share a corner inside that window.
+- **Sounds** are limited by the 1.2 s `SOUND_DUR + MIN_AUDIO_GAP` spacing. The
+  PT-heavy row is the sharpest counter-example in this document: PT (4,5) with
+  NPT (7,8) is the *same* 11-13 targets as the recommendation, but 8.5 sounds per
+  trial instead of 6.5, so 10.2 s of a 20 s trial is locked and two of every three
+  plans fail. At 8 trials the same configuration was the best row measured (1/60,
+  98.3% first try).
+
+The only way to buy headroom is to spend it: fewer targets (10-13 with PT 3-5) or a
+longer content window, where NPD (38, 45) restores a prevalence-matched distractor
+count and 12-15 targets place 0/30.
+
 ### 3.4 A confound to decide about: more targets also raises target prevalence
 
 Today: ~8 targets among ~36 images = **22% prevalence**. Raising targets to
@@ -499,6 +536,11 @@ clean at 8 trials: at 100 trials it fails 28/30 and only 29% of participants wou
 get a plan at all (section 3.3.4). **12-14 targets is also out** — 96.7% and 100%
 plan failure in the two splits that produce it, and 50% if NPD is cut to 14-20,
 which would drag prevalence to 38% (section 3.3.4).
+
+**These four ranges are at the ceiling, not near it.** Raising any of them breaks
+plan generation: NPD (22, 30) already fails 20/30 plans, PD (5, 7) fails 23/30, and
+moving PT/NPT weight onto PT at the same target total fails 20/30 (section 3.3.5).
+The 30% prevalence in this option is the price of having no distractor headroom left.
 
 Choose B if the trial is the unit of analysis and you want 50 observations per PT
 per block; choose A if you want the cadence near the pilot's 2.5 s, prevalence

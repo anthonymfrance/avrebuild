@@ -211,6 +211,35 @@ SCENARIOS = {
             TRIALS_PER_PT=25,
         ),
         scenario(
+            'w20_more_npd_22_30_full',
+            'halfway to the failing NPD: 11-13 targets with NPD 22-30, 100 trials',
+            **HARDER, TRIAL_PT_RANGE=[2, 3], TRIAL_NPT_RANGE=[9, 10], TRIAL_NPD_RANGE=[22, 30],
+            TRIALS_PER_PT=25,
+        ),
+        scenario(
+            'w20_more_npd_24_32_full',
+            'the recommendation with more distractors: 11-13 targets, NPD 24-32, 100 trials',
+            **HARDER, TRIAL_PT_RANGE=[2, 3], TRIAL_NPT_RANGE=[9, 10], TRIAL_NPD_RANGE=[24, 32],
+            TRIALS_PER_PT=25,
+        ),
+        scenario(
+            'w20_more_npd_28_34_full',
+            'the recommendation with NPD 28-34 (prevalence down to ~26%), 100 trials',
+            **HARDER, TRIAL_PT_RANGE=[2, 3], TRIAL_NPT_RANGE=[9, 10], TRIAL_NPD_RANGE=[28, 34],
+            TRIALS_PER_PT=25,
+        ),
+        scenario(
+            'w20_more_pd_5_7_full',
+            'the recommendation with PD raised to 5-7 (more sound events), 11-13 targets, 100 trials',
+            **HARDER, TRIAL_PT_RANGE=[2, 3], TRIAL_NPT_RANGE=[9, 10], TRIAL_PD_RANGE=[5, 7],
+            TRIALS_PER_PT=25,
+        ),
+        scenario(
+            'w20_pt_heavy_11_13_full',
+            '11-13 targets but PT-heavy: PT 4-5 with NPT 7-8, 100 trials, NPD 20-28',
+            **HARDER, TRIAL_PT_RANGE=[4, 5], TRIAL_NPT_RANGE=[7, 8], TRIALS_PER_PT=25,
+        ),
+        scenario(
             'w20_10_13_full',
             '20 s option B with PT 5: 10-13 targets, 100 trials, NPD 20-28',
             **HARDER, TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[7, 8],
