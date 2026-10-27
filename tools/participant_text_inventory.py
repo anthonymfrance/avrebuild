@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 import config  # noqa: E402  (import after sys.path fix)
 import practice  # noqa: E402
 import screens  # noqa: E402
+from scoring import trial_recap_lines  # noqa: E402
 
 
 class Placeholder:
@@ -94,6 +95,9 @@ for module in (screens, practice):
 NAMESPACE.update({
     'BLOCK_LABELS': TolerantLabels(config.BLOCK_LABELS),
     'KEY_NUMBER': practice.KEY_NUMBER,
+    # Real code, so the recap wording in the practice summary and in the trial
+    # report is the wording printed here. Counts arrive as placeholders.
+    'trial_recap_lines': trial_recap_lines,
 })
 
 MODULES = ('screens.py', 'practice.py', 'experiment.py')
@@ -121,10 +125,37 @@ def _is_text_target(target):
     return isinstance(target, ast.Attribute) and target.attr == 'text'
 
 
+def _page_sequences(tree, scope):
+    """Module-level tuples of strings: the paged instruction screens."""
+    sequences = []
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not all(isinstance(t, ast.Name) and t.id.isupper() for t in node.targets):
+            continue
+        value = _string_value(node.value)
+        if isinstance(value, str):  # e.g. an already-joined copy of the pages
+            continue
+        try:
+            expression = ast.Expression(body=node.value)
+            ast.fix_missing_locations(expression)
+            items = eval(compile(expression, '<inventory>', 'eval'), scope)
+        except Exception:
+            continue
+        if isinstance(items, (tuple, list)) and items and all(
+                isinstance(item, str) and ' ' in item
+                and len(item.split()) > 4 for item in items):
+            sequences.append((node.lineno, node.targets[0].id, items))
+    return sequences
+
+
 def collect(path):
     """Every string drawn to the screen in one module, in source order."""
     tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
     found = []
+    for lineno, name, items in _page_sequences(tree, dict(NAMESPACE)):
+        for index, item in enumerate(items, start=1):
+            found.append((path.name, lineno, f'{name}[{index}]', item))
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and any(_is_text_target(t) for t in node.targets):
             text = _string_value(node.value)

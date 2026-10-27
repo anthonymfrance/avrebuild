@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import config
-from scoring import classify_press
+from scoring import classify_press, trial_recap_lines
 import practice
 
 
@@ -193,6 +193,33 @@ def test_paced_round_records_hits_late_misses_and_false_alarms():
     assert target_rows['practice-2']['classification'] == 'late'
     assert target_rows['practice-4']['classification'] == 'miss'
     assert target_rows['practice-4']['key'] == ''
+
+
+def test_practice_summary_uses_the_same_recap_lines_as_the_real_trials():
+    drawn = []
+
+    class CapturingText(FakeText):
+        def draw(self):
+            drawn.append(self.text)
+
+    class CapturingVisual(FakeVisual):
+        TextStim = CapturingText
+
+    targets = [
+        {'response_status': 'hit'}, {'response_status': 'hit'},
+        {'response_status': 'late'}, {'response_status': 'miss'},
+    ]
+    outcome = practice._summary(
+        FakeWindow(), FakeKeyboard(['space']), CapturingVisual, targets, 2,
+    )
+    assert outcome == 'ok'
+    message = drawn[-1]
+    assert 'Practice complete.' in message
+    for line in trial_recap_lines(2, len(targets), 1, 1, 2):
+        assert line in message
+    assert 'Remember to respond to all targets quickly and accurately!' in message
+    assert 'The real task is the same' in message
+    assert 'Press SPACE to begin the study.' in message
 
 
 def test_corner_xy_is_the_same_place_inside_its_quadrant():

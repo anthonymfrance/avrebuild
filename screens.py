@@ -7,12 +7,13 @@ from pathlib import Path
 
 import config
 from config import BLOCK_LABELS
-from scoring import inter_trial_row
+from scoring import inter_trial_row, trial_recap_lines
 
 # Resolve the study root from this file's location, matching experiment.py's ROOT.
 _ROOT = Path(__file__).resolve().parent
 NUMPAD_IMAGE_NAME = '4-Corner Numpad Screen Visual.png'
 FINGERS_IMAGE_NAME = 'Finger Placement Screen Visual.png'
+HAND_PHOTO_NAME = 'Example Hand Placement Photo.jpg'
 
 
 def _image_path(name):
@@ -40,36 +41,53 @@ KEY_TO_CORNER = {
     key: corner for corner, keys in RESPONSE_KEYS.items() for key in keys
 }
 ALL_KEYS = list(KEY_TO_CORNER) + ['space', 'escape']
-INSTRUCTIONS_TOP = (
-    'The experiment has two parts: an animals part and an objects part. You will be told which will come first for you.\n\n'
-    'During the animals task, all animals will be your targets.\n'
-    'During the objects task, all objects will be your targets.\n\n'
-    'When a target appears, press the number key corresponding to the corner where it appeared.\n'
-    'Do not press for distracting, non-target pictures. IE if your target is animals aim to not react to objects with the numpad.\n'
-    f'Respond within {config.RESPONSE_WINDOW:g} seconds.'
+# "any animal" / "any object": the singular of the block label, so the block
+# intro cannot drift from the block name. It lives here rather than in config
+# because every config value is part of the snapshot that existing participant
+# plans are validated against, and this is wording, not a study parameter.
+BLOCK_TARGET_PHRASE = {
+    block: f'any {label.lower().rstrip("s")}' for block, label in BLOCK_LABELS.items()
+}
+# The instructions and the scoring rules are shown one page at a time: each page
+# is short enough to read in one look and waits for SPACE, so the participant
+# never faces a full wall of text. Every page carries its own advance line.
+INSTRUCTION_PAGES = (
+    'The experiment has two parts: an animals part and an objects part.\n'
+    'You will be told which part comes first for you.\n\n'
+    'During the animals part, all animals are your targets.\n'
+    'During the objects part, all objects are your targets.\n\n'
+    'Press SPACE to continue.',
+
+    'When a target appears, press the number key for the corner where it appeared.\n\n'
+    'Do not press for pictures that are not your targets. In the animals part, for\n'
+    'example, do not react to pictures of objects.\n\n'
+    f'You have {config.RESPONSE_WINDOW:g} seconds to respond.\n\n'
+    'Press SPACE to continue.',
+
+    'React correctly and the cross flashes green: that is a hit. Aim to get as many\n'
+    'hits as you can.\n\n'
+    'If you do not react in time you gain a miss or a late response; the next screen\n'
+    'explains the difference.\n\n'
+    'If you react to the wrong corner or to the wrong type of picture you gain a\n'
+    'false alarm. Aim to keep these low.\n\n'
+    'Press SPACE to continue.',
 )
-INSTRUCTIONS_BOTTOM = (
-    'Every time you correctly react to your target, the cross will flash green and you will gain a point or a correct hit. Aim to maximize these.\n'
-    'If you do not react in time you will gain a miss or a late response; the next screen explains the difference.\n'
-    'If you react to the wrong corner or the wrong object type (reacting to objects in the animals block) you will gain a false alarm. Aim to minimize these.\n\n'
-    'Press SPACE to continue.'
-)
-INSTRUCTIONS = INSTRUCTIONS_TOP + '\n\n' + INSTRUCTIONS_BOTTOM
 
 # The four outcomes the scorer actually produces, in the participant's words.
 # Keep the numbers derived from config so the screen cannot drift from scoring.
-SCORING_RULES = (
+SCORING_PAGES = (
     'How your responses are scored\n\n'
-    f'Hit: the right number key within {config.RESPONSE_WINDOW:g} seconds of the target appearing.\n'
-    '     The cross flashes green.\n'
-    f'Late: the right number key, but after {config.RESPONSE_WINDOW:g} seconds and within '
-    f'{config.TARGET_CORNER_HOLD:g} seconds.\n'
-    '     A late response is not a miss.\n'
-    f'Miss: no key in the target\'s corner within {config.TARGET_CORNER_HOLD:g} seconds.\n'
-    'False alarm: a key in the wrong corner, a key for a picture that is not your target,\n'
-    '     or a key when no target is on screen.\n\n'
+    f'Hit: the right number key within {config.RESPONSE_WINDOW:g} seconds of the target\n'
+    'appearing. The cross flashes green.\n\n'
+    f'Late: the right number key, but after {config.RESPONSE_WINDOW:g} seconds and within\n'
+    f'{config.TARGET_CORNER_HOLD:g} seconds. A late response is not a miss.\n\n'
+    'Press SPACE to continue.',
+
+    f'Miss: no key in the target\'s corner within {config.TARGET_CORNER_HOLD:g} seconds.\n\n'
+    'False alarm: a key in the wrong corner, a key for a picture that is not your\n'
+    'target, or a key when no target is on screen.\n\n'
     'Only 1, 2, 4 and 5 count as responses. Any other key is ignored.\n\n'
-    'Press SPACE to start the practice.'
+    'Press SPACE to start the practice.',
 )
 
 
@@ -96,21 +114,31 @@ def _fit_image(window, visual, path, max_fraction_w, max_fraction_h):
 def finger_placement(window, kb, visual):
     """Show where to rest the fingers before the key check; False if ESCAPE."""
     win_w, win_h = window.size
-    text = _text(window, visual, height=26, pos=(-win_w * 0.25, 0))
+    text = _text(
+        window, visual, height=26,
+        pos=(-win_w * 0.26, win_h * 0.38), anchorVert='top',
+    )
     text.text = (
         'Hand Placement\n\n'
-        'Rest your index finger between 4 and 1.\n'
-        'Rest your middle finger between 5 and 2.\n\n'
-        'Reach up for the top number or down for the bottom number in each pair.\n\n'
-        'Keep your fingers resting on the number pad between responses, so you can respond quickly.\n\n'
+        'Here is an example hand position: one finger on the\n'
+        'space bar and two on the number pad. Please use your\n'
+        'dominant hand on the number pad.\n\n'
+        'Rest your index finger between 4 and 1, and your\n'
+        'middle finger between 5 and 2.\n'
+        'Keep your fingers on the number pad between responses.\n\n'
         'Press SPACE when your hand is in place.'
     )
-    text.wrapWidth = win_w * 0.44
-    image = _fit_image(window, visual, _image_path(FINGERS_IMAGE_NAME), 0.36, 0.78)
-    image.pos = (win_w * 0.25, 0)
+    text.wrapWidth = win_w * 0.46
+    # The photo shows a real hand; the taller diagram stays beside it as the
+    # labelled reference for which key each finger rests on.
+    photo = _fit_image(window, visual, _image_path(HAND_PHOTO_NAME), 0.46, 0.38)
+    photo.pos = (-win_w * 0.26, -win_h * 0.22)
+    diagram = _fit_image(window, visual, _image_path(FINGERS_IMAGE_NAME), 0.30, 0.74)
+    diagram.pos = (win_w * 0.30, 0)
     while True:
         text.draw()
-        image.draw()
+        photo.draw()
+        diagram.draw()
         window.flip()
         presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
@@ -238,39 +266,49 @@ def operator_screen(window, kb, visual, lines):
             return True
 
 
+def block_intro_message(block_index, block_count, block):
+    """The page shown before each block. Targets are named as a group."""
+    return (
+        f'Block {block_index + 1} of {block_count}: {BLOCK_LABELS[block]}\n'
+        f'Your target group is {BLOCK_LABELS[block].lower()}. Press the matching '
+        f'numpad key when you see {BLOCK_TARGET_PHRASE[block]}.'
+    )
+
+
+def trial_recap_message(block, trial, hits, total_targets, late, misses, false_alarms):
+    """The page shown after every trial: what happened, in the participant's words."""
+    recap = '\n'.join(trial_recap_lines(hits, total_targets, late, misses, false_alarms))
+    return (
+        f'{BLOCK_LABELS[block]} — Trial {trial} complete.\n\n'
+        f'{recap}\n\n'
+        'Remember to respond to all targets quickly and accurately!'
+    )
+
+
+def _pages(window, kb, visual, pages, height=24):
+    """Show each page in turn, waiting for SPACE after every one; False if ESCAPE."""
+    text = _text(window, visual, height=height)
+    for page in pages:
+        text.text = page
+        while True:
+            text.draw()
+            window.flip()
+            presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+            if any(key.name == 'escape' for key in presses):
+                return False
+            if any(key.name == 'space' for key in presses):
+                break
+    return True
+
+
 def instructions(window, kb, visual):
-    """Show the task instructions; False if ESCAPE."""
-    win_h = window.size[1]
-
-    top_text = _text(window, visual, height=22, pos=(0, win_h * 0.28))
-    top_text.text = INSTRUCTIONS_TOP
-
-    bottom_text = _text(window, visual, height=22, pos=(0, -win_h * 0.28))
-    bottom_text.text = INSTRUCTIONS_BOTTOM
-
-    while True:
-        top_text.draw()
-        bottom_text.draw()
-        window.flip()
-        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
-        if any(key.name == 'escape' for key in presses):
-            return False
-        if any(key.name == 'space' for key in presses):
-            return True
+    """Show the task instructions, one page per SPACE; False if ESCAPE."""
+    return _pages(window, kb, visual, INSTRUCTION_PAGES, height=26)
 
 
 def scoring_rules(window, kb, visual):
     """Explain the four scored outcomes before practice; False if ESCAPE."""
-    text = _text(window, visual, height=24)
-    text.text = SCORING_RULES
-    while True:
-        text.draw()
-        window.flip()
-        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
-        if any(key.name == 'escape' for key in presses):
-            return False
-        if any(key.name == 'space' for key in presses):
-            return True
+    return _pages(window, kb, visual, SCORING_PAGES, height=26)
 
 
 def continuation(window, kb, text, message, key_rows, block, trial):

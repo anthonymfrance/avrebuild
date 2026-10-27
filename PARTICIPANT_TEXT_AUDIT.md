@@ -1,18 +1,35 @@
 # Participant text audit
 
 Every piece of text a participant can see during a session, in the order it
-appears, with its word count. Generated from the source by
-[tools/participant_text_inventory.py](tools/participant_text_inventory.py), which
-evaluates the real string expressions against `config`, so the wording below is
-the wording on screen (run-time numbers appear as `«placeholders»`).
+appears, with the word count of the page they are looking at. This is the state
+after the first round of wording changes (the earlier single-page wording is in
+the previous commit of this branch).
+
+Generated from the source, so the wording below is the wording on screen:
 
 ```bash
-python3 tools/participant_text_inventory.py          # word/char counts
+python3 tools/participant_text_inventory.py          # word/char counts per string
 python3 tools/participant_text_inventory.py --full    # counts + full wording
+python3 tools/render_screen_mock.py                   # contact sheet of the static screens
 ```
 
-19 participant-visible strings, 624 words in total. Nothing here has been
-changed yet — this is the map we pick edits from.
+`render_screen_mock.py` draws the screens to HTML with fake PsychoPy objects —
+no display and no PsychoPy needed — using the real positions, image sizes and
+page breaks. Serve it and open it:
+
+```bash
+python3 -m http.server 8791 --directory build/screen_mock
+```
+
+Run-time values appear below as `«placeholders»`; counts in the tables are the
+words the participant reads on that page, including its "Press SPACE…" line.
+
+The block intro and the trial recap are built from live trial counts by
+`screens.block_intro_message` and `screens.trial_recap_message`, so the inventory
+tool prints their fixed wording with placeholders for the numbers; the counts
+below come from rendering those two with representative values
+(`tests/test_participant_text.py` and `tests/test_screens.py` pin the assembled
+pages).
 
 ---
 
@@ -24,48 +41,60 @@ are **not** participant-visible and only appear when preflight is run with the
 
 | # | Screen | Source | Words | When |
 | --- | --- | --- | --- | --- |
-| 1 | Hand Placement | [screens.py:100](screens.py#L100) | 56 | once, before the plan exists |
-| 2 | Number Key Check | [screens.py:137](screens.py#L137) | 29 | once |
-| 3 | Sound Check | [screens.py:156](screens.py#L156) | 27 | once |
-| 4 | Instructions (part 1) | [screens.py:246](screens.py#L246) | 83 | once |
-| 5 | Instructions (part 2) | [screens.py:249](screens.py#L249) | 82 | once, same page as 4 |
-| 6 | How your responses are scored | [screens.py:265](screens.py#L265) | 98 | once |
-| 7 | Practice intro | [practice.py:112](practice.py#L112) | 23 | once |
-| 8 | Practice coach step 1 (circle) | [practice.py:30](practice.py#L30) | 13 | once |
-| 9 | Practice coach step 2 (square) | [practice.py:35](practice.py#L35) | 16 | once |
-| 10 | Practice coach step 3 (both) | [practice.py:44](practice.py#L44) | 13 | once |
-| 11 | Coach feedback notices | [practice.py:287](practice.py#L287), [practice.py:299](practice.py#L299) | 1–9 | after each coached press |
-| 12 | Now at the real speed | [practice.py:173](practice.py#L173) | 23 | once |
-| 13 | Paced practice caption | [practice.py:341](practice.py#L341) | 2 | during the 5-item practice round |
-| 14 | Practice complete | [practice.py:389](practice.py#L389) | 49 | once |
-| 15 | Block 1 of 2 intro | [experiment.py:390](experiment.py#L390) | 19 | once per block (×2) |
-| 16 | Trial complete recap | [experiment.py:430](experiment.py#L430) | 19 | after every trial (×8) |
-| 17 | Break | [screens.py:313](screens.py#L313) | 28 | once, after block 1 |
-| 18 | Study complete | [experiment.py:469](experiment.py#L469) | 34 | once, at the end |
+| 1 | Hand Placement | [screens.py:114](screens.py#L114) | 62 | once, before the plan exists |
+| 2 | Number Key Check | [screens.py:165](screens.py#L165) | 37 then less | once; the "still to check" list shrinks per key |
+| 3 | Sound Check | [screens.py:177](screens.py#L177) | 27 | once |
+| 4 | Instructions — page 1 of 3 | [screens.py:47](screens.py#L47) | 44 | once, one SPACE per page |
+| 5 | Instructions — page 2 of 3 | [screens.py:47](screens.py#L47) | 47 | " |
+| 6 | Instructions — page 3 of 3 | [screens.py:47](screens.py#L47) | 69 | " |
+| 7 | How your responses are scored — 1 of 2 | [screens.py:71](screens.py#L71) | 45 | once |
+| 8 | How your responses are scored — 2 of 2 | [screens.py:71](screens.py#L71) | 57 | " |
+| 9 | Practice intro | [practice.py:112](practice.py#L112) | 23 | once |
+| 10 | Practice coach step 1 (circle) | [practice.py:30](practice.py#L30) | 13 | once |
+| 11 | Practice coach step 2 (square) | [practice.py:35](practice.py#L35) | 16 | once |
+| 12 | Practice coach step 3 (both) | [practice.py:44](practice.py#L44) | 13 | once |
+| 13 | Coach feedback notices | [practice.py:287](practice.py#L287) | 1–9 | after each coached press |
+| 14 | Now at the real speed | [practice.py:173](practice.py#L173) | 23 | once |
+| 15 | Paced practice caption | [practice.py:341](practice.py#L341) | 2 | during the 5-item round |
+| 16 | Practice summary | [practice.py:390](practice.py#L390) | 87 | once |
+| 17 | Block intro | [screens.py:269](screens.py#L269) | 24 | once per block (×2) |
+| 18 | Trial recap | [screens.py:278](screens.py#L278) | 58 | after every trial (×8) |
+| 19 | Break | [screens.py:325](screens.py#L325) | 28 | once, after block 1 |
+| 20 | Study complete | [experiment.py:464](experiment.py#L464) | 34–36 | once, at the end; varies with the saved path length |
 
-Between blocks 15/16 repeat with the other block label, so a full session shows
-**17 distinct screens, 23 text pages, 8 of which are the trial recap**.
+**26 pages per session, from 18 distinct page types**: the block intro appears
+twice (once per block) and the trial recap eight times (once per trial). The
+table's last two rows are not pages a participant advances past: the
+coached-feedback lines appear under a practice prompt, and the "Circles only."
+caption is drawn during the paced practice round. Every instructions and scoring
+page now waits for SPACE, so the participant sets the reading pace instead of
+facing a two-block wall of text.
 
-### 1. Hand Placement — 56 words
+### 1. Hand Placement — 62 words
 
-*(text on the left, [finger diagram](Finger%20Placement%20Screen%20Visual.png) on the right)*
+Text in the left column, the new keyboard photo under it, and the tall finger
+diagram on the right as the labelled key reference:
 
 ```
 Hand Placement
 
-Rest your index finger between 4 and 1.
-Rest your middle finger between 5 and 2.
+Here is an example hand position: one finger on the
+space bar and two on the number pad. Please use your
+dominant hand on the number pad.
 
-Reach up for the top number or down for the bottom number in each pair.
-
-Keep your fingers resting on the number pad between responses, so you can respond quickly.
+Rest your index finger between 4 and 1, and your
+middle finger between 5 and 2.
+Keep your fingers on the number pad between responses.
 
 Press SPACE when your hand is in place.
 ```
 
-### 2. Number Key Check — 29 words
+Images: [Example Hand Placement Photo.jpg](Example%20Hand%20Placement%20Photo.jpg)
+(883×401 at 1920×1080, under the text) and
+[Finger Placement Screen Visual.png](Finger%20Placement%20Screen%20Visual.png)
+(576×768, right column).
 
-*(left: text, right: numpad diagram)*
+### 2. Number Key Check — 37 words at first, then fewer as keys are ticked off
 
 ```
 Number Key Check
@@ -89,50 +118,68 @@ Press SPACE if you heard it.
 Press N if you did not hear it.
 ```
 
-### 4 + 5. Instructions — 83 + 82 words (one page, two text blocks)
-
-*(top block)*
+### 4–6. Instructions — 44 / 47 / 69 words, one page each
 
 ```
-The experiment has two parts: an animals part and an objects part. You will be told which will come first for you.
+The experiment has two parts: an animals part and an objects part.
+You will be told which part comes first for you.
 
-During the animals task, all animals will be your targets.
-During the objects task, all objects will be your targets.
-
-When a target appears, press the number key corresponding to the corner where it appeared.
-Do not press for distracting, non-target pictures. IE if your target is animals aim to not react to objects with the numpad.
-Respond within 0.9 seconds.
-```
-
-*(bottom block, same page)*
-
-```
-Every time you correctly react to your target, the cross will flash green and you will gain a point or a correct hit. Aim to maximize these.
-If you do not react in time you will gain a miss or a late response; the next screen explains the difference.
-If you react to the wrong corner or the wrong object type (reacting to objects in the animals block) you will gain a false alarm. Aim to minimize these.
+During the animals part, all animals are your targets.
+During the objects part, all objects are your targets.
 
 Press SPACE to continue.
 ```
 
-### 6. How your responses are scored — 98 words
+```
+When a target appears, press the number key for the corner where it appeared.
+
+Do not press for pictures that are not your targets. In the animals part, for
+example, do not react to pictures of objects.
+
+You have 0.9 seconds to respond.
+
+Press SPACE to continue.
+```
+
+```
+React correctly and the cross flashes green: that is a hit. Aim to get as many
+hits as you can.
+
+If you do not react in time you gain a miss or a late response; the next screen
+explains the difference.
+
+If you react to the wrong corner or to the wrong type of picture you gain a
+false alarm. Aim to keep these low.
+
+Press SPACE to continue.
+```
+
+### 7–8. How your responses are scored — 45 / 57 words, one page each
 
 ```
 How your responses are scored
 
-Hit: the right number key within 0.9 seconds of the target appearing.
-     The cross flashes green.
-Late: the right number key, but after 0.9 seconds and within 1.4 seconds.
-     A late response is not a miss.
+Hit: the right number key within 0.9 seconds of the target
+appearing. The cross flashes green.
+
+Late: the right number key, but after 0.9 seconds and within
+1.4 seconds. A late response is not a miss.
+
+Press SPACE to continue.
+```
+
+```
 Miss: no key in the target's corner within 1.4 seconds.
-False alarm: a key in the wrong corner, a key for a picture that is not your target,
-     or a key when no target is on screen.
+
+False alarm: a key in the wrong corner, a key for a picture that is not your
+target, or a key when no target is on screen.
 
 Only 1, 2, 4 and 5 count as responses. Any other key is ignored.
 
 Press SPACE to start the practice.
 ```
 
-### 7. Practice intro — 23 words
+### 9. Practice intro — 23 words
 
 ```
 Practice
@@ -143,7 +190,7 @@ Everyone sees this same practice. It is not part of your score.
 Press SPACE to start.
 ```
 
-### 8–11. Coached practice — 13 / 16 / 13 words, plus feedback lines
+### 10–13. Coached practice — 13 / 16 / 13 words, plus feedback lines
 
 ```
 A circle is a target.
@@ -161,7 +208,7 @@ Press only for the circle.
 The circle is in the top-left. Press 4.
 ```
 
-Appended under the current prompt when the participant presses wrongly:
+Appended under the current prompt after a wrong press:
 
 ```
 That would be a false alarm. Squares are not targets.
@@ -169,9 +216,9 @@ That corner has a square. Squares are not targets.
 That key is a different corner. This circle is the top-right (5).
 ```
 
-and, on a correct press, the word `Correct.` flashes with the green cross.
+and `Correct.` flashes with the green cross after a correct press.
 
-### 12. Now at the real speed — 23 words
+### 14. Now at the real speed — 23 words
 
 ```
 Now at the real speed.
@@ -181,21 +228,26 @@ The cross flashes green when you are correct.
 Press SPACE to start.
 ```
 
-### 13. Paced practice caption — 2 words
+### 15. Paced practice caption — 2 words
 
 ```
 Circles only.
 ```
 
-### 14. Practice complete — 49 words
+### 16. Practice summary — 87 words
+
+Counts now use the same four lines as every trial recap (one definition in
+[scoring.py](scoring.py#L130)), so practice and the real task cannot drift apart:
 
 ```
 Practice complete.
 
-Correct hits: «hits»
-Late responses: «late»
-Misses: «misses»
-False alarms: «false_alarms»
+You correctly responded to 4 out of 5 targets!
+You responded too slowly on 1 target.
+You completely missed the reaction time window for 0 targets.
+You either reacted at the wrong time or to the wrong corner 1 time.
+
+Remember to respond to all targets quickly and accurately!
 
 The real task is the same, with animal photos and object photos
 instead of circles and squares. Some pictures play a sound.
@@ -204,28 +256,42 @@ You still respond only to the target pictures.
 Press SPACE to begin the study.
 ```
 
-### 15. Block intro — 19 words (×2, e.g. animals first)
+### 17. Block intro — 24 words (×2)
+
+Targets are now named as a group, not "one":
 
 ```
 Block 1 of 2: ANIMALS
-Your target group is animals. Press the matching numpad key when you see one.
+Your target group is animals. Press the matching numpad key when you see any animal.
 
 Press SPACE to continue.
 ```
 
-### 16. Trial complete recap — 19 words (×8)
+`OBJECTS` uses "any object". `screens.BLOCK_TARGET_PHRASE` derives the singular
+from `config.BLOCK_LABELS`, so the wording cannot drift from the block name; it
+sits in `screens.py` rather than `config.py` because every config constant is
+part of the snapshot that existing participant plans are validated against
+(`session_io.load_timeline`), and a plan that fails that check will not run.
+
+### 18. Trial recap — 58 words (×8, after every trial)
 
 ```
-ANIMALS — Trial 1 complete.
-Correct hits: «hits»
-Late responses: «late»
-Misses: «misses»
-False alarms: «false_alarms» (please minimize these).
+OBJECTS — Trial 3 complete.
+
+You correctly responded to 5 out of 7 targets!
+You responded too slowly on 1 target.
+You completely missed the reaction time window for 1 target.
+You either reacted at the wrong time or to the wrong corner 2 times.
+
+Remember to respond to all targets quickly and accurately!
 
 Press SPACE to continue.
 ```
 
-### 17. Break — 28 words (counts down from 30 s, ends on its own)
+Counts pluralize ("1 target" / "2 targets", "1 time" / "2 times") and zero counts
+still show, so a clean trial says `0 targets` rather than hiding the line.
+
+### 19. Break — 28 words (counts down from 30 s, ends on its own)
 
 ```
 Break — the study continues on its own in «30» seconds.
@@ -235,7 +301,7 @@ Rest your eyes and hands, then carry on when you are ready.
 Press SPACE to continue now.
 ```
 
-### 18. Study complete — 34 words
+### 20. Study complete — 34 words
 
 ```
 Study complete — thank you!
@@ -255,56 +321,35 @@ Please inform the experiment lead that you have finished.
 
 ---
 
-## B. Where the word wall actually is
+## B. The wall, before and after
 
-Ranked by words on a single page:
-
-| Rank | Screen | Words | Lines |
+| Screen | Before | After | Note |
 | --- | --- | --- | --- |
-| 1 | How your responses are scored | 98 | 13 |
-| 2 | Instructions part 1 | 83 | 7 |
-| 3 | Instructions part 2 | 82 | 4 |
-| 4 | Hand Placement | 56 | 7 |
-| 5 | Practice complete | 49 | 10 |
-| 6 | Study complete | 34 | 11 |
-| 7 | Sound Check | 27 | 6 |
-| 8 | Number Key Check | 29 | 6 |
-| 9 | Break | 28 | 5 |
+| Instructions (one page, two blocks) | 165 words, 24 lines | 44 + 47 + 69 across 3 SPACE-gated pages | the wall; longest page now 69 |
+| How your responses are scored | 98 words, 13 lines | 45 + 57 across 2 pages | split correct outcomes from errors |
+| Hand Placement | 56 words | 62 words | + the keyboard photo; two sentences dropped (see note) |
+| Block intro | 19 words | 24 words | names the target group |
+| Trial recap | 19 words | 58 words | now says what happened, in words |
+| Practice summary | 49 words | 87 words | shares the recap wording |
 
-Screens 4–6 sit back to back before any picture appears, so the participant
-reads **263 words / ~24 lines in three consecutive presses of SPACE**, with no
-task action in between. That is the main wall. Screen 4 also carries an
-unexplained abbreviation (`IE`), rests on jargon (`distracting, non-target
-pictures`, `wrong object type`), and teaches four scoring words (hit, late,
-miss, false alarm) that are then re-taught in full one screen later.
+Longest single page in the study is now the practice summary (87 words, shown
+once) and the longest instruction page is 69; before, two consecutive pages ran
+82–98 words with no task action between them.
 
-The secondary wall is repetition: the trial recap (×8) and practice summary
-show the same four counters again, and block intro/recap repeat the block rule.
+Notes on what was dropped rather than moved, so it can be restored if you want
+it back:
 
-### Proposal (not applied yet)
+- Screen 1 no longer says "Reach up for the top number or down for the bottom
+  number in each pair." The diagram and photo show the finger positions.
+- Screen 1 condenses "Keep your fingers resting on the number pad between
+  responses, so you can respond quickly" to "Keep your fingers on the number pad
+  between responses."
+- The `IE if your target is animals…` sentence became "In the animals part, for
+  example, do not react to pictures of objects."
 
-1. **Instructions, 2 screens → 1**, ~165 words → ~70. Keep: two parts, animals
-   then objects, press the corner key, do not press for non-targets, 0.9 s.
-   Drop: forward references to "the next screen", the parenthetical re-explaining
-   the block rule, and "Aim to maximize/minimize these".
-2. **Scoring screen: four definitions → a 4-line aligned recap** that reuses the
-   exact wording the recap screens already show (`Correct hits / Late / Misses /
-   False alarms`), ~98 words → ~45, and make it the last thing before practice.
-3. **Hand Placement: 56 → ~30 words.** The diagram already shows finger
-   positions; the text only needs "index between 4 and 1, middle between 5 and 2,
-   keep them there, SPACE when ready."
-4. **Trial recap: 19 → 8 words.** `Trial 1 of 4 complete.` plus only the counter
-   that is off (or a single compact line), because it appears 8 times.
-5. **Practice complete: cut the "real task is the same" paragraph** (already said
-   on the instructions screen) → ~25 words.
-6. **Hand Placement / Num Key Check / Sound Check** are hardware checks, not
-   instructions; they could gain a small "Setup 1 of 3" header so participants
-   know where they are.
-7. Consistent voice: screen 1 uses "index finger", screen 12 uses "you have
-   0.9 seconds", the recaps use "please minimize these" (an instruction in a
-   results table).
-
-Ready to apply once you pick which of these to take.
+Still open, if you want to go further: the practice summary and the 8 trial
+recaps are the two longest pages left, and the recap repeats the reminder line
+every trial.
 
 ---
 
@@ -312,7 +357,7 @@ Ready to apply once you pick which of these to take.
 
 Both participants ran **identical code**. The recorded `git_commit` in
 `participant_metadata.json` and `session_metadata.json` is `ca2c99d` for both
-(and for participants 7, 9 and 11 as well — every session in `data/` today).
+(and for participants 7, 9 and 11 as well — every session collected so far).
 
 | | participant_08 | participant_10 |
 | --- | --- | --- |
@@ -331,19 +376,19 @@ The branch name is not stored in the data — only the commit hash is. The branc
 unambiguous here:
 
 - `2026-10-26 13:03:52 -0700` (P8): `HEAD` had been on `cursor/shape-practice`
-  since 2026-10-19 16:24:11 and had not moved since. → **cursor/shape-practice**
-  → P7, P8, P9 all ran here.
+  since 2026-10-19 16:24:11 and had not moved since → **cursor/shape-practice**
+  → P7, P8 and P9 all ran there.
 - `2026-10-27 08:09:07 -0700`: `HEAD` moved `cursor/timing-log-rounding` →
-  `clean-start`. → P10's preflight was `08:12:10 -0700` and P11's later still, so
+  `clean-start`. P10's preflight was `08:12:10 -0700` and P11's later still, so
   **both ran on clean-start**.
 
-So the two participants differ in branch *name*, not in code: both branches
-pointed at the same commit, `ca2c99d`.
+The two participants differ in branch *name*, not in code: both branches pointed
+at the same commit, `ca2c99d`.
 
 ### Branch creation and commit times
 
 Branch creation is not stored in git objects, so these are reflog timestamps
-(`branch: Created from …`), all local time (`-0700`):
+(`branch: Created from …`), local time (`-0700`):
 
 | Branch | Created | Created from |
 | --- | --- | --- |
@@ -363,11 +408,10 @@ The commit the participants actually ran:
 Newer commits exist on the other branches but **no participant has run them**:
 `e9b661f` (2026-10-26 16:36:45, "Tell participants how each trial went in the
 words they were taught"), `14da234` (2026-10-26 16:37:53) and `5546c74`
-(2026-10-27 08:08:46) were all made while `HEAD` sat on branches that participants
+(2026-10-27 08:08:46) were all made while `HEAD` sat on branches participants
 never ran, and `clean-start` was deliberately rolled back to `ca2c99d` before
-P10. That means **the "trial went in the words they were taught" text change is
-not in any participant's data** — the recap wording above is still the
-`ca2c99d` wording.
+P10. So the "trial went in the words they were taught" work is not in any
+participant's data.
 
 One caveat worth knowing: the block-order difference between P8 and P10 is not a
 branch effect. It is the counterbalancing rule

@@ -190,3 +190,45 @@ Baseline across 9 pilot sessions (1604 visuals): visual `onset_deviation` mean +
   `skipped` row.
 - `trial_log.csv` has one row per completed or aborted trial and its `miss_count`/`late_count` sum
   to the same totals as `trial_summary`.
+
+## 2026-10-27 participant wording changes
+
+- **The pre-task text is paged, one idea per SPACE press.** `screens.INSTRUCTION_PAGES` replaces
+  `INSTRUCTIONS_TOP`/`INSTRUCTIONS_BOTTOM` (the two blocks were shown together on one page: 165
+  words, 24 lines) and `screens.SCORING_PAGES` replaces `SCORING_RULES` (98 words). The new
+  `screens._pages` helper draws each page and waits for SPACE; ESCAPE still aborts on any page. The
+  pages are 44/47/69 and 45/57 words, so no page carries a wall of text. The `IE if your target is
+  animals…` sentence is reworded, and the scoring page indentation is gone.
+- **The hand-placement screen shows the real hand position** (`screens.HAND_PHOTO_NAME`,
+  `Example Hand Placement Photo.jpg`). The photo sits in the left column under the caption and the
+  finger diagram stays on the right as the labelled key reference. Dropped from the text to make
+  room: "Reach up for the top number or down for the bottom number in each pair", the "so you can
+  respond quickly" clause, and the `IE …` sentence.
+- **The block intro names the target group** (`screens.BLOCK_TARGET_PHRASE`, derived from
+  `config.BLOCK_LABELS`): "when you see any animal" / "any object" replaces "when you see one".
+  It is deliberately not a config constant, because a new config value would change the config
+  snapshot and refuse every existing participant plan (`session_io.load_timeline`). Verified:
+  `data/participant_08/timeline_key.csv` still loads.
+- **The between-trial recap and the practice summary share one wording**
+  (`scoring.trial_recap_lines`), reporting what the participant did in their own words instead of a
+  bare counter table: hits out of the trial's targets, too slow, missed the window, wrong time or
+  corner. Counts pluralize and zero counts still show. The practice summary keeps the "real task is
+  the same…" paragraph.
+- **The block intro and the trial recap are built by `screens.block_intro_message` and
+  `screens.trial_recap_message`** instead of inline in `experiment.py`, so the two pages that used
+  to be assembled in the runner are now pinned by tests like every other screen.
+- **No data-format or timing change.** No CSV column, metadata field, scoring rule or window was
+  touched; only participant-facing text and the screen flow for reading it.
+- New dev tools: `tools/participant_text_inventory.py` (word counts per screen string) and
+  `tools/render_screen_mock.py` (draws the static screens to HTML with fake PsychoPy objects, no
+  display or PsychoPy needed). `PARTICIPANT_TEXT_AUDIT.md` maps every screen, the wording, and the
+  before/after word counts.
+
+### Verify in pilot
+- Every instruction and scoring page is fully readable at 26 px with no clipping, and each waits for
+  SPACE before advancing; ESCAPE aborts from any page.
+- The hand-placement screen shows the photo, the caption and the diagram with no overlap, and the
+  participant's hand is on the number pad with a finger free for the space bar.
+- The block intro reads "any animal" in the animals block and "any object" in the objects block.
+- The recap after a trial lists all four counts with the trial's own numbers, and the practice
+  summary shows the same four lines for the practice round.

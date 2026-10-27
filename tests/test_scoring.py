@@ -1,6 +1,6 @@
 from scoring import (
     classify_press, finalize_targets, inter_trial_row, response_deadline,
-    session_false_alarms, trial_feedback, trial_summary,
+    session_false_alarms, trial_feedback, trial_recap_lines, trial_summary,
 )
 
 WINDOW = 1.5
@@ -121,3 +121,20 @@ def test_trial_feedback_from_memory():
     targets = [target('a', 'top_right', 1.0, 'hit'), target('b', 'top_left', 2.0, 'miss')]
     keys = [{'classification': 'hit'}, {'classification': 'false_alarm'}, {'classification': 'abort'}]
     assert trial_feedback(targets, keys) == (1, 1)
+
+
+def test_trial_recap_lines_say_what_happened_in_plain_words():
+    assert trial_recap_lines(5, 7, 1, 1, 2) == (
+        'You correctly responded to 5 out of 7 targets!',
+        'You responded too slowly on 1 target.',
+        'You completely missed the reaction time window for 1 target.',
+        'You either reacted at the wrong time or to the wrong corner 2 times.',
+    )
+
+
+def test_trial_recap_lines_pluralize_and_still_show_zero_counts():
+    lines = trial_recap_lines(0, 3, 2, 3, 0)
+    assert lines[0] == 'You correctly responded to 0 out of 3 targets!'
+    assert lines[1] == 'You responded too slowly on 2 targets.'
+    assert lines[2] == 'You completely missed the reaction time window for 3 targets.'
+    assert lines[3] == 'You either reacted at the wrong time or to the wrong corner 0 times.'

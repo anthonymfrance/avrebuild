@@ -4,12 +4,32 @@ from collections import defaultdict
 from participant_setup import derive_rng
 from stimulus_split import split_pool
 import config
+import screens
+import session_io
 
 
 def test_block_continuation_does_not_expose_soa():
     source = Path(__file__).parents[1].joinpath('experiment.py').read_text()
     block_intro = source.split('if not continuation(', 1)[1].split('):', 1)[0]
     assert 'SOA' not in block_intro
+
+
+def test_block_intro_names_the_target_group_not_a_single_picture():
+    animals = screens.block_intro_message(0, 2, 'animate')
+    objects = screens.block_intro_message(1, 2, 'inanimate')
+    assert animals.startswith('Block 1 of 2: ANIMALS')
+    assert objects.startswith('Block 2 of 2: OBJECTS')
+    assert 'when you see any animal' in animals
+    assert 'when you see any object' in objects
+    assert 'when you see one' not in animals + objects
+    assert set(screens.BLOCK_TARGET_PHRASE) == set(config.BLOCK_LABELS)
+    assert screens.BLOCK_TARGET_PHRASE['animate'] == 'any animal'
+    assert screens.BLOCK_TARGET_PHRASE['inanimate'] == 'any object'
+
+
+def test_block_wording_is_not_a_config_snapshot_value():
+    """A config constant would refuse every existing participant plan."""
+    assert 'BLOCK_TARGET_PHRASE' not in session_io.config_snapshot()
 
 
 def test_first_timeline_soa_is_independent_of_first_sampled_item():

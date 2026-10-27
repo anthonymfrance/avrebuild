@@ -122,6 +122,27 @@ def trial_feedback(trial_targets, trial_keys):
     return hits, false_alarms
 
 
+def _counted(count, singular, plural):
+    """"1 target" but "2 targets"; the count itself is always shown."""
+    return f'{count} {singular if count == 1 else plural}'
+
+
+def trial_recap_lines(hits, total_targets, late, misses, false_alarms):
+    """The four counts a participant reads after a trial, in their own words.
+
+    Used for every between-trial screen and for the practice summary, so the
+    practice recap and the real trials cannot drift apart.
+    """
+    return (
+        f'You correctly responded to {hits} out of {total_targets} targets!',
+        f'You responded too slowly on {_counted(late, "target", "targets")}.',
+        'You completely missed the reaction time window for '
+        f'{_counted(misses, "target", "targets")}.',
+        'You either reacted at the wrong time or to the wrong corner '
+        f'{_counted(false_alarms, "time", "times")}.',
+    )
+
+
 def session_false_alarms(keys):
     """False alarms in completed trials; inter-trial presses are not counted."""
     return sum(

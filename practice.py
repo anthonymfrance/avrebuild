@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import config
 from config import VISUAL_DURATION
-from scoring import classify_press, finalize_targets
+from scoring import classify_press, finalize_targets, trial_recap_lines
 from screens import ALL_KEYS, KEY_TO_CORNER
 from trial_runner import planned_image_alpha
 
@@ -382,21 +382,20 @@ def _paced(window, kb, clock, fixation, text, stims, rows):
 
 
 def _summary(window, kb, visual, targets, false_alarms):
+    """The same recap the real trials use, so the wording cannot drift apart."""
     hits = sum(row['response_status'] == 'hit' for row in targets)
     late = sum(row['response_status'] == 'late' for row in targets)
     misses = sum(row['response_status'] == 'miss' for row in targets)
     text = _text(window, visual)
-    text.text = (
-        'Practice complete.\n\n'
-        f'Correct hits: {hits}\n'
-        f'Late responses: {late}\n'
-        f'Misses: {misses}\n'
-        f'False alarms: {false_alarms}\n\n'
+    text.text = '\n\n'.join((
+        'Practice complete.',
+        '\n'.join(trial_recap_lines(hits, len(targets), late, misses, false_alarms)),
+        'Remember to respond to all targets quickly and accurately!',
         'The real task is the same, with animal photos and object photos\n'
         'instead of circles and squares. Some pictures play a sound.\n'
-        'You still respond only to the target pictures.\n\n'
-        'Press SPACE to begin the study.'
-    )
+        'You still respond only to the target pictures.',
+        'Press SPACE to begin the study.',
+    ))
     while True:
         text.draw()
         window.flip()

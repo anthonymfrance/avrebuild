@@ -388,9 +388,7 @@ def run(args):
         aborted = False
         for block_index, block in enumerate(block_order):
             if not continuation(
-                f"Block {block_index + 1} of {len(block_order)}: {BLOCK_LABELS[block]}\n"
-                f'Your target group is {BLOCK_LABELS[block].lower()}. Press the matching '
-                'numpad key when you see one.'
+                screens.block_intro_message(block_index, len(block_order), block)
             ):
                 aborted = True
                 break
@@ -427,13 +425,10 @@ def run(args):
                 last_block, last_trial = block, trial
                 save_session(session_dir, all_events, key_rows, trial_rows, metadata)
                 trial_hits, trial_false_alarms = trial_feedback(trial_targets, trial_keys)
-                if aborted or not continuation(
-                    f'{BLOCK_LABELS[block]} — Trial {trial} complete.\n'
-                    f'Correct hits: {trial_hits}\n'
-                    f'Late responses: {trial_row["late_count"]}\n'
-                    f'Misses: {trial_row["miss_count"]}\n'
-                    f'False alarms: {trial_false_alarms} (please minimize these).'
-                ):
+                if aborted or not continuation(screens.trial_recap_message(
+                    block, trial, trial_hits, len(trial_targets),
+                    trial_row['late_count'], trial_row['miss_count'], trial_false_alarms,
+                )):
                     aborted = True
                     break
             if not aborted and block_index < len(block_order) - 1:
