@@ -434,11 +434,18 @@ def run(args):
                 last_block, last_trial = block, trial
                 save_session(session_dir, all_events, key_rows, trial_rows, metadata)
                 trial_hits, trial_false_alarms = trial_feedback(trial_targets, trial_keys)
-                if aborted or not continuation(screens.trial_recap_message(
+                if aborted:
+                    break
+                # The recap is two pages: the correct/late counts, then the
+                # miss/false-alarm counts and the reminder.
+                for recap_page in screens.trial_recap_messages(
                     block, trial, trial_hits, len(trial_targets),
                     trial_row['late_count'], trial_row['miss_count'], trial_false_alarms,
-                )):
-                    aborted = True
+                ):
+                    if not continuation(recap_page):
+                        aborted = True
+                        break
+                if aborted:
                     break
             if not aborted and block_index < len(block_order) - 1:
                 break_outcome, break_duration = screens.rest_break(

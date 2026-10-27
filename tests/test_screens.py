@@ -201,18 +201,25 @@ def test_instructions_are_split_across_pages_and_do_not_repeat_the_numpad_guide(
     assert 'all objects are your targets' in message
     assert 'press the number key for the corner where it appeared' in message
     assert 'not your targets' in message
-    assert f'You have {config.RESPONSE_WINDOW:g} seconds to respond.' in message
+    assert (
+        f'You will have {config.RESPONSE_WINDOW:g} seconds to get points for '
+        'reacting after the target first appears.' in message
+    )
     assert 'false alarm' in message.lower()
     assert 'green' in message.lower()
 
 
-def test_trial_recap_page_reports_the_trial_in_words():
-    message = screens.trial_recap_message('inanimate', 3, 5, 7, 1, 1, 2)
-    assert message.startswith('OBJECTS — Trial 3 complete.')
-    for line in trial_recap_lines(5, 7, 1, 1, 2):
-        assert line in message
-    assert message.endswith('Remember to respond to all targets quickly and accurately!')
-    assert len(message.split()) <= PAGE_WORD_BUDGET
+def test_trial_recap_pages_report_the_trial_in_two_halves():
+    pages = screens.trial_recap_messages('inanimate', 3, 5, 7, 1, 1, 2)
+    assert len(pages) == 2
+    assert pages[0].startswith('OBJECTS — Trial 3 complete.')
+    recap = trial_recap_lines(5, 7, 1, 1, 2)
+    for line in recap[:2]:
+        assert line in pages[0] and line not in pages[1]
+    for line in recap[2:]:
+        assert line in pages[1] and line not in pages[0]
+    assert pages[1].endswith('Remember to respond to all targets quickly and accurately!')
+    assert all(len(page.split()) <= PAGE_WORD_BUDGET for page in pages)
 
 
 def test_instructions_escape_aborts_on_any_page():

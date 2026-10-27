@@ -61,7 +61,8 @@ INSTRUCTION_PAGES = (
     'When a target appears, press the number key for the corner where it appeared.\n\n'
     'Do not press for pictures that are not your targets. In the animals part, for\n'
     'example, do not react to pictures of objects.\n\n'
-    f'You have {config.RESPONSE_WINDOW:g} seconds to respond.\n\n'
+    f'You will have {config.RESPONSE_WINDOW:g} seconds to get points for reacting\n'
+    'after the target first appears.\n\n'
     'Press SPACE to continue.',
 
     'React correctly and the cross flashes green: that is a hit. Aim to get as many\n'
@@ -86,9 +87,13 @@ SCORING_PAGES = (
     f'Miss: no key in the target\'s corner within {config.TARGET_CORNER_HOLD:g} seconds.\n\n'
     'False alarm: a key in the wrong corner, a key for a picture that is not your\n'
     'target, or a key when no target is on screen.\n\n'
+    'Press SPACE to continue.',
+
     'Only 1, 2, 4 and 5 count as responses. Any other key is ignored.\n\n'
-    'Practice is three short rounds, each a little faster than the last.\n\n'
-    'Press SPACE to start the practice.',
+    # "3 short rounds" mirrors practice.TIERS: screens.py cannot import practice
+    # (practice imports screens), and a config value would be frozen into the
+    # participant-plan snapshot.
+    'Press SPACE to start the practice. There are 3 short rounds.',
 )
 
 
@@ -276,13 +281,26 @@ def block_intro_message(block_index, block_count, block):
     )
 
 
-def trial_recap_message(block, trial, hits, total_targets, late, misses, false_alarms):
-    """The page shown after every trial: what happened, in the participant's words."""
-    recap = '\n'.join(trial_recap_lines(hits, total_targets, late, misses, false_alarms))
+def recap_pages(headline, hits, total_targets, late, misses, false_alarms):
+    """The recap split over two pages, so neither page is a wall of text.
+
+    The practice summary uses this too, so the two recaps cannot drift apart.
+    The caller supplies the headline and adds its own SPACE line to each page.
+    """
+    lines = trial_recap_lines(hits, total_targets, late, misses, false_alarms)
     return (
-        f'{BLOCK_LABELS[block]} — Trial {trial} complete.\n\n'
-        f'{recap}\n\n'
-        'Remember to respond to all targets quickly and accurately!'
+        f'{headline}\n\n'
+        + '\n'.join(lines[:2]),
+        '\n'.join(lines[2:])
+        + '\n\nRemember to respond to all targets quickly and accurately!',
+    )
+
+
+def trial_recap_messages(block, trial, hits, total_targets, late, misses, false_alarms):
+    """The two pages shown after every trial, in the participant's words."""
+    return recap_pages(
+        f'{BLOCK_LABELS[block]} — Trial {trial} complete.',
+        hits, total_targets, late, misses, false_alarms,
     )
 
 

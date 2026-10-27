@@ -609,14 +609,17 @@ def test_practice_summary_uses_the_same_recap_lines_as_the_real_trials():
         FakeWindow(), FakeKeyboard(['space']), CapturingVisual, summary,
     )
     assert outcome == 'ok'
-    message = drawn[-1]
-    assert 'Practice complete.' in message
-    for line in trial_recap_lines(2, 4, 1, 1, 2):
-        assert line in message
-    assert 'Round 1 of 3 (easy): hits 1, late 0, misses 0, false alarms 1' in message
-    assert 'Remember to respond to all targets quickly and accurately!' in message
-    assert 'The real task is the same' in message
-    assert 'Press SPACE to begin the study.' in message
+    # Two recap pages, split exactly like the between-trial screens, then the
+    # page that links practice to the real task.
+    assert len(drawn) == 3
+    recap_one, recap_two, real_task = drawn
+    assert 'Practice complete.' in recap_one
+    assert all(line in recap_one + recap_two for line in trial_recap_lines(2, 4, 1, 1, 2))
+    assert 'Remember to respond to all targets quickly and accurately!' in recap_two
+    # The per-round tier counts are operator data, not participant text.
+    assert 'Round 1 of 3' not in recap_one + recap_two + real_task
+    assert 'The real task is similar' in real_task
+    assert 'Press SPACE to begin the study.' in real_task
 
 
 def test_corner_xy_is_the_same_place_inside_its_quadrant():

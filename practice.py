@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import config
 from config import VISUAL_DURATION
-from scoring import classify_press, finalize_targets, trial_recap_lines
-from screens import ALL_KEYS, KEY_TO_CORNER
+from scoring import classify_press, finalize_targets
+from screens import ALL_KEYS, KEY_TO_CORNER, recap_pages
 from trial_runner import planned_image_alpha
 
 KEY_NUMBER = {
@@ -188,8 +188,7 @@ TIERS = (
         'offsets': EASY_OFFSETS,
         'caption': 'Circles only.',
         'hold_text': (
-            'Round 1 of 3: at an easy pace.\n'
-            'One picture at a time.\n'
+            'Round 1 of 3.\n'
             'Press the number key for the corner with the circle.\n\n'
             'Press SPACE to start.'
         ),
@@ -200,8 +199,7 @@ TIERS = (
         'offsets': MEDIUM_OFFSETS,
         'caption': 'Circles only.',
         'hold_text': (
-            'Round 2 of 3: a bit faster.\n'
-            'Pictures come closer together, so two can share the screen.\n\n'
+            'Round 2 of 3.\n\n'
             'Press SPACE to start.'
         ),
     },
@@ -211,8 +209,8 @@ TIERS = (
         'offsets': HARD_OFFSETS,
         'caption': 'Circles only.',
         'hold_text': (
-            'Round 3 of 3: the real speed.\n'
-            f'Several pictures at once. You have {config.RESPONSE_WINDOW:g} seconds.\n'
+            'Round 3 of 3.\n'
+            f'You have {config.RESPONSE_WINDOW:g} seconds.\n'
             'The cross flashes green when you are correct.\n\n'
             'Press SPACE to start.'
         ),
@@ -589,40 +587,40 @@ def _paced(window, kb, clock, fixation, text, stims, rows, tier, backgrounds):
 
 
 def _summary(window, kb, visual, summary):
-    """The same recap the real trials use, plus the per-round tier counts.
+    """The two recap pages the real trials use, then the page about the real task.
 
-    The four statements come from ``scoring.trial_recap_lines`` so the practice
-    recap and the real trials cannot drift apart; the per-round lines report the
-    counts for each of the three practice tiers for the pilot.
+    ``screens.recap_pages`` is shared with the between-trial screens, so the two
+    recaps cannot drift apart. Per-round counts stay out of it: the participant
+    only ever reads the session totals.
     """
     total_targets = (
         summary['paced_hits'] + summary['paced_late'] + summary['paced_misses']
     )
-    rounds = '\n'.join(
-        f'Round {index} of {len(TIERS)} ({tier["tier"]}): hits {tier["hits"]}, '
-        f'late {tier["late"]}, misses {tier["misses"]}, '
-        f'false alarms {tier["false_alarms"]}'
-        for index, tier in enumerate(summary['tiers'], start=1)
-    )
-    text = _text(window, visual)
-    text.text = '\n\n'.join((
-        'Practice complete.',
-        '\n'.join(trial_recap_lines(
+    pages = [
+        page + '\n\nPress SPACE to continue.'
+        for page in recap_pages(
+            'Practice complete.',
             summary['paced_hits'], total_targets, summary['paced_late'],
             summary['paced_misses'], summary['paced_false_alarms'],
-        )),
-        rounds,
-        'Remember to respond to all targets quickly and accurately!',
-        'The real task is the same, with animal photos and object photos\n'
+        )
+    ]
+    pages.append(
+        'The real task is similar, but with animal photos and object photos\n'
         'instead of circles and squares. Some pictures play a sound.\n'
-        'You still respond only to the target pictures.',
-        'Press SPACE to begin the study.',
-    ))
-    while True:
-        text.draw()
-        window.flip()
-        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
-        if any(key.name == 'escape' for key in presses):
-            return 'abort'
-        if any(key.name == 'space' for key in presses):
-            return 'ok'
+        'You still respond only to the target pictures.\n\n'
+        'Press SPACE to begin the study.'
+    )
+    text = _text(window, visual)
+    for page in pages:
+        text.text = page
+        while True:
+            text.draw()
+            window.flip()
+            presses = kb.getKeys(
+                keyList=['space', 'escape'], waitRelease=False, clear=True,
+            )
+            if any(key.name == 'escape' for key in presses):
+                return 'abort'
+            if any(key.name == 'space' for key in presses):
+                break
+    return 'ok'
