@@ -15,6 +15,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import config
+from plan_validator import validate_plan
 from session_io import config_snapshot, json_default, server_data_directory, sha256_file
 from slotting_key import build_slotting_key, write_slotting_key
 from stimulus_split import split_pool
@@ -32,6 +33,10 @@ PARTICIPANT_PATTERN = re.compile(r"^(?:participant_)?(\d+)$")
 
 class PlanGenerationError(RuntimeError):
     """Raised when all secret-seed plan placement attempts fail."""
+
+
+class PlanValidationError(RuntimeError):
+    """A generated plan broke a rule: a generator bug, never retried with a new seed."""
 
 
 def derive_rng(seed: int, label: str) -> random.Random:
@@ -60,6 +65,9 @@ def build_plan(seed, block_order, count_ranges=None, diagnostics=None):
         slotting_rows, derive_rng(seed, 'timeline'), assignment, config.WINDOW_SIZE,
         diagnostics=diagnostics, count_ranges=count_ranges,
     )
+    errors = validate_plan(assignment, slotting_rows, timeline, count_ranges=count_ranges)
+    if errors:
+        raise PlanValidationError(f'Seed {seed}: plan failed independent validation: ' + '; '.join(errors[:10]))
     return assignment, slotting_rows, timeline, required, stats
 
 
@@ -323,6 +331,7 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
                 except ValueError:
                     pass
     failed_seeds = []
+    failed_reasons = []
     try:
         for attempt in range(1, 6):
             seed = secrets.randbits(64)
@@ -333,6 +342,7 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
                 assignment, slotting_rows, timeline, required, stats = build_plan(seed, block_order)
             except PlacementFailure as exc:
                 failed_seeds.append(seed)
+                failed_reasons.append(str(exc)[:400])
                 if attempt == 5:
                     failed = ', '.join(map(str, failed_seeds))
                     raise PlanGenerationError(
@@ -361,6 +371,11 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
             'completed_session_count_at_allocation': completed_count,
             'plan_attempts': len(failed_seeds) + 1,
             'failed_plan_seeds': failed_seeds,
+            'failed_plan_reasons': failed_reasons,
+            'placement': {
+                'placement_orders': stats['placement_attempts'],
+                'repaired_trials': stats['repaired_trials'],
+            },
             'timeline_sha256': sha256_file(temp_dir / 'timeline_key.csv'),
             'generated_utc': datetime.now(timezone.utc).isoformat(),
             'git_commit': git_commit,

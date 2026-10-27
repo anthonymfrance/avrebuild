@@ -14,7 +14,7 @@ from config import (
     TRIAL_NPD_RANGE, TRIAL_NPT_RANGE, TRIAL_PD_RANGE, TRIAL_PT_RANGE,
     WINDOW_SIZE,
 )
-from participant_setup import build_plan
+from participant_setup import PlanValidationError, build_plan
 from timeline_key import PlacementFailure, _maximum_visual_events, validate_timeline
 
 
@@ -240,7 +240,7 @@ def _run_seed(seed, diagnostics=None, count_ranges=None):
 
 def _classify_failure(exc, diagnostics):
     stage = diagnostics.get('stage', 'unknown')
-    if stage == 'monte_carlo_audit':
+    if stage == 'monte_carlo_audit' or isinstance(exc, PlanValidationError):
         return 'independent_validation_failure'
     counts = diagnostics.get('trial_visual_counts', [])
     over_capacity = [
@@ -248,6 +248,8 @@ def _classify_failure(exc, diagnostics):
     ]
     if stage == 'capacity_check' and over_capacity:
         return 'over_capacity'
+    if stage == 'capacity_check' and isinstance(exc, PlacementFailure):
+        return 'provably_infeasible'
     if isinstance(exc, PlacementFailure) and stage == 'placement':
         return 'placement_failure_within_capacity'
     if stage == 'validation':

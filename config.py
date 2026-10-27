@@ -19,8 +19,8 @@ TRIAL_PT_RANGE = (2, 3)
 TRIAL_NPT_RANGE = (3, 8)
 TRIAL_PD_RANGE = (3, 5)
 TRIAL_NPD_RANGE = (20, 28) #used to be 11 - 15
-MAX_PLACEMENT_ATTEMPTS = 250
-MAX_TIMELINE_ATTEMPTS = 3
+MAX_PLACEMENT_ATTEMPTS = 250   # random event orders per trial in the first placement pass
+MAX_TIMELINE_ATTEMPTS = 3      # placement passes; passes after the first retry only unplaced trials
 
 TARGET_SPATIAL_BIAS = 0.80
 CORNERS = ('top_left', 'top_right', 'bottom_left', 'bottom_right')
