@@ -255,7 +255,7 @@ distinct images**, not 12-14 distinct images. If the design needs more distinct
 targets per trial, `PT_COUNT_PER_BLOCK` / `PD_COUNT_PER_BLOCK` are the knobs — and
 they also change the PT manipulation, so they are not a difficulty lever.
 
-### 3.3.2 Raising the PT upper bound costs nothing, but only in a 30 s window
+### 3.3.2 Widening PT when the distractors are scaled too (30 s window)
 
 Monte Carlo, 100 seeds per scenario, 8-trial plans, `HARDER` exposure levers,
 `TRIAL_NPT_RANGE = (9, 10)`, `TRIAL_NPD_RANGE = (38, 45)`:
@@ -273,11 +273,15 @@ more PT observations and 36 more sounds across the session. Prevalence stays
 exactly 80% in `top_right` (the bias is per identity across the block, so it is
 scale-invariant).
 
-**The same PT range in the current 20 s window fails 60/60 seeds (100%).** Each
-failed seed burns the full 750 placement orders, so that scenario alone took
-523 s to simulate. That is not the PT count being too high: PT (3, 5) plus
-NPT (9, 10) plus NPD (38, 45) is ~59-65 visual events in a trial, and a 20 s
-window cannot host that load under the corner-hold and response-window rules.
+**With those same dense distractors, this PT range in a 20 s window fails 60/60
+seeds (100%).** Each failed seed burns the full 750 placement orders, so that
+scenario alone took 523 s to simulate. That failure is the distractor count and the
+content window, **not** the PT range: PT (3, 5) plus NPT (9, 10) plus NPD (38, 45)
+is ~59-65 visual events in a trial, and a 20 s window cannot host that load under
+the corner-hold and response-window rules.
+
+Do not read this as "PT 5 needs a 30 s window". With today's distractor count
+(20, 28), PT 3-5 places fine in a 20 s window — section 3.3.3.
 The distractor count is what has to move with the content window, which is why
 option B below deliberately leaves NPD alone.
 
@@ -416,8 +420,12 @@ ready to step exposure down (0.15 -> 0.10 -> 0.08 s fades) or size down
 If more PT observations per session are wanted, `TRIAL_PT_RANGE = (3, 5)` is a
 verified drop-in for `(3, 4)` in option A (section 3.3.2): same 0/100 placement
 failures, targets become 12-15, sessions stay 45.3 min, and the cost is 36 extra
-sounds (~0.5 more per trial). `(3, 6)` is also free at 12-16 targets. Both need
-the 30 s content window; either one fails outright in a 20 s window.
+sounds (~0.5 more per trial). `(3, 6)` is also free at 12-16 targets.
+
+In the 20 s window (option B) the equivalent move is PT (3, 5) with
+`TRIAL_NPT_RANGE = (8, 9)`, giving 11-14 targets at 16/100 placement failures —
+the same rate as (3, 4) with (9, 10) at 12-14 (section 3.3.3). Either way the
+limit is the target total, not the PT range.
 
 ## 5. How to verify
 
