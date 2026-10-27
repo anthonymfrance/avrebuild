@@ -230,6 +230,31 @@ change helps here as well: a 0.3 s stimulus leaves more room in the schedule.
 So the professor's "at least 11-12, ideally more" is comfortably reachable:
 **11-13 targets in a 20 s window**, or **up to 18-20 in a 30 s window**.
 
+### 3.3.1 What a target count means inside one trial
+
+`TRIAL_PT_RANGE` is **not** the number of different privileged targets in a trial.
+There is exactly one active PT per trial (`PT_COUNT_PER_BLOCK` per block, each
+active on `TRIALS_PER_PT` trials); the range is how many times **that one image is
+repeated** in the trial. `TRIAL_NPT_RANGE` is sampled **with replacement** from the
+six remaining in-category items, so any count above 6 necessarily repeats
+identities within the trial.
+
+Per block the 10 category items split **2 PT / 2 PD / 6 NPT / 6 NPD**. A trial
+generated at the recommended ranges (seed 7, animate trial 1, 61 events):
+
+```
+PT :  3 presentations from 1 identity    {elephant: 3}
+NPT:  9 presentations from 4 identities  {horse: 4, pig: 2, cow: 2, frog: 1}
+PD :  4 presentations from 2 identities  {phone: 3, toilet: 1}
+NPD: 45 presentations from 6 identities  {camera: 13, helicopter: 9, ...}
+```
+
+The other NPT identities appear in other trials; across the block all six are
+used. So a "12-14 target trial" is **~13 presentations of targets drawn from 1-7
+distinct images**, not 12-14 distinct images. If the design needs more distinct
+targets per trial, `PT_COUNT_PER_BLOCK` / `PD_COUNT_PER_BLOCK` are the knobs — and
+they also change the PT manipulation, so they are not a difficulty lever.
+
 ### 3.4 A confound to decide about: more targets also raises target prevalence
 
 Today: ~8 targets among ~36 images = **22% prevalence**. Raising targets to
@@ -276,8 +301,8 @@ Two clean ways out:
 | `FADE_IN_DUR` | 0.3 | **0.15** | halves contrast-time (3.1) |
 | `FADE_OUT_DUR` | 0.3 | **0.15** | ditto |
 | `IMAGE_SIZE` | (150, 150) | **(100, 100)** | 44% of the area, ~3 deg (3.2) |
-| `TRIAL_PT_RANGE` | (2, 3) | **(3, 4)** | part of the 12-14 target count |
-| `TRIAL_NPT_RANGE` | (3, 8) | **(9, 10)** | ditto |
+| `TRIAL_PT_RANGE` | (2, 3) | **(3, 4)** | repeats of the single active PT (3.3.1) |
+| `TRIAL_NPT_RANGE` | (3, 8) | **(9, 10)** | drawn with replacement from the 6-item NPT pool |
 | `TRIAL_NPD_RANGE` | (20, 28) | **(38, 45)** | holds prevalence at ~22% (3.4) |
 | `TRIAL_CONTENT_DUR` | 20.0 | **30.0** | 13 targets at a 2.3 s cadence; placement becomes trivial |
 | `TRIALS_PER_PT` | 2 | **17** | 34 trials/block, 68 total = 45.3 min |
