@@ -389,8 +389,8 @@ distractors per trial over today's count - takes a plan from 100% to 86.8% withi
 retry budget. Nothing can be added in this window: the recommendation sits on the
 boundary, not near it.
 
-The two resources that are actually exhausted are different ones, which is why every
-route fails the same way:
+Two separate resources are exhausted here, and every route fails because it spends
+one of them:
 
 - **Targets** are limited by the corner-hold and response-window rules (3.3.3): a
   target occupies its corner for `TARGET_CORNER_HOLD` = 1.4 s and no two targets may
