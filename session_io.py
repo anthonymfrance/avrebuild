@@ -374,6 +374,20 @@ def save_session(session_dir, events, keys, trials, metadata):
     os.replace(temp_path, session_dir / 'session_metadata.json')
 
 
+def first_screen_elapsed_seconds(first_screen_utc, now_utc=None):
+    """Wall seconds from the first participant screen to now, or None before it.
+
+    ``first_screen_utc`` is stamped just before the first screen a participant sees,
+    so the elapsed time spans the whole participant-facing session. Reporting it this
+    way also covers exits that never reach a saved session, such as ESC on the
+    hand-placement screen.
+    """
+    if first_screen_utc is None:
+        return None
+    now = now_utc or datetime.now(timezone.utc)
+    return round((now - first_screen_utc).total_seconds(), 3)
+
+
 def server_data_directory():
     """Resolve the same server data root for allocation and backup."""
     server_root = os.environ.get('AV_STUDY_SERVER_ROOT')

@@ -20,7 +20,8 @@ from participant_setup import create_participant_plan, derive_rng, verify_partic
 import practice
 import screens
 from session_io import (
-    load_timeline, operator_warn, save_session, sha256_file, sync_participant, write_practice_log,
+    first_screen_elapsed_seconds, load_timeline, operator_warn, save_session, sha256_file,
+    sync_participant, write_practice_log,
 )
 from audio_ptb import (
     AUDIO_START_SOURCE, assign_sound_slots, backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio,
@@ -146,6 +147,7 @@ def run(args):
     key_rows = []
     trial_rows = []
     current_trial_events = None
+    first_screen_utc = None
     metadata = {
         'participant_id': args.pid,
         'started_utc': None,
@@ -250,6 +252,11 @@ def run(args):
         )
         kb = keyboard.Keyboard(clock=session_clock)
         kb.clearEvents()
+
+        # Wall clock for the whole participant-facing session. Stamped on the first
+        # screen they see, so it covers every exit path, including ESC.
+        first_screen_utc = datetime.now(timezone.utc)
+        metadata['first_screen_utc'] = first_screen_utc.isoformat()
 
         if not screens.finger_placement(window, kb, visual):
             return
@@ -453,6 +460,9 @@ def run(args):
 
         metadata['completion_status'] = 'aborted' if aborted else 'completed'
         metadata['ended_utc'] = datetime.now(timezone.utc).isoformat()
+        metadata['elapsed_seconds_from_first_screen'] = first_screen_elapsed_seconds(
+            first_screen_utc
+        )
         if session_dir is not None:
             metadata['server_sync'] = {'status': 'pending'}
             save_session(session_dir, all_events, key_rows, trial_rows, metadata)
@@ -490,6 +500,14 @@ def run(args):
                 lambda: save_session(session_dir, all_events, key_rows, trial_rows, metadata),
             )
     finally:
+        # Printed even when no session was saved (for example ESC on the first
+        # screen), so a drill's wall-clock length is always visible in the runner log.
+        elapsed_from_first_screen = first_screen_elapsed_seconds(first_screen_utc)
+        if elapsed_from_first_screen is not None:
+            print(
+                f'Wall clock from first screen to exit: {elapsed_from_first_screen:.1f} s',
+                file=sys.stderr,
+            )
         if session_dir is not None and current_trial_events is not None:
             # An error interrupted a trial: keep its rows marked trial_complete=False
             # (pending targets become 'incomplete') so they never count as misses.
@@ -511,6 +529,9 @@ def run(args):
             current_trial_events = None
             metadata.setdefault('completion_status', 'aborted_or_error')
             metadata['ended_utc'] = datetime.now(timezone.utc).isoformat()
+            metadata['elapsed_seconds_from_first_screen'] = first_screen_elapsed_seconds(
+                first_screen_utc
+            )
             save_session(session_dir, all_events, key_rows, trial_rows, metadata)
         Path(report_source).unlink(missing_ok=True)
         if window is not None:

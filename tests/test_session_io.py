@@ -223,3 +223,13 @@ def test_participant_metadata_write_accepts_numpy(tmp_path, monkeypatch):
     assert stored['config']['n'] == 2
     assert stored['config']['hz'] == 60.5
     assert stored['config']['size'] == [1920, 1080]
+
+
+def test_first_screen_elapsed_seconds():
+    from datetime import datetime, timedelta, timezone
+
+    assert session_io.first_screen_elapsed_seconds(None) is None
+    start = datetime(2026, 10, 27, 12, 0, 0, tzinfo=timezone.utc)
+    assert session_io.first_screen_elapsed_seconds(start, start) == 0.0
+    later = start + timedelta(seconds=90.5)
+    assert session_io.first_screen_elapsed_seconds(start, later) == 90.5
