@@ -184,6 +184,22 @@ def _element_html(element):
     )
 
 
+def _practice_summary():
+    """A pretend three-round practice result, for the summary screen."""
+    tiers = [
+        {'tier': 'easy', 'hits': 2, 'late': 0, 'misses': 1, 'false_alarms': 1},
+        {'tier': 'medium', 'hits': 3, 'late': 0, 'misses': 1, 'false_alarms': 1},
+        {'tier': 'hard', 'hits': 3, 'late': 0, 'misses': 1, 'false_alarms': 0},
+    ]
+    return {
+        'tiers': tiers,
+        'paced_hits': sum(tier['hits'] for tier in tiers),
+        'paced_late': sum(tier['late'] for tier in tiers),
+        'paced_misses': sum(tier['misses'] for tier in tiers),
+        'paced_false_alarms': sum(tier['false_alarms'] for tier in tiers),
+    }
+
+
 def render(name, run, images):
     """Run one screen with fakes; return its title, frames and referenced images."""
     RECORDER.frames = [[]]
@@ -222,8 +238,14 @@ def main():
     sheet('Practice intro', lambda visual: practice.intro(
         FakeWindow(), FakeKeyboard(), visual))
     sheet('Practice summary', lambda visual: practice._summary(
-        FakeWindow(), FakeKeyboard(), visual,
-        [{'response_status': status} for status in ('hit', 'hit', 'late', 'miss', 'hit')], 1))
+        FakeWindow(), FakeKeyboard(), visual, _practice_summary()))
+    for index, tier in enumerate(practice.TIERS, start=1):
+        sheet(
+            f'Practice round {index} hold ({tier["tier"]})',
+            lambda visual, tier=tier: practice._hold(
+                FakeWindow(), FakeKeyboard(),
+                practice._text(FakeWindow(), visual), tier['hold_text']),
+        )
     sheet('Break', lambda visual: screens.rest_break(
         FakeWindow(), FakeKeyboard(), visual, FakeClock(advance=1.0)))
 
