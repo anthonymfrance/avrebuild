@@ -281,6 +281,40 @@ window cannot host that load under the corner-hold and response-window rules.
 The distractor count is what has to move with the content window, which is why
 option B below deliberately leaves NPD alone.
 
+### 3.3.3 In a 20 s window the cap is the target total, not the PT count
+
+All rows: `HARDER` exposure levers, content 20 s, `TRIAL_NPD_RANGE` left at
+today's (20, 28), 8-trial plans. Monte Carlo per row, n as shown.
+
+| `TRIAL_PT_RANGE` | `TRIAL_NPT_RANGE` | Targets/trial | n | Placement failures | First try | Within 5 seeds |
+| --- | --- | --- | --- | --- | --- | --- |
+| (3, 5) | (7, 8) | 10-13 | 60 | **1/60** | 98.3% | 100% |
+| (2, 3) | (9, 10) | 11-13 | 100 | **1/100** | 96.0% | 100% |
+| (4, 5) | (7, 8) | 11-13 | 60 | **5/60** | 88.3% | 100% |
+| (3, 5) | (8, 9) | 11-14 | 100 | **16/100** | 72.0% | 100% |
+| (3, 4) | (9, 10) | 12-14 | 100 | **16/100** | 72.0% | 100% |
+| (4, 5) | (8, 9) | 12-14 | 100 | **20/100** | 72.0% | 100% |
+| (3, 5) | (9, 10) | 12-15 | 60 | **30/60** | 38.3% | 96.9% |
+| (3, 6) | (9, 10) | 12-16 | 60 | **52/60** | 10.0% | 51.1% |
+| (3, 4) | (11, 12) | 14-16 | 100 | **99/100** | 0.0% | 4.9% |
+
+**PT (3, 4) is not a hard ceiling on PT.** PT 5 and PT 6 both place fine in a 20 s
+window — what is capped is the **total number of target presentations per trial**, at
+roughly 14. Read the table by that column, not by the PT column: 10-14 targets
+sits at 1-20% per-seed failure, 15 targets jumps to 50%, 16 to 87%, and 14-16
+(mean 15) to 99%.
+
+Two consequences for a 20 s design:
+
+- `TRIAL_PT_RANGE = (3, 5)` with `TRIAL_NPT_RANGE = (8, 9)` gives **11-14 targets at
+  the same 16/100 failure rate** as today's proposed (3, 4) / (9, 10) at 12-14. So
+  if a wider PT range is wanted, trade one NPT for the extra PT repeat; it is free.
+- The mix is a secondary cost at a fixed total. At 11.8 vs 12.0 targets/trial,
+  PT (4, 5) produces **8.4 sounds/trial against 6.2** for PT (2, 3), and sounds must
+  be at least `SOUND_DUR + MIN_AUDIO_GAP` = 1.2 s apart. That is 10.1 s of the 20 s
+  window locked up versus 7.4 s, which is why the failure rate rises from 1% to 8%
+  even though the target total is identical. PT carries sound; NPT does not.
+
 ### 3.4 A confound to decide about: more targets also raises target prevalence
 
 Today: ~8 targets among ~36 images = **22% prevalence**. Raising targets to
@@ -351,15 +385,22 @@ attempt, with ~8.5 randomized placement orders per trial (today's baseline is
 ~2.6 per trial). The mean gap between consecutive targets is 1.65 s, so no
 pair of targets sits anywhere near the 200-500 ms attentional-blink window.
 
-**Option B (keeps the 20 s window): 100 trials, 11-13 targets.**
+**Option B (keeps the 20 s window): 100 trials, 11-14 targets.**
 
-`TRIAL_PT_RANGE = (2, 3)`, `TRIAL_NPT_RANGE = (9, 10)`,
-`TRIALS_PER_PT = 25` (50 trials/block, 100 total, 45.8 min), everything else as in
-option A except `TRIAL_CONTENT_DUR` stays 20.0 and `TRIAL_NPD_RANGE` stays as it
-is (prevalence would be 11-13 of ~41 = 30%, flagged as a manipulation).
-Placement is 96% first try. Choose this if the trial is the unit of analysis and
-you want 50 observations per PT per block; choose A if you want the cadence to
-stay near the pilot's 2.5 s and the generator to have slack.
+`TRIAL_CONTENT_DUR` stays 20.0, `TRIALS_PER_PT = 25` (50 trials/block, 100 total,
+45.8 min), and `TRIAL_NPD_RANGE` stays at (20, 28) — with a 20 s window the
+distractors cannot scale, so prevalence rises to ~30-33% and has to be either
+accepted as a manipulation or reported. Two verified target splits (section 3.3.3,
+100 seeds each):
+
+| PT range | NPT range | Targets | Failures | Within 5 seeds |
+| --- | --- | --- | --- | --- |
+| (3, 5) | (8, 9) | 11-14 | 16/100 | 100% |
+| (4, 5) | (8, 9) | 12-14 | 20/100 | 100% |
+
+Choose B if the trial is the unit of analysis and you want 50 observations per PT
+per block; choose A if you want the cadence near the pilot's 2.5 s, distractor
+counts that keep prevalence constant, and slack in the generator.
 
 **Do not ship both exposure levers at once with no psychometric check.** The
 literature supports a graded duration effect but not a specific hit rate for

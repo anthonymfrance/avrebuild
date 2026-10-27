@@ -138,6 +138,38 @@ SCENARIOS = {
             **HARDER, TRIAL_CONTENT_DUR=30.0,
             TRIAL_PT_RANGE=[3, 4], TRIAL_NPT_RANGE=[9, 10], TRIAL_NPD_RANGE=[38, 45],
         ),
+        # 20 s content window with the distractor count left at today's (20, 28):
+        # how the target total and the PT/NPT split each drive placement.
+        scenario(
+            'w20_pt3_5_npt9_10',
+            '20 s window, PT max 5, 12-15 targets (same NPT as the 12-14 control)',
+            **HARDER, TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[9, 10],
+        ),
+        scenario(
+            'w20_pt3_6_npt9_10',
+            '20 s window, PT max 6, 12-16 targets',
+            **HARDER, TRIAL_PT_RANGE=[3, 6], TRIAL_NPT_RANGE=[9, 10],
+        ),
+        scenario(
+            'w20_pt3_5_npt7_8',
+            '20 s window, PT max 5 but only 10-13 targets: isolates PT count from target load',
+            **HARDER, TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[7, 8],
+        ),
+        scenario(
+            'w20_pt4_5_npt7_8',
+            '20 s window, PT 4-5 repeats, 11-13 targets',
+            **HARDER, TRIAL_PT_RANGE=[4, 5], TRIAL_NPT_RANGE=[7, 8],
+        ),
+        scenario(
+            'w20_pt3_5_npt8_9',
+            '20 s window, PT max 5, 11-14 targets: the floor stays at the requested 11',
+            **HARDER, TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[8, 9],
+        ),
+        scenario(
+            'w20_pt4_5_npt8_9',
+            '20 s window, PT 4-5 repeats, 12-14 targets: matches the (3,4) target total',
+            **HARDER, TRIAL_PT_RANGE=[4, 5], TRIAL_NPT_RANGE=[8, 9],
+        ),
         scenario(
             'pt_3_5_content_30s',
             'wider PT range in the 30 s window: 3-5 PT repeats + 9-10 NPT = 12-15 targets',
