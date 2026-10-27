@@ -159,6 +159,23 @@ def test_write_practice_log_keeps_skipped_practice(tmp_path):
     assert set(stored[0]) == set(session_io.PRACTICE_LOG_FIELDS)
 
 
+def test_practice_log_records_which_round_a_row_came_from(tmp_path):
+    rows = [
+        {'phase': 'paced', 'tier': 'easy', 'event_id': 'easy-0', 'classification': 'hit'},
+        {'phase': 'paced', 'tier': 'hard', 'event_id': 'hard-0', 'classification': 'miss'},
+    ]
+    session_io.write_practice_log(tmp_path / 'practice_log.csv', rows)
+    stored = list(csv.DictReader((tmp_path / 'practice_log.csv').open()))
+    assert session_io.PRACTICE_LOG_FIELDS.index('tier') == 1
+    assert [row['tier'] for row in stored] == ['easy', 'hard']
+    assert [row['event_id'] for row in stored] == ['easy-0', 'hard-0']
+    # A log written before the column existed still parses: the field is blank.
+    legacy = [{'phase': 'paced', 'event_id': 'practice-0', 'classification': 'hit'}]
+    session_io.write_practice_log(tmp_path / 'legacy.csv', legacy)
+    old = list(csv.DictReader((tmp_path / 'legacy.csv').open()))
+    assert old[0]['tier'] == '' and old[0]['classification'] == 'hit'
+
+
 def test_save_session_writes_numpy_metadata_as_json(tmp_path):
     np = pytest.importorskip('numpy')
     metadata = {

@@ -1,4 +1,13 @@
-"""Hardcoded practice. Same shapes for every participant.
+"""Hardcoded practice: coached steps, then three paced rounds that get harder.
+
+The script is fixed for every participant (no RNG), so practice is identical
+across sessions and subjects. Everything with a config equivalent -- shape size,
+fade profile, response window, corner signs -- is read from config, so practice
+cannot drift from the real task. Only the content is hardcoded: which corner,
+target or distractor, and how densely the shapes appear.
+
+Difficulty is item density, never the response window: RESPONSE_WINDOW is the
+same in all three rounds and in the real task.
 
 Rows are returned to the caller so practice can be saved even when it is
 skipped or aborted; nothing here writes files.
@@ -25,7 +34,8 @@ KEY_NUMBER = {
 # paced-round start. Gaps stay wider than the hit window plus the late window.
 # Small fixed offsets from the quadrant center, in pixels. They keep the shapes
 # from always appearing in exactly the same spot while staying identical for
-# every participant. Values stay well inside each quadrant.
+# every participant. Values stay well inside each quadrant, and two shapes in
+# the same corner never share an offset.
 COACHED = (
     {
         'prompt': 'A circle is a target.\nThis one is in the top-right. Press 5.',
@@ -50,19 +60,132 @@ COACHED = (
         'expect': 'top_left',
     },
 )
-PACED = (
+
+# Round 1: one shape at a time, nothing else on screen while a target's window
+# is open. 5 items, 1.6 s apart.
+EASY = (
     (0.8, 'target', 'top_right'),
     (2.4, 'distractor', 'bottom_left'),
     (4.0, 'target', 'bottom_right'),
     (5.6, 'distractor', 'top_left'),
     (7.2, 'target', 'top_left'),
 )
-PACED_OFFSETS = (
+EASY_OFFSETS = (
     (25, 20),
     (-30, -25),
     (35, -30),
     (-40, 25),
     (20, -35),
+)
+
+# Round 2: more pictures, closer together, but still only one on screen at a
+# time (gaps stay above VISUAL_DURATION). 9 items, 0.7-0.9 s apart.
+MEDIUM = (
+    (0.60, 'target', 'top_right'),
+    (1.30, 'distractor', 'bottom_left'),
+    (2.10, 'target', 'top_left'),
+    (3.00, 'distractor', 'bottom_right'),
+    (3.90, 'distractor', 'top_right'),
+    (4.80, 'distractor', 'bottom_left'),
+    (5.70, 'target', 'bottom_right'),
+    (6.60, 'distractor', 'top_left'),
+    (7.40, 'target', 'top_right'),
+)
+MEDIUM_OFFSETS = (
+    (30, -25),
+    (-35, 30),
+    (-25, -35),
+    (40, 25),
+    (25, 30),
+    (-30, 20),
+    (35, -30),
+    (-40, 25),
+    (20, -35),
+)
+
+# Round 3: the real item density from a generated trial (1.4-2.2 items/s), so
+# the next shape is already fading in while the previous one fades out and each
+# target's window spans two later onsets. The gaps still respect every rule the
+# timeline enforces: MIN_VISUAL_ONSET_GAP, target onsets at least RESPONSE_WINDOW
+# apart, and a target's corner empty for TARGET_CORNER_HOLD.
+HARD = (
+    (0.50, 'target', 'top_right'),
+    (0.95, 'distractor', 'bottom_left'),
+    (1.35, 'distractor', 'bottom_right'),
+    (1.75, 'distractor', 'top_left'),
+    (2.10, 'target', 'bottom_left'),
+    (2.55, 'distractor', 'bottom_right'),
+    (2.95, 'distractor', 'top_left'),
+    (3.55, 'distractor', 'bottom_left'),
+    (3.95, 'distractor', 'top_right'),
+    (4.35, 'target', 'bottom_right'),
+    (4.75, 'distractor', 'top_left'),
+    (5.15, 'distractor', 'bottom_left'),
+    (5.55, 'distractor', 'top_right'),
+    (5.95, 'distractor', 'bottom_right'),
+    (6.35, 'target', 'top_left'),
+    (6.75, 'distractor', 'bottom_right'),
+    (7.15, 'distractor', 'bottom_left'),
+    (7.55, 'distractor', 'top_right'),
+)
+HARD_OFFSETS = (
+    (30, -25),
+    (-35, 25),
+    (40, 20),
+    (-25, -35),
+    (-25, 35),
+    (35, -30),
+    (-40, 25),
+    (25, 20),
+    (25, 30),
+    (-20, -35),
+    (30, 20),
+    (-20, -40),
+    (-20, -30),
+    (30, 35),
+    (20, -25),
+    (-35, 20),
+    (30, -25),
+    (35, -30),
+)
+
+# The order participants see, and the words they read between rounds.
+TIERS = (
+    {
+        'tier': 'easy',
+        'events': EASY,
+        'offsets': EASY_OFFSETS,
+        'caption': 'Circles only.',
+        'hold_text': (
+            'Round 1 of 3: at an easy pace.\n'
+            'One picture at a time.\n'
+            'Press the number key for the corner with the circle.\n\n'
+            'Press SPACE to start.'
+        ),
+    },
+    {
+        'tier': 'medium',
+        'events': MEDIUM,
+        'offsets': MEDIUM_OFFSETS,
+        'caption': 'Circles only.',
+        'hold_text': (
+            'Round 2 of 3: a bit faster.\n'
+            'More pictures, one after another. Still one at a time.\n\n'
+            'Press SPACE to start.'
+        ),
+    },
+    {
+        'tier': 'hard',
+        'events': HARD,
+        'offsets': HARD_OFFSETS,
+        'caption': 'Circles only.',
+        'hold_text': (
+            'Round 3 of 3: the real speed.\n'
+            f'Circles only. You have {config.RESPONSE_WINDOW:g} seconds.\n'
+            'The cross flashes green when you are correct.\n\n'
+            'Press SPACE to start.'
+        ),
+    },
 )
 
 
@@ -73,14 +196,14 @@ def corner_xy(width, height, corner, offset=(0, 0)):
     return (sx * width * 0.32 + dx, sy * height * 0.28 + dy)
 
 
-def paced_targets(events=PACED):
+def paced_targets(events, prefix):
     """Target rows in the shape classify_press already scores."""
     targets = []
     for index, (onset, kind, corner) in enumerate(events):
         if kind != 'target':
             continue
         targets.append({
-            'event_id': f'practice-{index}',
+            'event_id': f'{prefix}-{index}',
             'corner': corner,
             '_actual_onset': onset,
             '_planned_runtime': onset,
@@ -90,16 +213,16 @@ def paced_targets(events=PACED):
     return targets
 
 
-def paced_end(events=PACED):
+def paced_end(events):
     last = max(onset for onset, _, _ in events)
     return last + config.RESPONSE_WINDOW + config.LATE_WINDOW + 0.3
 
 
 def _row(phase, step='', event_id='', time_seconds='', key='', corner='',
-         expected_corner='', classification='', rt_seconds='', outcome=''):
+         expected_corner='', classification='', rt_seconds='', outcome='', tier=''):
     """One practice_log.csv row; blank fields stay blank."""
     return {
-        'phase': phase, 'step': step, 'event_id': event_id,
+        'tier': tier, 'phase': phase, 'step': step, 'event_id': event_id,
         'time_seconds': time_seconds, 'key': key, 'corner': corner,
         'expected_corner': expected_corner, 'classification': classification,
         'rt_seconds': rt_seconds, 'outcome': outcome,
@@ -113,6 +236,7 @@ def intro(window, kb, visual):
         'Practice\n\n'
         'Circles are targets. Squares are not.\n'
         'Everyone sees this same practice. It is not part of your score.\n\n'
+        f'There are {len(TIERS)} short rounds. Each one is a little faster.\n\n'
         'Press SPACE to start.'
     )
     while True:
@@ -132,7 +256,8 @@ def run(window, kb, visual, fixation, clock):
 
     status is 'completed', 'skipped', or 'abort'. rows are practice_log.csv
     rows, collected even when the participant skips or aborts, so the caller can
-    still save what happened.
+    still save what happened. summary['tiers'] holds one entry per round, in the
+    order they were run.
     """
     started = float(clock.getTime())
     rows = []
@@ -145,6 +270,8 @@ def run(window, kb, visual, fixation, clock):
         'paced_late': 0,
         'paced_misses': 0,
         'paced_false_alarms': 0,
+        'skipped_at_tier': '',
+        'tiers': [],
     }
 
     def finish(status):
@@ -170,24 +297,41 @@ def run(window, kb, visual, fixation, clock):
                 return finish('abort')
             if outcome == 'corrected':
                 summary['coached_corrections'] += 1
-        if _hold(
-            window, kb, text,
-            'Now at the real speed.\n'
-            f'Circles only. You have {config.RESPONSE_WINDOW:g} seconds.\n'
-            'The cross flashes green when you are correct.\n\n'
-            'Press SPACE to start.',
-        ) == 'abort':
-            return finish('abort')
-        paced_outcome, targets, false_alarms = _paced(
-            window, kb, clock, fixation, text, stims, rows,
-        )
-        summary['paced_false_alarms'] = false_alarms
-        summary['paced_hits'] = sum(t['response_status'] == 'hit' for t in targets)
-        summary['paced_late'] = sum(t['response_status'] == 'late' for t in targets)
-        summary['paced_misses'] = sum(t['response_status'] == 'miss' for t in targets)
-        if paced_outcome == 'abort':
-            return finish('abort')
-        if _summary(window, kb, visual, targets, false_alarms) == 'abort':
+        for tier in TIERS:
+            decision = _hold(window, kb, text, tier['hold_text'], allow_skip=True)
+            if decision == 'abort':
+                return finish('abort')
+            if decision == 'skip':
+                # The operator may end practice at any round change; the rows
+                # collected so far are kept and the status is 'skipped'.
+                rows.append(_row(
+                    'intro', classification='skipped',
+                    outcome='practice_not_run', tier=tier['tier'],
+                ))
+                summary['skipped_at_tier'] = tier['tier']
+                return finish('skipped')
+            tier_started = float(clock.getTime())
+            outcome, targets, false_alarms = _paced(
+                window, kb, clock, fixation, text, stims, rows, tier,
+            )
+            hits = sum(target['response_status'] == 'hit' for target in targets)
+            late = sum(target['response_status'] == 'late' for target in targets)
+            misses = sum(target['response_status'] == 'miss' for target in targets)
+            summary['paced_hits'] += hits
+            summary['paced_late'] += late
+            summary['paced_misses'] += misses
+            summary['paced_false_alarms'] += false_alarms
+            summary['tiers'].append({
+                'tier': tier['tier'],
+                'events': len(tier['events']),
+                'duration_seconds': float(clock.getTime()) - tier_started,
+                'hits': hits, 'late': late, 'misses': misses,
+                'false_alarms': false_alarms,
+                'outcome': 'abort' if outcome == 'abort' else 'completed',
+            })
+            if outcome == 'abort':
+                return finish('abort')
+        if _summary(window, kb, visual, summary) == 'abort':
             return finish('abort')
         return finish('completed')
     finally:
@@ -251,12 +395,14 @@ def _coached(window, kb, clock, fixation, text, stims, step, step_number, rows):
                 rows.append(_row(
                     'coached', step_number, '', float(press.rt), press.name,
                     KEY_TO_CORNER[press.name], '', 'false_alarm', '',
+                    tier='coached',
                 ))
                 notice = 'That would be a false alarm. Squares are not targets.'
             if any(key.name == 'space' for key in presses):
                 rows.append(_row(
                     'coached', step_number, classification='step_result',
                     outcome='false_alarm_prompted' if corrected else 'no_false_alarm',
+                    tier='coached',
                 ))
                 return 'corrected' if corrected else 'ok'
             continue
@@ -265,11 +411,12 @@ def _coached(window, kb, clock, fixation, text, stims, step, step_number, rows):
             if corner == expect:
                 rows.append(_row(
                     'coached', step_number, '', float(press.rt), press.name,
-                    corner, expect, 'correct', '',
+                    corner, expect, 'correct', '', tier='coached',
                 ))
                 rows.append(_row(
                     'coached', step_number, classification='step_result',
                     outcome='corrected' if corrected else 'first_try',
+                    tier='coached',
                 ))
                 if _acknowledge(window, kb, clock, fixation, text, placed) == 'abort':
                     return 'abort'
@@ -277,7 +424,7 @@ def _coached(window, kb, clock, fixation, text, stims, step, step_number, rows):
             corrected = True
             rows.append(_row(
                 'coached', step_number, '', float(press.rt), press.name,
-                corner, expect, 'wrong_corner', '',
+                corner, expect, 'wrong_corner', '', tier='coached',
             ))
             notice = _miss_notice(corner, expect, step['shapes'])
 
@@ -307,39 +454,45 @@ def _acknowledge(window, kb, clock, fixation, text, placed):
     return 'ok'
 
 
-def _hold(window, kb, text, message):
+def _hold(window, kb, text, message, allow_skip=False):
+    """Wait for SPACE. Returns 'ok', 'skip' (operator ending practice), or 'abort'."""
     text.text = message
+    key_list = ['space', 'escape'] + (['s'] if allow_skip else [])
     while True:
         text.draw()
         window.flip()
-        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+        presses = kb.getKeys(keyList=key_list, waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
             return 'abort'
+        if allow_skip and any(key.name == 's' for key in presses):
+            return 'skip'
         if any(key.name == 'space' for key in presses):
             return 'ok'
 
 
-def _paced(window, kb, clock, fixation, text, stims, rows):
-    """Paced round. Returns ('ok'|'abort', targets, false_alarms)."""
+def _paced(window, kb, clock, fixation, text, stims, rows, tier):
+    """One paced round. Returns ('ok'|'abort', targets, false_alarms)."""
     width, height = window.size
-    targets = paced_targets()
+    events = tier['events']
+    offsets = tier['offsets']
+    targets = paced_targets(events, tier['tier'])
     t0 = float(clock.getTime())
     green_until = -1.0
     false_alarms = 0
     kb.clearEvents()
     aborted = False
-    while float(clock.getTime()) - t0 < paced_end():
+    while float(clock.getTime()) - t0 < paced_end(events):
         now = float(clock.getTime()) - t0
         drawn = []
-        for index, (onset, kind, corner) in enumerate(PACED):
+        for index, (onset, kind, corner) in enumerate(events):
             age = now - onset
             if 0 <= age < VISUAL_DURATION:
                 drawn.append((
-                    stims[kind], corner_xy(width, height, corner, PACED_OFFSETS[index]),
+                    stims[kind], corner_xy(width, height, corner, offsets[index]),
                     planned_image_alpha(age),
                 ))
         _frame(
-            window, fixation, text, drawn, 'Circles only.',
+            window, fixation, text, drawn, tier['caption'],
             float(clock.getTime()) < green_until,
         )
         for press in kb.getKeys(keyList=ALL_KEYS, waitRelease=False, clear=True):
@@ -350,7 +503,7 @@ def _paced(window, kb, clock, fixation, text, stims, rows):
             if corner is None:
                 rows.append(_row(
                     'paced', '', '', float(press.rt) - t0, press.name, '',
-                    '', 'ignored_key', '',
+                    '', 'ignored_key', '', tier=tier['tier'],
                 ))
                 continue
             row, chosen = classify_press(
@@ -364,6 +517,7 @@ def _paced(window, kb, clock, fixation, text, stims, rows):
             rows.append(_row(
                 'paced', '', '', float(press.rt) - t0, press.name, corner, '',
                 row['classification'], row['rt_from_actual_onset'],
+                tier=tier['tier'],
             ))
             if row['classification'] == 'hit':
                 green_until = float(press.rt) + config.FIXATION_FLASH_DUR
@@ -377,21 +531,25 @@ def _paced(window, kb, clock, fixation, text, stims, rows):
             'paced', '', target['event_id'], target['_actual_onset'],
             target.get('response_key', ''), target['corner'], target['corner'],
             target['response_status'], target.get('rt_from_actual_onset', ''),
+            tier=tier['tier'],
         ))
     return ('abort' if aborted else 'ok'), targets, false_alarms
 
 
-def _summary(window, kb, visual, targets, false_alarms):
-    hits = sum(row['response_status'] == 'hit' for row in targets)
-    late = sum(row['response_status'] == 'late' for row in targets)
-    misses = sum(row['response_status'] == 'miss' for row in targets)
+def _summary(window, kb, visual, summary):
+    rounds = '\n'.join(
+        f'Round {index} of {len(TIERS)} ({tier["tier"]}):   hits {tier["hits"]}, '
+        f'late {tier["late"]}, misses {tier["misses"]}, '
+        f'false alarms {tier["false_alarms"]}'
+        for index, tier in enumerate(summary['tiers'], start=1)
+    )
     text = _text(window, visual)
     text.text = (
         'Practice complete.\n\n'
-        f'Correct hits: {hits}\n'
-        f'Late responses: {late}\n'
-        f'Misses: {misses}\n'
-        f'False alarms: {false_alarms}\n\n'
+        f'{rounds}\n\n'
+        f'Total: hits {summary["paced_hits"]}, late {summary["paced_late"]}, '
+        f'misses {summary["paced_misses"]}, '
+        f'false alarms {summary["paced_false_alarms"]}.\n\n'
         'The real task is the same, with animal photos and object photos\n'
         'instead of circles and squares. Some pictures play a sound.\n'
         'You still respond only to the target pictures.\n\n'

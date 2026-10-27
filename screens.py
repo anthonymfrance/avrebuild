@@ -69,6 +69,7 @@ SCORING_RULES = (
     'False alarm: a key in the wrong corner, a key for a picture that is not your target,\n'
     '     or a key when no target is on screen.\n\n'
     'Only 1, 2, 4 and 5 count as responses. Any other key is ignored.\n\n'
+    'Practice is three short rounds, each a little faster than the last.\n\n'
     'Press SPACE to start the practice.'
 )
 
