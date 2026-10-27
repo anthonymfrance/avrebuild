@@ -568,8 +568,8 @@ Unchanged in every option, and deliberately so: `RESPONSE_WINDOW` (0.9),
 Counted from **10 real generated plans per configuration** (the first 10 seeds that
 place), not from the mean-of-ranges formula, so these are what a participant would
 actually be shown. "clean-start" is the 8-trial, 5.9-minute session the pilots ran.
-Session length uses the same break cadence in every column (the 12-trial cadence in
-4.1 for the long sessions; clean-start needs no new cadence).
+Session length uses the same break cadence in every column (the 12-trial cadence from
+the Option A table above for the long sessions; clean-start needs no new cadence).
 
 | Per session | clean-start / pilots | 20 s option B | 30 s option A |
 | --- | --- | --- | --- |
