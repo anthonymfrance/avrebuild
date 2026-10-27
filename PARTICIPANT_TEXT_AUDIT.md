@@ -48,7 +48,7 @@ Between blocks 15/16 repeat with the other block label, so a full session shows
 
 ### 1. Hand Placement — 56 words
 
-![](Finger%20Placement%20Screen%20Visual.png) *(left: text, right: finger diagram)*
+*(text on the left, [finger diagram](Finger%20Placement%20Screen%20Visual.png) on the right)*
 
 ```
 Hand Placement
