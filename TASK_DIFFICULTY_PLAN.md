@@ -255,6 +255,32 @@ distinct images**, not 12-14 distinct images. If the design needs more distinct
 targets per trial, `PT_COUNT_PER_BLOCK` / `PD_COUNT_PER_BLOCK` are the knobs — and
 they also change the PT manipulation, so they are not a difficulty lever.
 
+### 3.3.2 Raising the PT upper bound costs nothing, but only in a 30 s window
+
+Monte Carlo, 100 seeds per scenario, 8-trial plans, `HARDER` exposure levers,
+`TRIAL_NPT_RANGE = (9, 10)`, `TRIAL_NPD_RANGE = (38, 45)`:
+
+| `TRIAL_PT_RANGE` | Targets/trial | Placement failures | First try | Orders/plan | PT observations/session | Sounds/session |
+| --- | --- | --- | --- | --- | --- | --- |
+| (3, 4) | 12-14 | **0/100** | 100% | 8.0 | 237 (3.5/trial) | 504 (7.4/trial) |
+| (3, 5) | 12-15 | **0/100** | 100% | 8.2 | 273 (4.0/trial) | 540 (7.9/trial) |
+| (3, 6) | 12-16 | **0/100** | 100% | 8.5 | 297 (4.4/trial) | 564 (8.3/trial) |
+
+All three are in the 30 s content window. Widening PT to 3-5 is **free**: same
+zero failures, 8.2 vs 8.0 randomized placement orders per plan, and it buys 36
+more PT observations and 36 more sounds across the session. Prevalence stays
+22-23.5% because NPD absorbs the extra targets, and the PT corner mix stays
+exactly 80% in `top_right` (the bias is per identity across the block, so it is
+scale-invariant).
+
+**The same PT range in the current 20 s window fails 60/60 seeds (100%).** Each
+failed seed burns the full 750 placement orders, so that scenario alone took
+523 s to simulate. That is not the PT count being too high: PT (3, 5) plus
+NPT (9, 10) plus NPD (38, 45) is ~59-65 visual events in a trial, and a 20 s
+window cannot host that load under the corner-hold and response-window rules.
+The distractor count is what has to move with the content window, which is why
+option B below deliberately leaves NPD alone.
+
 ### 3.4 A confound to decide about: more targets also raises target prevalence
 
 Today: ~8 targets among ~36 images = **22% prevalence**. Raising targets to
@@ -343,6 +369,14 @@ ready to step exposure down (0.15 -> 0.10 -> 0.08 s fades) or size down
 (100 -> 75 px) if hit rate stays above ~90%.
 
 ---
+
+### 4.1 Optional: widen PT to 3-5
+
+If more PT observations per session are wanted, `TRIAL_PT_RANGE = (3, 5)` is a
+verified drop-in for `(3, 4)` in option A (section 3.3.2): same 0/100 placement
+failures, targets become 12-15, sessions stay 45.3 min, and the cost is 36 extra
+sounds (~0.5 more per trial). `(3, 6)` is also free at 12-16 targets. Both need
+the 30 s content window; either one fails outright in a 20 s window.
 
 ## 5. How to verify
 
