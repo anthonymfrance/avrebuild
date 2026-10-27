@@ -355,20 +355,13 @@ producing a plan when the plan is 100 trials long. Do the sweep at the plan leng
 you are going to run.
 
 **12-14 targets — the range the supervisor asked for — is not reachable in a 20 s
-window either.** Measured directly, both ways of splitting it fail, and lowering
-NPD to buy room does not save it:
-
-| Split | Targets | Prevalence | Plan failures | Within 5 seeds |
-| --- | --- | --- | --- | --- |
-| PT (3, 4) / NPT (9, 10), NPD (20, 28) | 12-14 | 32% | 29/30 (96.7%) | 15.6% |
-| PT (4, 5) / NPT (8, 9), NPD (20, 28) | 12-14 | 32% | 30/30 (100%) | 0.0% |
-| PT (3, 4) / NPT (9, 10), NPD (14, 20) | 12-14 | 38% | 15/30 (50%) | 96.9% |
-
-The third row is the one worth reading: cutting NPD from 24 to 17 does halve the
-failure rate, but it still fails half the time within the 5-seed budget, and it
-pushes prevalence to 38% — nearly double the pilot's 22% — so the "more targets"
-effect would be confounded with a much easier target-detection condition. There
-is no 20 s configuration at 12-14 targets that is both generatable and clean.
+window either.** Both ways of splitting it fail at 100 trials (96.7% and 100%,
+rows 7-10 above), at 32% prevalence. Cutting NPD from (20, 28) to (14, 20) is the
+only lever that helps — it halves the failure rate to 15/30 (50%) and raises the
+chance of a plan within the retry budget to 96.9% — but even that is a coin flip,
+and it drives prevalence to **38%**, nearly double the pilot's 22%. So the "more
+targets" effect would arrive confounded with a much easier detection condition.
+There is no 20 s configuration at 12-14 targets that is both generatable and clean.
 
 For the 20 s window this leaves two viable target splits at 100 trials:
 **11-13** (PT 2-3 / NPT 9-10, 100% within 5 seeds) and **10-13** (PT 3-5 / NPT 7-8,
