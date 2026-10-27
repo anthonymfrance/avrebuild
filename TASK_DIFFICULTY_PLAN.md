@@ -484,7 +484,8 @@ pair of targets sits anywhere near the 200-500 ms attentional-blink window.
 **Option B (keeps the 20 s window): 100 trials, 11-13 targets.**
 
 `TRIAL_CONTENT_DUR` stays 20.0, `TRIALS_PER_PT = 25` (50 trials/block, 100 total,
-45.8 min), `TRIAL_NPD_RANGE` stays at (20, 28). With a 20 s window the distractor
+45.8 min on the current break cadence or **49.3 min** with the 12-trial cadence the
+30 s option needs - section 4.3), `TRIAL_NPD_RANGE` stays at (20, 28). With a 20 s window the distractor
 count cannot scale, so prevalence rises to ~30% and has to be accepted as a
 manipulation or reported. Verified at the real plan length of 100 trials (n=30):
 
@@ -548,7 +549,7 @@ derived ones marked below.
 | `TRIAL_NPD_RANGE` | (20, 28) | (20, 28) | (28, 34) … (40, 46) | **(38, 45)** |
 | `TRIALS_PER_PT` | 2 | **25** | — | **17** |
 | Trials per session | 8 | **100** | — | **68** |
-| Session length | 5.9 min | **45.8 min** | — | **45.3 min** |
+| Session length | 5.9 min | **49.3 min** | — | **45.3 min** |
 | Targets/trial | 5-11 | **11-13 / 10-13** | 11-14 | **12-14** |
 | Distractors/trial | 23-33 | 23-33 | 43-51 | 41-50 |
 | Visuals/trial *(mean)* | ~36 | ~41 | ~55-62 | ~59 |
@@ -561,6 +562,42 @@ Unchanged in every option, and deliberately so: `RESPONSE_WINDOW` (0.9),
 `LATE_WINDOW` (0.5), `TARGET_CORNER_HOLD` (1.4, derived), `TARGET_SPATIAL_BIAS`
 (0.80), `CORNERS`, `PT_COUNT_PER_BLOCK`, `PD_COUNT_PER_BLOCK`, `TRIAL_BUFFER_DUR`
 (2.0), `BREAK_OFFER_SECONDS` (30) and the SOA ranges.
+
+### 4.3 Exposure per session against the clean-start run
+
+Counted from **10 real generated plans per configuration** (the first 10 seeds that
+place), not from the mean-of-ranges formula, so these are what a participant would
+actually be shown. "clean-start" is the 8-trial, 5.9-minute session the pilots ran.
+Session length uses the same break cadence in every column (the 12-trial cadence in
+4.1 for the long sessions; clean-start needs no new cadence).
+
+| Per session | clean-start / pilots | 20 s option B | 30 s option A |
+| --- | --- | --- | --- |
+| Trials | 8 | **100** | **68** |
+| Session length | 5.9 min | **49.3 min** | **45.3 min** |
+| Targets | 65 (8.1/trial) | **1200** (12.0/trial) | **885** (13.0/trial) |
+| Images | 287 | 3994 | 3975 |
+| Sounds (PT + PD) | 52 (6.5/trial) | 650 (6.5/trial) | 507 (7.5/trial) |
+| PT observations | 20 | **252** | **237** |
+| Target prevalence | 22.6% | **30.0%** | **22.3%** |
+| Seconds per target | 2.49 | 1.67 | 2.30 |
+| Images per minute | 48 | 81 | 88 |
+| Sounds per minute | 8.8 | 13.2 | 11.2 |
+
+Three things this makes plain that the settings table hides:
+
+- **The difficulty levers are the smaller half of the change.** The recommendation is
+  a **45-minute session, not a 6-minute one**, and each participant contributes ~14x
+  more target observations (65 -> 885). Anyone approving "a harder version of the
+  task" is also approving a session ~7.7x longer, and should be told that in the same
+  breath.
+- **The PT-level analysis is currently unpowered.** An 8-trial session yields 20 PT
+  presentations across 4 PT identities - about 5 per identity - which is too few for
+  any per-identity comparison. The recommendation gives ~59 per identity. That gain
+  may matter more than the exposure change, and it comes free with the longer session.
+- Sound density rises in both options (8.8 -> 13.2 or 11.2 per minute) because PT and
+  PD counts both rise, so the task is harder on the auditory dimension as well; the
+  increased difficulty is not purely visual.
 
 ## 5. How to verify
 
