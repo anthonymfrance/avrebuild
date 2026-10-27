@@ -209,8 +209,7 @@ TIERS = (
         'offsets': HARD_OFFSETS,
         'caption': 'Circles only.',
         'hold_text': (
-            'Round 3 of 3.\n'
-            'The cross flashes green when you are correct.\n\n'
+            'Round 3 of 3.\n\n'
             'Press SPACE to start.'
         ),
     },
