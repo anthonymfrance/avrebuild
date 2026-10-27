@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 import config
 from scoring import trial_recap_lines
 import screens
@@ -103,6 +105,94 @@ class FakeClock:
     def getTime(self):
         self.now += self.advance
         return self.now
+
+
+class FakeMark:
+    """Any of the centre-mark primitives; records what it was built with."""
+
+    instances = []
+
+    def __init__(self, window, **kwargs):
+        self.window = window
+        self.kwargs = kwargs
+        self.pos = kwargs.get('pos', (0, 0))
+        self.lineColor = kwargs.get('lineColor')
+        type(self).instances.append(self)
+
+
+class FakeMarkShape(FakeMark):
+    instances = []
+
+
+class FakeMarkRect(FakeMark):
+    instances = []
+
+
+class FakeMarkCircle(FakeMark):
+    instances = []
+
+
+class MarkVisual:
+    """A visual module exposing only the mark primitives, so the options stay
+    distinguishable from one another."""
+
+    ShapeStim = FakeMarkShape
+    Rect = FakeMarkRect
+    Circle = FakeMarkCircle
+
+
+MARK_STIM = {'cross': FakeMarkShape, 'circle': FakeMarkCircle, 'border': FakeMarkRect}
+
+
+def test_center_mark_draws_each_option_as_an_unfilled_stim_at_the_centre(monkeypatch):
+    for shape, stim_class in MARK_STIM.items():
+        for fake in (FakeMarkShape, FakeMarkRect, FakeMarkCircle):
+            fake.instances.clear()
+        monkeypatch.setattr(config, 'FIXATION_SHAPE', shape)
+        mark = screens.center_mark(FakeWindow(), MarkVisual)
+        assert type(mark) is stim_class
+        assert mark.lineColor == config.FIXATION_COLOR
+        assert mark.pos == (0, 0)
+        # Unfilled: the hit flash is a lineColor change, which is why
+        # trial_runner and practice need no per-mark case.
+        assert mark.kwargs.get('fillColor', None) is None
+
+
+def test_border_frame_is_inset_so_the_whole_stroke_stays_on_screen(monkeypatch):
+    monkeypatch.setattr(config, 'FIXATION_SHAPE', 'border')
+    mark = screens.center_mark(FakeWindow(), MarkVisual)
+    width = config.FIXATION_BORDER_WIDTH
+    # A stroked Rect straddles its path, so the frame is inset by one stroke
+    # width and its visible outer edge lands on the window edge.
+    assert mark.kwargs['lineWidth'] == width
+    assert mark.kwargs['size'] == (1920 - width, 1080 - width)
+    assert width > config.FIXATION_LINE_WIDTH
+
+
+def test_mark_wording_follows_the_configured_shape(monkeypatch):
+    assert set(screens.MARK_NAMES) == {'cross', 'circle', 'border'}
+    for shape, name in screens.MARK_NAMES.items():
+        monkeypatch.setattr(config, 'FIXATION_SHAPE', shape)
+        assert screens.mark_shape() == shape
+        assert screens.mark_flash_phrase() == f'the {name} flashes green'
+
+
+def test_instruction_and_scoring_pages_name_the_configured_mark():
+    """The pages read the mark from config instead of a hardcoded word."""
+    phrase = screens.mark_flash_phrase()
+    for pages in (screens.INSTRUCTION_PAGES, screens.SCORING_PAGES):
+        text = oneline('\n'.join(pages))
+        assert phrase in text
+        for other in set(screens.MARK_NAMES) - {config.FIXATION_SHAPE}:
+            assert f'the {screens.MARK_NAMES[other]} flashes green' not in text
+
+
+def test_an_unknown_mark_shape_is_rejected(monkeypatch):
+    monkeypatch.setattr(config, 'FIXATION_SHAPE', 'triangle')
+    with pytest.raises(ValueError, match='FIXATION_SHAPE'):
+        screens.mark_shape()
+    with pytest.raises(ValueError, match='FIXATION_SHAPE'):
+        screens.center_mark(FakeWindow(), MarkVisual)
 
 
 def test_rest_break_counts_down_and_space_ends_it_early():

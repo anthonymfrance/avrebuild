@@ -62,10 +62,23 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+# Config that only changes how the screen is drawn, never what a timeline
+# contains. These are left out of the config snapshot entirely -- neither stored
+# with a plan nor compared against one -- so changing the centre mark (or
+# adding it, for plans generated before it existed) cannot refuse a participant
+# plan that was already generated. Each session records the value it ran with in
+# its metadata. Keep this list to presentation-only values.
+PRESENTATION_ONLY = frozenset({'FIXATION_SHAPE', 'FIXATION_BORDER_WIDTH'})
+
+
 def config_snapshot():
-    """JSON-normalized uppercase config values (tuples become lists, sets sorted lists)."""
+    """JSON-normalized uppercase config values (tuples become lists, sets sorted lists).
+
+    PRESENTATION_ONLY values are omitted; see the note on that set.
+    """
     values = {name: value for name, value in vars(config).items()
-              if name.isupper() and not name.startswith('_')}
+              if name.isupper() and not name.startswith('_')
+              and name not in PRESENTATION_ONLY}
     return json.loads(json.dumps(values, default=sorted))
 
 
