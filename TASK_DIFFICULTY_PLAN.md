@@ -287,6 +287,9 @@ option B below deliberately leaves NPD alone.
 
 ### 3.3.3 In a 20 s window the cap is the target total, not the PT count
 
+**Read section 3.3.4 before acting on this table.** These rows are 8-trial plans;
+a real session is 68-100 trials, and failure compounds with the trial count.
+
 All rows: `HARDER` exposure levers, content 20 s, `TRIAL_NPD_RANGE` left at
 today's (20, 28), 8-trial plans. Monte Carlo per row, n as shown.
 
@@ -310,14 +313,45 @@ sits at 1-20% per-seed failure, 15 targets jumps to 50%, 16 to 87%, and 14-16
 
 Two consequences for a 20 s design:
 
-- `TRIAL_PT_RANGE = (3, 5)` with `TRIAL_NPT_RANGE = (8, 9)` gives **11-14 targets at
-  the same 16/100 failure rate** as today's proposed (3, 4) / (9, 10) at 12-14. So
-  if a wider PT range is wanted, trade one NPT for the extra PT repeat; it is free.
+- At 8 trials, `TRIAL_PT_RANGE = (3, 5)` with `TRIAL_NPT_RANGE = (8, 9)` (11-14
+  targets) looks free: 16/100, identical to (3, 4) / (9, 10) at 12-14. **It is not
+  free at full length** — that split fails 28/30 as a 100-trial plan (3.3.4). The
+  20 s way to reach PT 5 is `(3, 5)` with `(7, 8)`, i.e. 10-13 targets, not 11-14.
 - The mix is a secondary cost at a fixed total. At 11.8 vs 12.0 targets/trial,
   PT (4, 5) produces **8.4 sounds/trial against 6.2** for PT (2, 3), and sounds must
   be at least `SOUND_DUR + MIN_AUDIO_GAP` = 1.2 s apart. That is 10.1 s of the 20 s
   window locked up versus 7.4 s, which is why the failure rate rises from 1% to 8%
   even though the target total is identical. PT carries sound; NPT does not.
+
+### 3.3.4 The 8-trial rates understate long-plan risk — measure at the real length
+
+`create_participant_plan` builds **one plan per participant**, so what matters is the
+failure probability of the whole 68- or 100-trial plan, not of an 8-trial plan. A
+per-trial failure probability `p` compounds: `p_plan(N) ~= 1 - (1 - p)^N`.
+
+Same configuration, same exposure levers, only the trial count changed (n=30 per
+row, all `placement_failure_within_capacity`):
+
+| Config | Targets | Trials | Plan failures | First try | Within 5 seeds |
+| --- | --- | --- | --- | --- | --- |
+| PT (3, 5) / NPT (8, 9) | 11-14 | 8 | 16% (n=100) | 72.0% | 100% |
+| PT (3, 5) / NPT (8, 9) | 11-14 | **100** | **28/30 (93.3%)** | 0.0% | **29.2%** |
+| PT (2, 3) / NPT (9, 10) | 11-13 | 8 | 1% (n=100) | 96.0% | 100% |
+| PT (2, 3) / NPT (9, 10) | 11-13 | **100** | **6/30 (20%)** | 63.3% | **100%** |
+| PT (3, 5) / NPT (7, 8) | 10-13 | 8 | 1.7% (n=60) | 98.3% | 100% |
+| PT (3, 5) / NPT (7, 8) | 10-13 | **100** | **9/30 (30%)** | 53.3% | **99.8%** |
+| recommended 30 s plan | 12-14 | **68** | **0/30** | 100% | 100% |
+
+**The 11-14 target split is not usable in a 20 s window at 100 trials.** It looked
+identical to 11-13 at 8 trials (16/100 both) and collapses to a 29% chance of ever
+producing a plan when the plan is 100 trials long. Do the sweep at the plan length
+you are going to run.
+
+For the 20 s window this leaves two viable target splits at 100 trials:
+**11-13** (PT 2-3 / NPT 9-10, 100% within 5 seeds) and **10-13** (PT 3-5 / NPT 7-8,
+99.8%, which is the way to get PT up to 5). Compare that with the 30 s window,
+where a 68-trial plan with 12-14 targets has *never* failed in 2040 simulated
+trials.
 
 ### 3.4 A confound to decide about: more targets also raises target prevalence
 
@@ -329,6 +363,48 @@ fall as prevalence rises (Wolfe et al. 2007; Chan & Chan 2022). So raising the
 target count while holding distractors fixed partly works against the intended
 difficulty increase, and stacks a prevalence change on top of the exposure and
 size changes — three manipulations at once.
+
+#### The splitting arithmetic (why NPD always dominates)
+
+`prevalence = targets / (targets + PD + NPD)`, so holding prevalence fixed while
+targets rise forces **NPD up by ~3.5 per extra target** at the pilot's 22%
+(`capacity_sweep.npd_for_prevalence`):
+
+| Targets/trial | NPD needed for 22% prevalence (PD=4) | Prevalence if NPD stays at today's 24 |
+| --- | --- | --- |
+| 8 (today) | 24 | 22.2% |
+| 11 | 35 | 28.2% |
+| 12 | 38 | 30.0% |
+| 13 | 42 | 31.7% |
+| 14 | 45 | 33.3% |
+
+That is the whole splitting problem in one line: more targets and the pilot's
+prevalence both demand *more* NPD, and NPD is already the largest role by count
+because it absorbs everything the PD cap leaves over. So NPD rising is not a
+symptom of a bad split; it is what prevalence control requires.
+
+#### But in a 20 s window you cannot have both
+
+Targets pinned at 11-14 (PT 3-5 / NPT 8-9), 20 s content, `HARDER` levers, 8-trial
+plans, n=50 per row — pushing NPD up to chase the pilot's prevalence:
+
+| PD | NPD | Prevalence | Plan failures | First try | Within 5 seeds |
+| --- | --- | --- | --- | --- | --- |
+| (3, 5) | **(20, 28)** — today | 31% | **16/100** | 72.0% | 100% |
+| (3, 5) | (28, 34) | 26% | **32/50** | 24.0% | 89.3% |
+| (3, 5) | (34, 40) | 23% | **48/50** | 2.0% | 18.5% |
+| (3, 5) | (40, 46) | 21% | **50/50** | 0.0% | 0.0% |
+| (5, 7) | (34, 40) | 23% | **50/50** | 0.0% | 0.0% |
+
+Raising PD does not rescue it either: at the same NPD (34, 40), PD (5, 7) fails
+50/50, because PD is also a sound event and the sound budget is what is left.
+
+So in a 20 s window the target count and the pilot's prevalence are in direct
+conflict, and prevalence loses. With 11-13 targets the achievable prevalence is
+~30%, and there is no NPD range that gets it back to 22% without killing
+placement. If holding prevalence near 22% matters, it is another argument for the
+30 s content window, where 12-14 targets at 22% prevalence placed 100% first try
+over 68 trials.
 
 Two clean ways out:
 
@@ -389,22 +465,25 @@ attempt, with ~8.5 randomized placement orders per trial (today's baseline is
 ~2.6 per trial). The mean gap between consecutive targets is 1.65 s, so no
 pair of targets sits anywhere near the 200-500 ms attentional-blink window.
 
-**Option B (keeps the 20 s window): 100 trials, 11-14 targets.**
+**Option B (keeps the 20 s window): 100 trials, 11-13 targets.**
 
 `TRIAL_CONTENT_DUR` stays 20.0, `TRIALS_PER_PT = 25` (50 trials/block, 100 total,
-45.8 min), and `TRIAL_NPD_RANGE` stays at (20, 28) — with a 20 s window the
-distractors cannot scale, so prevalence rises to ~30-33% and has to be either
-accepted as a manipulation or reported. Two verified target splits (section 3.3.3,
-100 seeds each):
+45.8 min), `TRIAL_NPD_RANGE` stays at (20, 28). With a 20 s window the distractor
+count cannot scale, so prevalence rises to ~30% and has to be accepted as a
+manipulation or reported. Verified at the real plan length of 100 trials (n=30):
 
-| PT range | NPT range | Targets | Failures | Within 5 seeds |
+| PT range | NPT range | Targets | Plan failures | Within 5 seeds |
 | --- | --- | --- | --- | --- |
-| (3, 5) | (8, 9) | 11-14 | 16/100 | 100% |
-| (4, 5) | (8, 9) | 12-14 | 20/100 | 100% |
+| (2, 3) | (9, 10) | 11-13 | 6/30 | **100%** |
+| (3, 5) | (7, 8) | 10-13 | 9/30 | **99.8%** |
+
+Do not use PT (3, 5) with NPT (8, 9) (11-14 targets) here, even though it tests
+clean at 8 trials: at 100 trials it fails 28/30 and only 29% of participants would
+get a plan at all (section 3.3.4).
 
 Choose B if the trial is the unit of analysis and you want 50 observations per PT
-per block; choose A if you want the cadence near the pilot's 2.5 s, distractor
-counts that keep prevalence constant, and slack in the generator.
+per block; choose A if you want the cadence near the pilot's 2.5 s, prevalence
+held at 22%, and a generator that has never failed in simulation.
 
 **Do not ship both exposure levers at once with no psychometric check.** The
 literature supports a graded duration effect but not a specific hit rate for
@@ -423,9 +502,44 @@ failures, targets become 12-15, sessions stay 45.3 min, and the cost is 36 extra
 sounds (~0.5 more per trial). `(3, 6)` is also free at 12-16 targets.
 
 In the 20 s window (option B) the equivalent move is PT (3, 5) with
-`TRIAL_NPT_RANGE = (8, 9)`, giving 11-14 targets at 16/100 placement failures —
-the same rate as (3, 4) with (9, 10) at 12-14 (section 3.3.3). Either way the
-limit is the target total, not the PT range.
+`TRIAL_NPT_RANGE = (7, 8)`, giving 10-13 targets, 9/30 failures at 100 trials and
+99.8% within the 5-seed budget. `(8, 9)` instead of `(7, 8)` reaches 11-14 targets
+but is not usable at full length (section 3.3.4). Either way the limit is the
+target total, not the PT range.
+
+### 4.2 Every tested configuration against clean-start
+
+`clean-start` is the base branch; this work changes no config, so the first column
+is exactly what the pilots ran. All values are `config.py` settings except the
+derived ones marked below.
+
+| Setting | clean-start / pilots | 20 s option B | 20 s + prevalence matched | 30 s option A (recommended) |
+| --- | --- | --- | --- | --- |
+| `FADE_IN_DUR` / `FADE_OUT_DUR` | 0.3 / 0.3 | **0.15 / 0.15** | 0.15 / 0.15 | **0.15 / 0.15** |
+| `VISUAL_DURATION` *(derived)* | 0.6 | 0.3 | 0.3 | 0.3 |
+| `PEAK_HOLD_DUR` | 0.0 | 0.0 | 0.0 | 0.0 |
+| `IMAGE_SIZE` | (150, 150) | **(100, 100)** | (100, 100) | **(100, 100)** |
+| `TRIAL_CONTENT_DUR` | 20.0 | 20.0 | 20.0 | **30.0** |
+| `TRIAL_DURATION` *(derived)* | 24.0 | 24.0 | 24.0 | **34.0** |
+| `TRIAL_PT_RANGE` | (2, 3) | **(2, 3)** or **(3, 5)** | (3, 5) | **(3, 4)** |
+| `TRIAL_NPT_RANGE` | (3, 8) | **(9, 10)** or **(7, 8)** | (8, 9) | **(9, 10)** |
+| `TRIAL_PD_RANGE` | (3, 5) | (3, 5) | (3, 5) or (5, 7) | (3, 5) |
+| `TRIAL_NPD_RANGE` | (20, 28) | (20, 28) | (28, 34) … (40, 46) | **(38, 45)** |
+| `TRIALS_PER_PT` | 2 | **25** | — | **17** |
+| Trials per session | 8 | **100** | — | **68** |
+| Session length | 5.9 min | **45.8 min** | — | **45.3 min** |
+| Targets/trial | 5-11 | **11-13 / 10-13** | 11-14 | **12-14** |
+| Distractors/trial | 23-33 | 23-33 | 43-51 | 41-50 |
+| Visuals/trial *(mean)* | ~36 | ~41 | ~55-62 | ~59 |
+| Target prevalence *(mean)* | 22% | **~29-30%** | 21-26% | **~22%** |
+| Sounds/trial *(mean, PT+PD)* | ~6.5 | ~6.5 / ~8.0 | ~8.0 | ~7.5 |
+| Plan failures at full length | **2/100** at 8 trials | **6/30** or **9/30** at 100 | **50/50** at 8 | **0/30** at 68 |
+| Within 5-seed retry budget | 100% | 100% / 99.8% | 0% | 100% |
+
+Unchanged in every option, and deliberately so: `RESPONSE_WINDOW` (0.9),
+`LATE_WINDOW` (0.5), `TARGET_CORNER_HOLD` (1.4, derived), `TARGET_SPATIAL_BIAS`
+(0.80), `CORNERS`, `PT_COUNT_PER_BLOCK`, `PD_COUNT_PER_BLOCK`, `TRIAL_BUFFER_DUR`
+(2.0), `BREAK_OFFER_SECONDS` (30) and the SOA ranges.
 
 ## 5. How to verify
 

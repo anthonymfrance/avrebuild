@@ -6,6 +6,7 @@ import config
 import session_timing
 from capacity_sweep import (
     BASE, SCENARIOS, _target_counts, _target_prevalence, _visual_duration,
+    npd_for_prevalence,
 )
 
 
@@ -172,6 +173,30 @@ def test_every_scenario_states_the_full_config_it_tests():
 
 def test_target_prevalence_matches_the_pilot_ratio():
     assert _target_prevalence(BASE) == pytest.approx(8.0 / 36.0)
+
+
+def test_npd_for_prevalence_reproduces_the_shipped_ranges():
+    # Today's config: 8 targets among 36 images = 22%, with PD averaging 4.
+    assert npd_for_prevalence(8, 0.222, 4) == pytest.approx(24, abs=0.5)
+    # Holding 22% while targets rise to 13 needs NPD ~41, far above the shipped 24.
+    assert npd_for_prevalence(13, 0.222, 4) == pytest.approx(41.5, abs=0.5)
+
+
+def test_npd_for_prevalence_needs_about_three_and_a_half_times_the_targets():
+    # At a fixed 22% prevalence, each extra target costs ~3.5 extra distractors.
+    per_target = (
+        npd_for_prevalence(14, 0.222, 4) - npd_for_prevalence(13, 0.222, 4)
+    )
+    assert per_target == pytest.approx((1 - 0.222) / 0.222, abs=0.01)
+    assert per_target > 3
+
+
+def test_npd_for_prevalence_rejects_impossible_inputs():
+    for bad in (0.0, 1.0, -0.1, 1.5):
+        with pytest.raises(ValueError, match='prevalence'):
+            npd_for_prevalence(10, bad, 4)
+    with pytest.raises(ValueError, match='nonnegative'):
+        npd_for_prevalence(-1, 0.22, 4)
 
 
 def test_harder_target_scenarios_raise_prevalence_unless_distractors_scale():

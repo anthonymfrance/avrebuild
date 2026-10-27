@@ -160,6 +160,50 @@ SCENARIOS = {
             '20 s window, PT 4-5 repeats, 11-13 targets',
             **HARDER, TRIAL_PT_RANGE=[4, 5], TRIAL_NPT_RANGE=[7, 8],
         ),
+        # 20 s window, targets pinned at 11-14 (PT 3-5, NPT 8-9), distractors
+        # pushed up to find where the prevalence the study wants stops placing.
+        scenario(
+            'w20_npd28_34',
+            '11-14 targets with more distractors: NPD 28-34, prevalence ~27%',
+            **HARDER, TRIAL_NPD_RANGE=[28, 34],
+            TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[8, 9],
+        ),
+        scenario(
+            'w20_npd34_40',
+            '11-14 targets: NPD 34-40, prevalence ~24%',
+            **HARDER, TRIAL_NPD_RANGE=[34, 40],
+            TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[8, 9],
+        ),
+        scenario(
+            'w20_npd40_46',
+            '11-14 targets: NPD 40-46, prevalence ~22% (matches the pilot)',
+            **HARDER, TRIAL_NPD_RANGE=[40, 46],
+            TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[8, 9],
+        ),
+        scenario(
+            'w20_pd5_7_npd34_40',
+            '11-14 targets with PD raised to 5-7: 23% prevalence but 10 sounds/trial',
+            **HARDER, TRIAL_PD_RANGE=[5, 7], TRIAL_NPD_RANGE=[34, 40],
+            TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[8, 9],
+        ),
+        scenario(
+            'w20_11_13_full',
+            '20 s option B with fewer targets: 11-13 targets, 100 trials, NPD 20-28',
+            **HARDER, TRIAL_PT_RANGE=[2, 3], TRIAL_NPT_RANGE=[9, 10],
+            TRIALS_PER_PT=25,
+        ),
+        scenario(
+            'w20_10_13_full',
+            '20 s option B with PT 5: 10-13 targets, 100 trials, NPD 20-28',
+            **HARDER, TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[7, 8],
+            TRIALS_PER_PT=25,
+        ),
+        scenario(
+            'w20_pt3_5_npt8_9_full',
+            'the whole 20 s option B plan: 11-14 targets, 100 trials, NPD 20-28',
+            **HARDER, TRIAL_PT_RANGE=[3, 5], TRIAL_NPT_RANGE=[8, 9],
+            TRIALS_PER_PT=25,
+        ),
         scenario(
             'w20_pt3_5_npt8_9',
             '20 s window, PT max 5, 11-14 targets: the floor stays at the requested 11',
@@ -215,6 +259,22 @@ def _target_counts(patch):
 
 def _visual_duration(patch):
     return patch['FADE_IN_DUR'] + patch['FADE_OUT_DUR']
+
+
+def npd_for_prevalence(targets, prevalence, pd_distractors):
+    """NPD count per trial that puts target prevalence at `prevalence`.
+
+    Prevalence is targets / (targets + PD + NPD), so holding it fixed while the
+    target count rises forces NPD up by a multiple of the targets, not by the
+    same amount. This is the arithmetic behind the splitting problem: at 22%
+    prevalence every extra target needs ~3.5 extra NPD, and NPD is therefore
+    always the largest role by count.
+    """
+    if not 0 < prevalence < 1:
+        raise ValueError('prevalence must be between 0 and 1 exclusive.')
+    if targets < 0 or pd_distractors < 0:
+        raise ValueError('targets and pd_distractors must be nonnegative.')
+    return targets * (1 - prevalence) / prevalence - pd_distractors
 
 
 def _mean(bounds):
