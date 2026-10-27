@@ -210,7 +210,6 @@ TIERS = (
         'caption': 'Circles only.',
         'hold_text': (
             'Round 3 of 3.\n'
-            f'You have {config.RESPONSE_WINDOW:g} seconds.\n'
             'The cross flashes green when you are correct.\n\n'
             'Press SPACE to start.'
         ),
