@@ -190,3 +190,33 @@ Baseline across 9 pilot sessions (1604 visuals): visual `onset_deviation` mean +
   `skipped` row.
 - `trial_log.csv` has one row per completed or aborted trial and its `miss_count`/`late_count` sum
   to the same totals as `trial_summary`.
+
+## 2026-10-27 session-length and task-difficulty planning (analysis only, no runtime change)
+
+No participant-facing behavior changed: `config.py`, `experiment.py`, `trial_runner.py`,
+`screens.py`, `scoring.py` and `timeline_key.py` are untouched. The plan and its numbers are in
+`TASK_DIFFICULTY_PLAN.md`.
+
+- **`session_timing.py`** models participant-facing session length from the config constants plus
+  the pilot medians for the participant-paced screens (65 s pre-task, 29 s practice, 2.0 s per
+  feedback screen), solves trials per block for a target duration, and prints the
+  targets-per-trial x target-cadence decision table. `--calibrate DIR` recomputes those medians
+  from `preflight_report.txt`, `session_metadata.json` and `trial_log.csv`. Validated against the
+  three completed pilot sessions: within 10% for participants who read the screens, over-predicts
+  for a participant who pressed SPACE immediately.
+- **Findings**: the current session is 5.9 min; 45 min needs 96-100 trials at the present 24 s
+  trial, or 64-68 trials once the content window is 30 s. Trials per block is a multiple of
+  `PT_COUNT_PER_BLOCK`, so session length is quantized in 104 s steps at a 24 s trial.
+- **`capacity_sweep.py`** runs the real generation path over scenarios that each state the full
+  config they test, in a separate interpreter because `timeline_key` binds config values at import
+  time. It reports success rate, first-attempt rate, the 5-seed retry budget that
+  `create_participant_plan` actually has, placement orders per plan, and target prevalence.
+- **Findings**: with the 20 s content window, 11-13 targets per trial place 96% first try and
+  14-16 fail almost always (`placement_failure_within_capacity`, `RESPONSE_WINDOW` plus the 1.4 s
+  same-corner hold and `TARGET_SPATIAL_BIAS`). With a 30 s content window, 12-14 through 18-20
+  targets all place 100% first try, including the full 68-trial 45-minute plan with
+  prevalence-matched distractors. Raising the target count without raising the distractor count
+  also raises target prevalence from 22% to 32%, which on its own reduces misses.
+- **`tests/test_session_timing.py`** covers the model arithmetic, the solver and its quantization,
+  the cadence table, prevalence, scenario completeness, and pilot calibration on a synthetic
+  session folder.
