@@ -249,7 +249,7 @@ def _classify_failure(exc, diagnostics):
     if stage == 'capacity_check' and over_capacity:
         return 'over_capacity'
     if stage == 'capacity_check' and isinstance(exc, PlacementFailure):
-        return 'provably_infeasible'
+        return 'lower_bound_rejection'
     if isinstance(exc, PlacementFailure) and stage == 'placement':
         return 'placement_failure_within_capacity'
     if stage == 'validation':

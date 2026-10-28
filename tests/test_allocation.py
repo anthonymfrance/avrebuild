@@ -183,17 +183,19 @@ def test_pt_sound_never_starts_before_previous_pt_response_window_ends():
             validate_timeline(slotting_rows, required, mutated, assignment, WINDOW_SIZE)
 
 
-def test_five_failed_seeds_leave_no_folder_and_do_not_consume_id(tmp_path, monkeypatch):
-    seeds = iter(range(100, 105))
+def test_exhausted_seeds_leave_no_folder_and_do_not_consume_id(tmp_path, monkeypatch):
+    attempts = participant_setup.PLAN_SEED_ATTEMPTS
+    seeds = iter(range(100, 100 + attempts))
     monkeypatch.setattr(participant_setup.secrets, 'randbits', lambda _: next(seeds))
 
     def fail(*args, **kwargs):
         raise PlacementFailure('simulated failure')
 
     monkeypatch.setattr(participant_setup, 'build_timeline', fail)
-    with pytest.raises(PlanGenerationError, match='failed after 5 attempts') as error:
+    with pytest.raises(PlanGenerationError, match=f'failed after {attempts} attempts') as error:
         participant_setup.create_participant_plan(tmp_path, 'participant_01')
-    assert all(str(seed) in str(error.value) for seed in range(100, 105))
+    assert all(str(seed) in str(error.value) for seed in range(100, 100 + attempts))
+    assert 'simulated failure' in str(error.value)
     assert not (tmp_path / 'participant_01').exists()
     assert not (tmp_path / '.participant_01.tmp').exists()
     assert next_participant_id(tmp_path) == 'participant_01'

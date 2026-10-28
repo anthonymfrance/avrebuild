@@ -109,16 +109,19 @@ def _events(corner_roles):
             for i, (corner, role) in enumerate(corner_roles)]
 
 
-def test_overloaded_corner_is_reported_as_provably_infeasible():
+def test_overloaded_corner_is_rejected_by_its_lower_bound():
     # 15 targets holding one corner need 14 * 1.4 + 0.6 = 20.2 s of a 20 s window.
-    assert 'corner lower bound' in timeline_key._infeasibility(_events([('top_right', 'NPT')] * 15))
-    assert timeline_key._infeasibility(_events([('top_right', 'NPT')] * 14)) == ''
+    assert 'exceeds' in timeline_key._infeasibility(_events([('top_right', 'NPT')] * 15))
+    # 11 targets and 9 distractors need exactly 20 s: valid only with zero slack.
+    full = _events([('top_right', 'NPT')] * 11 + [('top_right', 'NPD')] * 9)
+    assert 'no slack' in timeline_key._infeasibility(full)
+    assert timeline_key._infeasibility(full[:-1]) == ''
 
 
-def test_provably_infeasible_trial_fails_before_any_placement(monkeypatch):
+def test_lower_bound_rejection_happens_before_any_placement(monkeypatch):
     monkeypatch.setattr(timeline_key, '_infeasibility', lambda events: 'corner lower bound 21s')
     diagnostics = {}
-    with pytest.raises(PlacementFailure, match='provably infeasible'):
+    with pytest.raises(PlacementFailure, match='unplaceable by lower bound'):
         participant_setup.build_plan(7, ORDER, diagnostics=diagnostics)
     assert diagnostics['stage'] == 'capacity_check'
     assert diagnostics['placement_stats']['placement_attempts'] == 0

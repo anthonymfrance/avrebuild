@@ -29,6 +29,9 @@ from timeline_key import (
 
 
 PARTICIPANT_PATTERN = re.compile(r"^(?:participant_)?(\d+)$")
+# Not in config, whose values are snapshotted into every plan. About a third of
+# 100-trial seeds draw a trial no schedule can hold; those fail in under a second.
+PLAN_SEED_ATTEMPTS = 20
 
 
 class PlanGenerationError(RuntimeError):
@@ -333,7 +336,7 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
     failed_seeds = []
     failed_reasons = []
     try:
-        for attempt in range(1, 6):
+        for attempt in range(1, PLAN_SEED_ATTEMPTS + 1):
             seed = secrets.randbits(64)
             while seed in used_seeds:
                 seed = secrets.randbits(64)
@@ -343,10 +346,11 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
             except PlacementFailure as exc:
                 failed_seeds.append(seed)
                 failed_reasons.append(str(exc)[:400])
-                if attempt == 5:
+                if attempt == PLAN_SEED_ATTEMPTS:
                     failed = ', '.join(map(str, failed_seeds))
                     raise PlanGenerationError(
-                        f'Timeline placement failed after 5 attempts; failed seeds: {failed}.'
+                        f'Timeline placement failed after {PLAN_SEED_ATTEMPTS} attempts; '
+                        f'failed seeds: {failed}; last reason: {failed_reasons[-1]}'
                     ) from exc
                 continue
             write_slotting_key(participant_id, seed, slotting_rows, assignment, data_dir=temp_dir)

@@ -261,11 +261,17 @@ def _lower_bounds(events):
 
 
 def _infeasibility(events):
-    """Name the bound that proves no order of `events` fits the trial, else ''."""
+    """Name the bound that rules out every order of `events`, else ''.
+
+    A bound equal to the window is rejected too: its only schedules would pin
+    every event of that family at minimum spacing, with no timing left to randomize.
+    """
     bounds = _lower_bounds(events)
     name = max(bounds, key=bounds.get)
     if bounds[name] > TRIAL_CONTENT_DUR + 1e-9:
         return f'{name} lower bound {bounds[name]:.3f}s exceeds content_window={TRIAL_CONTENT_DUR:.3f}s'
+    if bounds[name] > TRIAL_CONTENT_DUR - 1e-9:
+        return f'{name} lower bound {bounds[name]:.3f}s fills content_window={TRIAL_CONTENT_DUR:.3f}s with no slack'
     return ''
 
 
@@ -718,7 +724,7 @@ def build_timeline(
     for (block, trial), events in required_by_trial.items():
         reason = _infeasibility(events)
         if reason:
-            raise PlacementFailure(f'{block} trial {trial}: provably infeasible: {reason}.')
+            raise PlacementFailure(f'{block} trial {trial}: unplaceable by lower bound: {reason}.')
 
     # Pass 1 places every trial with fresh random orders; each later pass retries
     # only the trials still unplaced, so placed trials are never discarded.
