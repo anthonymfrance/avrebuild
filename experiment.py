@@ -174,6 +174,20 @@ def run(args):
             'first_frame_opacity': 0.02,
             'note': 'opacity is deterministic from time since recorded onset; see trial_runner.planned_image_alpha',
         },
+        # Presentation only, so it is deliberately absent from the participant-plan
+        # config snapshot; this is the record of which mark the session ran with.
+        'center_mark': {
+            'shape': config.FIXATION_SHAPE,
+            'size_pixels': config.FIXATION_SIZE,
+            'line_width_pixels': (
+                config.FIXATION_BORDER_WIDTH if config.FIXATION_SHAPE == 'border'
+                else config.FIXATION_LINE_WIDTH
+            ),
+            'color': config.FIXATION_COLOR,
+            'hit_color': config.FIXATION_HIT_COLOR,
+            'flash_seconds': config.FIXATION_FLASH_DUR,
+            'participant_wording': screens.mark_flash_phrase(),
+        },
         'audio_start_source': None,
         'audio_clock_conversion': 'session_time = PTB time - session_clock.getLastResetTime()',
         'audio_clock_offset_check_seconds': clock_offset,
@@ -243,13 +257,7 @@ def run(args):
         except Exception:
             metadata['psychtoolbox_version'] = None
 
-        fix_half = config.FIXATION_SIZE / 2
-        fixation = visual.ShapeStim(
-            window,
-            vertices=((0, -fix_half), (0, fix_half), (0, 0), (-fix_half, 0), (fix_half, 0)),
-            closeShape=False, lineColor=config.FIXATION_COLOR,
-            lineWidth=config.FIXATION_LINE_WIDTH, pos=(0, 0), autoLog=False,
-        )
+        fixation = screens.center_mark(window, visual)
         kb = keyboard.Keyboard(clock=session_clock)
         kb.clearEvents()
 

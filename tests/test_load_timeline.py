@@ -43,3 +43,17 @@ def test_rejects_config_that_differs_from_plan_snapshot(plan):
     metadata['config']['RESPONSE_WINDOW'] = 9.0
     with pytest.raises(ValueError, match='RESPONSE_WINDOW'):
         load_timeline(timeline_path, metadata, ROOT)
+
+
+def test_a_plan_made_before_the_center_mark_option_still_loads(plan):
+    """The center mark is presentation only, so it stays out of the plan snapshot.
+
+    A plan generated before the option existed stores no FIXATION_SHAPE key; if
+    the mark were a study parameter, loading that plan now would report it as a
+    changed value and refuse to run.
+    """
+    timeline_path, metadata = plan
+    assert 'FIXATION_SHAPE' not in metadata['config']
+    assert 'FIXATION_BORDER_WIDTH' not in metadata['config']
+    rows, assets, block_order, trials_by_block = load_timeline(timeline_path, metadata, ROOT)
+    assert block_order == metadata['block_order']

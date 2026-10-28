@@ -48,6 +48,35 @@ ALL_KEYS = list(KEY_TO_CORNER) + ['space', 'escape']
 BLOCK_TARGET_PHRASE = {
     block: f'any {label.lower().rstrip("s")}' for block, label in BLOCK_LABELS.items()
 }
+# What the centre mark is called in participant-facing text, keyed by the config
+# value that decides which mark is drawn, so the wording cannot drift from the
+# screen. Each name is a single word on purpose: the instructions page that
+# mentions the flash sits at its word budget (tests/test_screens.py,
+# PAGE_WORD_BUDGET). Only the wording lives here; the word 'ring' rather than
+# 'circle' keeps the mark distinct from the practice targets, which are filled
+# grey circles.
+MARK_NAMES = {
+    'cross': 'cross',
+    'circle': 'ring',
+    'border': 'frame',
+}
+
+
+def mark_shape():
+    """config.FIXATION_SHAPE, checked against the marks this module can draw."""
+    shape = config.FIXATION_SHAPE
+    if shape not in MARK_NAMES:
+        raise ValueError(
+            f'config.FIXATION_SHAPE must be one of {sorted(MARK_NAMES)}, got {shape!r}.'
+        )
+    return shape
+
+
+def mark_flash_phrase():
+    """How the screens name the hit flash, for the configured mark."""
+    return f'the {MARK_NAMES[mark_shape()]} flashes green'
+
+
 # The instructions and the scoring rules are shown one page at a time: each page
 # is short enough to read in one look and waits for SPACE, so the participant
 # never faces a full wall of text. Every page carries its own advance line.
@@ -65,7 +94,7 @@ INSTRUCTION_PAGES = (
     'after the target first appears.\n\n'
     'Press SPACE to continue.',
 
-    'React correctly and the cross flashes green: that is a hit. Aim to get as many\n'
+    f'React correctly and {mark_flash_phrase()}: that is a hit. Aim to get as many\n'
     'hits as you can.\n\n'
     'If you do not react in time you gain a miss or a late response; the next screen\n'
     'explains the difference.\n\n'
@@ -79,7 +108,7 @@ INSTRUCTION_PAGES = (
 SCORING_PAGES = (
     'How your responses are scored\n\n'
     f'Hit: the right number key within {config.RESPONSE_WINDOW:g} seconds of the target\n'
-    'appearing. The cross flashes green.\n\n'
+    f'appearing, and {mark_flash_phrase()}.\n\n'
     f'Late: the right number key, but after {config.RESPONSE_WINDOW:g} seconds and within\n'
     f'{config.TARGET_CORNER_HOLD:g} seconds. A late response is not a miss.\n\n'
     'Press SPACE to continue.',
@@ -115,6 +144,43 @@ def _fit_image(window, visual, path, max_fraction_w, max_fraction_h):
     )
     image.size = (img_w * scale, img_h * scale)
     return image
+
+
+def center_mark(window, visual):
+    """The configured centre mark: the stim whose lineColor is the hit flash.
+
+    Every option is an outline, so trial_runner and practice flash all of them
+    the same way (FIXATION_COLOR -> FIXATION_HIT_COLOR) without knowing which
+    one is drawn.
+    """
+    shape = mark_shape()
+    if shape == 'border':
+        # A Rect strokes centred on its path, so the frame is inset by the
+        # stroke width: its visible outer edge lands on the window edge instead
+        # of half the stroke being cropped, and FIXATION_BORDER_WIDTH is the
+        # width the participant actually sees.
+        width = config.FIXATION_BORDER_WIDTH
+        return visual.Rect(
+            window,
+            # size, not width/height: the latter are deprecated in PsychoPy.
+            size=(window.size[0] - width, window.size[1] - width),
+            pos=(0, 0), fillColor=None, lineColor=config.FIXATION_COLOR,
+            lineWidth=width, units='pix', autoLog=False,
+        )
+    if shape == 'circle':
+        return visual.Circle(
+            window, radius=config.FIXATION_SIZE / 2,
+            fillColor=None, lineColor=config.FIXATION_COLOR,
+            lineWidth=config.FIXATION_LINE_WIDTH, pos=(0, 0),
+            units='pix', autoLog=False,
+        )
+    fix_half = config.FIXATION_SIZE / 2
+    return visual.ShapeStim(
+        window,
+        vertices=((0, -fix_half), (0, fix_half), (0, 0), (-fix_half, 0), (fix_half, 0)),
+        closeShape=False, lineColor=config.FIXATION_COLOR,
+        lineWidth=config.FIXATION_LINE_WIDTH, pos=(0, 0), autoLog=False,
+    )
 
 
 def finger_placement(window, kb, visual):

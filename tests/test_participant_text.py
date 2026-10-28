@@ -32,6 +32,23 @@ def test_block_wording_is_not_a_config_snapshot_value():
     assert 'BLOCK_TARGET_PHRASE' not in session_io.config_snapshot()
 
 
+def test_center_mark_is_presentation_only_in_the_config_snapshot():
+    """Switching the mark shape must not refuse a plan made with another one.
+
+    Only the two constants added for the option are left out: the mark values
+    that predate it stay study parameters, so no existing plan's stored snapshot
+    changed when it was added.
+    """
+    snapshot = session_io.config_snapshot()
+    assert session_io.PRESENTATION_ONLY == {'FIXATION_SHAPE', 'FIXATION_BORDER_WIDTH'}
+    assert not session_io.PRESENTATION_ONLY & set(snapshot)
+    assert {'FIXATION_COLOR', 'FIXATION_HIT_COLOR', 'FIXATION_FLASH_DUR'} <= set(snapshot)
+
+
+def test_every_mark_option_has_participant_wording():
+    assert set(screens.MARK_NAMES) == {'cross', 'circle', 'border'}
+
+
 def test_first_timeline_soa_is_independent_of_first_sampled_item():
     by_item = defaultdict(list)
     for seed in range(20_000):

@@ -93,9 +93,25 @@ BG_SEED = 0xA1D0B04A
 IMAGE_SIZE = (150, 150) #was at 200, 200
 MAX_OPACITY = 1.0
 
-# --- Fixation ---
-FIXATION_SIZE = 30
-FIXATION_LINE_WIDTH = 3
+# --- Fixation / centre mark ---
+# What sits at the centre of the screen, or around its edge. 'cross' is the
+# classic fixation cross, 'circle' an unfilled ring, 'border' a frame around the
+# whole window with no centre icon. Whichever is chosen flashes
+# FIXATION_HIT_COLOR on a hit, so the hit feedback is the same mark in every
+# configuration (trial_runner and practice only set its lineColor).
+#
+# Presentation only: it changes how the screen looks, never what a timeline
+# contains, so it is kept out of the participant-plan config snapshot
+# (session_io.PRESENTATION_ONLY) and changing it cannot refuse a plan that was
+# already generated. Each session records the mark it ran with in its metadata.
+# The participant-facing name of each option lives with the wording it appears
+# in, in screens.MARK_NAMES.
+FIXATION_SHAPE = 'circle'   # options: 'cross', 'circle', 'border'
+FIXATION_SIZE = 30          # pixels: cross arm length, or ring diameter
+FIXATION_LINE_WIDTH = 3     # stroke width for 'cross' and 'circle'
+# A 3 px stroke is a hairline along a 1920 px window edge, so the frame has its
+# own width rather than sharing FIXATION_LINE_WIDTH.
+FIXATION_BORDER_WIDTH = 16
 FIXATION_COLOR = 'white'
 FIXATION_HIT_COLOR = 'green'
 FIXATION_FLASH_DUR = 0.2
