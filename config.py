@@ -16,9 +16,9 @@ PD_SOA_MAX = 1.5
 
 # --- Items per trial (min, max) ---
 TRIAL_PT_RANGE = (2, 3)
-TRIAL_NPT_RANGE = (3, 8)
+TRIAL_NPT_RANGE = (4, 9)
 TRIAL_PD_RANGE = (3, 5)
-TRIAL_NPD_RANGE = (20, 28) #used to be 11 - 15
+TRIAL_NPD_RANGE = (36, 44) #used to be 11 - 15
 MAX_PLACEMENT_ATTEMPTS = 250   # random event orders per trial in the first placement pass
 MAX_TIMELINE_ATTEMPTS = 3      # placement passes; passes after the first retry only unplaced trials
 
@@ -28,9 +28,9 @@ FAVORED_CORNER = 'top_right'
 
 # --- Visual timing (seconds) ---
 WINDOW_SIZE = (1920, 1080)
-FADE_IN_DUR = 0.3
+FADE_IN_DUR = 0.15
 PEAK_HOLD_DUR = 0.0
-FADE_OUT_DUR = 0.3
+FADE_OUT_DUR = 0.15
 MIN_VISUAL_ONSET_GAP = 0.15
 MIN_TARGET_END_TO_ONSET_GAP = 0.15
 MIN_SAME_ITEM_GAP = 0.75
@@ -90,7 +90,7 @@ BG_UPDATE_RATE = 0.2
 BG_SEED = 0xA1D0B04A
 
 # --- Images ---
-IMAGE_SIZE = (150, 150) #was at 200, 200
+IMAGE_SIZE = (100, 100) #was at 200, 200
 MAX_OPACITY = 1.0
 
 # --- Fixation / centre mark ---
