@@ -328,16 +328,37 @@ def _pair_separation(previous, current):
     return separation
 
 
-def _offsets(layout, extras=None):
+def _separation_matrix(events):
+    """Minimum separation for every ordered pair; it depends on the pair alone."""
+    return [[_pair_separation(previous, current) for current in events] for previous in events]
+
+
+def _layout_order(layout, index_of=None):
+    """Positions in the trial matrix for the events of one candidate order."""
+    if index_of is None:
+        return list(range(len(layout)))
+    return [index_of[event['event_id']] for event in layout]
+
+
+def _offsets_from_matrix(separations, order, extras=None):
     """Earliest onset of each event relative to the first, plus optional extra slack."""
     offsets = [0.0]
-    for index, event in enumerate(layout[1:], start=1):
-        minimum_onset = max(
-            offsets[previous_index] + _pair_separation(previous, event)
-            for previous_index, previous in enumerate(layout[:index])
-        )
-        offsets.append(minimum_onset + (extras[index - 1] if extras else 0.0))
+    for index in range(1, len(order)):
+        current = order[index]
+        best = separations[order[0]][current] + offsets[0]
+        for previous in range(1, index):
+            value = separations[order[previous]][current] + offsets[previous]
+            if value > best:
+                best = value
+        offsets.append(best + (extras[index - 1] if extras else 0.0))
     return offsets
+
+
+def _offsets(layout, extras=None, separations=None, index_of=None):
+    """Earliest onset of each event relative to the first, plus optional extra slack."""
+    if separations is None:
+        separations = _separation_matrix(layout)
+    return _offsets_from_matrix(separations, _layout_order(layout, index_of), extras)
 
 
 def _base_window(layout, offsets, trial_start):
@@ -363,16 +384,20 @@ def _base_window(layout, offsets, trial_start):
     return lower, upper
 
 
-def _layout_excess(layout, trial_start):
+def _layout_excess(layout, trial_start, separations=None, index_of=None):
     """Seconds by which the tightest packing of `layout` misses the trial; <= 0 fits."""
-    lower, upper = _base_window(layout, _offsets(layout), trial_start)
+    lower, upper = _base_window(
+        layout, _offsets(layout, separations=separations, index_of=index_of), trial_start)
     return lower - upper
 
 
-def _schedule_layout(layout, trial_start, rng):
+def _schedule_layout(layout, trial_start, rng, separations=None, index_of=None):
     """Spread random slack over one event order, or return None if it cannot fit."""
     count = len(layout)
-    minimum_offsets = _offsets(layout)
+    if separations is None:
+        separations = _separation_matrix(layout)
+    order = _layout_order(layout, index_of)
+    minimum_offsets = _offsets_from_matrix(separations, order)
     available_slack = max(
         0.0, TRIAL_CONTENT_DUR - VISUAL_DURATION - minimum_offsets[-1]
     )
@@ -384,7 +409,10 @@ def _schedule_layout(layout, trial_start, rng):
             [extra_total * weight / weight_total for weight in weights]
             if weight_total and extra_total else [0.0] * len(weights)
         )
-        offsets = _offsets(layout, extras)
+        # A zero extra_total makes every extras entry zero, so the offsets are the
+        # minimum offsets computed above; reuse them instead of rebuilding.
+        offsets = (_offsets_from_matrix(separations, order, extras)
+                   if extra_total else minimum_offsets)
         lower, upper = _base_window(layout, offsets, trial_start)
         if lower > upper + 1e-9:
             continue
@@ -415,6 +443,11 @@ def _schedule_layout(layout, trial_start, rng):
                     'trial_onset': sound_onset - trial_start, 'duration': SOUND_DUR,
                     'event_type': 'sound', 'soa': event['soa'], 'response_window': '',
                 })
+        visual_by_id = {row['event_id']: row for row in placed if row['event_type'] == 'visual'}
+        sounds_by_source = {}
+        for row in placed:
+            if row['event_type'] == 'sound':
+                sounds_by_source.setdefault(row['source_event_id'], []).append(row)
         checked = []
         for index, event in enumerate(layout):
             reason = _conflict(
@@ -424,27 +457,24 @@ def _schedule_layout(layout, trial_start, rng):
             if reason:
                 break
             visual_id = event['event_id']
-            checked.append(next(row for row in placed if row['event_id'] == visual_id))
-            checked.extend(
-                row for row in placed
-                if row['event_type'] == 'sound' and row['source_event_id'] == visual_id
-            )
+            checked.append(visual_by_id[visual_id])
+            checked.extend(sounds_by_source.get(visual_id, ()))
         else:
             return placed
     return None
 
 
-def _repaired_order(events, trial_start, rng):
+def _repaired_order(events, trial_start, rng, separations=None, index_of=None):
     """A random order, then single-event moves kept whenever the packing does not
     get longer, until it fits or REPAIR_MOVES run out."""
     layout = _random_order(events, rng)
-    excess = _layout_excess(layout, trial_start)
+    excess = _layout_excess(layout, trial_start, separations, index_of)
     for _ in range(REPAIR_MOVES):
         if excess <= 1e-9:
             break
         candidate = list(layout)
         candidate.insert(rng.randrange(len(events)), candidate.pop(rng.randrange(len(events))))
-        value = _layout_excess(candidate, trial_start)
+        value = _layout_excess(candidate, trial_start, separations, index_of)
         if value <= excess:
             layout, excess = candidate, value
     return layout
@@ -459,10 +489,15 @@ def _construct_trial_schedule(events, trial_start, stats, repair=False):
     """
     count = len(events)
     rng = stats['rng']
+    # Separations depend on the event pair only, so build them once per trial
+    # instead of once per candidate order inside every packing pass.
+    separations = _separation_matrix(events)
+    index_of = {event['event_id']: index for index, event in enumerate(events)}
     tries = REPAIR_RESTARTS if repair else MAX_PLACEMENT_ATTEMPTS
     for _ in range(tries):
-        layout = _repaired_order(events, trial_start, rng) if repair else _random_order(events, rng)
-        result = _schedule_layout(layout, trial_start, rng)
+        layout = (_repaired_order(events, trial_start, rng, separations, index_of)
+                  if repair else _random_order(events, rng))
+        result = _schedule_layout(layout, trial_start, rng, separations, index_of)
         stats['placement_attempts'] += 1
         if result is not None:
             return result
