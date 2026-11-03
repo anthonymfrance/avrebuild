@@ -335,3 +335,43 @@ No participant-facing behavior changed: `config.py`, `experiment.py`, `trial_run
 - **`tests/test_session_timing.py`** covers the model arithmetic, the solver and its quantization,
   the cadence table, prevalence, scenario completeness, and pilot calibration on a synthetic
   session folder.
+
+## 2026-11-03 half-second stimulus sounds
+
+- **The 1 s sounds are re-cut to the 0.5 s the timeline schedules.** `config.SOUND_DUR`
+  has been 0.5 since `c629e0d`, `timeline_key` writes 0.5 into every sound row, and
+  `session_io.load_timeline` rejects a WAV that differs by more than 2 ms — so the branch
+  could not load any plan (`tests/test_load_timeline.py` failed with *"WAV for toilet lasts
+  1.0000s but the plan schedules 0.5000s"*). The new set lives in
+  `20_stimuli/*/obj_snds/_cleaned_0.5` (20 files, 24 000 frames, 48 kHz stereo);
+  `_cleaned` keeps the 1 s recordings untouched and `session_io.stimulus_paths` reads the
+  new folder.
+- **Where the cut goes** (`tools/trim_stimuli.py`, `--report` prints the full table). Every
+  `_cleaned` file is a 1 s excerpt of the longer recording beside it, and 17 of 20 carry
+  energy past 0.5 s, so every policy loses something. Chosen `hybrid`: start at the natural
+  attack, but for slow-attack swells move the window so the envelope peak sits 0.40 s in
+  (a 10-90 % rise time above 0.25 s marks a swell). Two dense textures (ani 7, ina 9) are
+  pinned to the onset cut in `OVERRIDES`, because their loudest 10 ms frame is a
+  fluctuation rather than a swell, and the peak anchor would start them mid-texture.
+  The six swells (ani 4, ani 10, ina 8, ina 10, and the more compact ina 2, ina 4) keep
+  69-84 % of their energy instead of the 12-26 % the plain onset cut would keep.
+- **Every clip has a 5 ms fade-in and a 40 ms fade-out baked in**, so a cut through a
+  sounding waveform cannot click; PsychoPy plays the file as-is and has no envelope stage.
+- **Loudness is matched on the loudest 200 ms K-weighted level** (BS.1770 pre-filter) to
+  -17.5 dB, not on RMS: the 1 s set was already at -20 dBFS RMS but still spanned 9.4 dB of
+  momentary loudness, because a 100 ms click and a sustained texture of equal RMS do not
+  sound equally loud. The re-cut set spans 2.4 dB. ina 5 (-19.9) and ina 7 (-18.3) are held
+  1.7-2.4 dB under target by the -1 dBFS peak ceiling — both are already at full scale in
+  the source, and limiting them would distort rather than raise them.
+- **No config constant was added**; the folder name lives in `session_io.stimulus_paths`
+  and `tools/trim_stimuli.py`, next to the existing `_normalized` image path.
+- Audition scratch output (`--out`, the HTML page with all three cut policies) is written
+  to `20_stimuli/_trim_candidates/`, which is git-ignored.
+
+### Verify in pilot
+- The eight swells (ani 4, ani 10, ina 2, ina 4, ina 8, ina 10 and the two pinned textures)
+  still read as their object over headphones and do not sound like a cut-off ramp.
+- ina 5 and ina 7 are audibly a little quieter than the rest but not weak next to the
+  background noise; if they are, the ceiling has to move rather than the target.
+- Sound onsets still line up with `realized_soa_seconds` near 0, now that every clip starts
+  at its attack instead of carrying pre-onset recording noise.
