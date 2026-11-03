@@ -43,11 +43,17 @@ def test_pool_keeps_every_request_ahead_of_its_onset():
         assert late_request_violations(sounds, slots) == []
 
 
-def test_single_sound_per_stimulus_shrinks_the_lead_on_some_plan():
-    assert any(
-        late_request_violations(sounds, assign_sound_slots(sounds, 1))
-        for sounds in PLANS
-    )
+# A deliberately close sequence verifies the pool contract independently of the
+# more restrictive same-sound gap used by current generated plans.
+CLOSE_SOUNDS = [
+    {'event_id': event_id, 'stimulus': 'helicopter', 'global_onset': onset}
+    for event_id, onset in [('z', 1.0), ('a', 1.8), ('b', 2.6)]
+]
+
+
+def test_single_sound_per_stimulus_shrinks_the_lead_on_close_sequence():
+    assert late_request_violations(CLOSE_SOUNDS, assign_sound_slots(CLOSE_SOUNDS, 1))
+    assert not late_request_violations(CLOSE_SOUNDS, assign_sound_slots(CLOSE_SOUNDS, 2))
 
 
 def mutated_assign(sounds, pool_size, slot_of, order_key):
@@ -66,11 +72,8 @@ def test_round_robin_mutations_are_caught():
         (lambda count, size: count % size, lambda row: row['event_id']),
     ]
     for slot_of, order_key in mutants:
-        assert any(
-            late_request_violations(
-                sounds, mutated_assign(sounds, config.SOUND_POOL_SIZE, slot_of, order_key))
-            for sounds in PLANS
-        )
+        assert late_request_violations(
+            CLOSE_SOUNDS, mutated_assign(CLOSE_SOUNDS, config.SOUND_POOL_SIZE, slot_of, order_key))
 
 
 def test_assignment_alternates_per_stimulus_in_onset_order():

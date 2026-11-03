@@ -194,4 +194,11 @@ def validate_plan(assignment, slotting_rows, timeline, trials_per_pt=None, count
         for a, b in zip(block_sounds, block_sounds[1:]):
             if b['global_onset'] - a['global_onset'] < c.SOUND_DUR + c.MIN_AUDIO_GAP - EPS:
                 err(f'{block} {a["event_id"]} -> {b["event_id"]}: sounds too close.')
+        sounds_by_item = defaultdict(list)
+        for sound in block_sounds:
+            sounds_by_item[sound['stimulus']].append(sound)
+        for item_sounds in sounds_by_item.values():
+            for a, b in zip(item_sounds, item_sounds[1:]):
+                if b['global_onset'] - a['global_onset'] < c.SOUND_DUR + c.MIN_SAME_SOUND_GAP - EPS:
+                    err(f'{block} {a["event_id"]} -> {b["event_id"]}: same sound too close.')
     return errors

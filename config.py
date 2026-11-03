@@ -9,6 +9,9 @@ PT_COUNT_PER_BLOCK = 2
 PD_COUNT_PER_BLOCK = 2
 
 # --- SOAs ---
+# SOA is sound onset to the visual peak (onset + FADE_IN_DUR).
+# With a 0.5 s sound, SOAs below 0.65 s overlap the 0.3 s image;
+# longer SOAs end before image onset.
 PT_SOA_MIN = 0.5
 PT_SOA_MAX = 1.5
 PD_SOA_MIN = 0.5
@@ -16,9 +19,9 @@ PD_SOA_MAX = 1.5
 
 # --- Items per trial (min, max) ---
 TRIAL_PT_RANGE = (2, 3)
-TRIAL_NPT_RANGE = (4, 9)
+TRIAL_NPT_RANGE = (6, 10)
 TRIAL_PD_RANGE = (3, 5)
-TRIAL_NPD_RANGE = (36, 44) #used to be 11 - 15
+TRIAL_NPD_RANGE = (28, 36)
 MAX_PLACEMENT_ATTEMPTS = 250   # random event orders per trial in the first placement pass
 MAX_TIMELINE_ATTEMPTS = 3      # placement passes; passes after the first retry only unplaced trials
 
@@ -67,8 +70,9 @@ AUDIO_BACKEND = 'ptb'
 AUDIO_LATENCY_MODE = 2
 AUDIO_DEVICE = 'default'
 AUDIO_SPEAKER = 'default'
-SOUND_DUR = 1.0
+SOUND_DUR = 0.5
 MIN_AUDIO_GAP = 0.2
+MIN_SAME_SOUND_GAP = 0.75  # end of a sound to next onset of the same item
 SOUND_POOL_SIZE = 2          # Sound objects per stimulus, used round-robin
 SOUND_POOL_RESTART_MARGIN = 0.05  # play() must land this long after the previous play on a pooled object ended
 SOUND_REQUEST_MIN_LEAD = 0.01     # seconds of future margin when a play request is already late

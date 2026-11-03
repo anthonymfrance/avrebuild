@@ -16,6 +16,7 @@ from config import (
     MAX_TIMELINE_ATTEMPTS,
     MIN_AUDIO_GAP,
     MIN_SAME_ITEM_GAP,
+    MIN_SAME_SOUND_GAP,
     MIN_TARGET_END_TO_ONSET_GAP,
     MIN_VISUAL_ONSET_GAP,
     PD_SOA_MAX,
@@ -220,8 +221,10 @@ def _conflict(event, onset, placed):
                 return 'PT sound overlaps previous PT response window'
     if event['role'] in AUDIO_ROLES:
         for other in placed:
-            if other['event_type'] == 'sound' and abs(sound_onset - other['global_onset']) < SOUND_DUR + MIN_AUDIO_GAP:
-                return 'sound overlap or minimum audio gap'
+            if other['event_type'] == 'sound':
+                gap = MIN_SAME_SOUND_GAP if event['stimulus'] == other['stimulus'] else MIN_AUDIO_GAP
+                if abs(sound_onset - other['global_onset']) < SOUND_DUR + max(MIN_AUDIO_GAP, gap):
+                    return 'sound overlap or minimum audio gap'
     return ''
 
 
@@ -320,7 +323,7 @@ def _pair_separation(previous, current):
     if previous['role'] in AUDIO_ROLES and current['role'] in AUDIO_ROLES:
         separation = max(
             separation,
-            SOUND_DUR + MIN_AUDIO_GAP + current['soa'] - previous['soa'],
+            SOUND_DUR + max(MIN_AUDIO_GAP, MIN_SAME_SOUND_GAP if previous['stimulus'] == current['stimulus'] else MIN_AUDIO_GAP) + current['soa'] - previous['soa'],
         )
     return separation
 
@@ -618,6 +621,13 @@ def validate_timeline(
         for left, right in zip(block_sounds, block_sounds[1:]):
             if right['global_onset'] - left['global_onset'] < SOUND_DUR + MIN_AUDIO_GAP:
                 raise ValueError(f'{block}: sound overlap or minimum audio gap violated.')
+        sounds_by_item = defaultdict(list)
+        for sound in block_sounds:
+            sounds_by_item[sound['stimulus']].append(sound)
+        for item_sounds in sounds_by_item.values():
+            for left, right in zip(item_sounds, item_sounds[1:]):
+                if right['global_onset'] - left['global_onset'] + 1e-9 < SOUND_DUR + MIN_SAME_SOUND_GAP:
+                    raise ValueError(f'{block}: minimum same-sound gap violated.')
         for visual in block_visuals:
             if visual['role'] in AUDIO_ROLES:
                 sound = sounds_by_source[visual['event_id']]

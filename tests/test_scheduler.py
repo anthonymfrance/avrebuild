@@ -34,10 +34,12 @@ def plan_100():
         return participant_setup.build_plan(7, ORDER)
 
 
-def test_eight_trial_plan_is_unchanged_from_before_the_scheduler_rework():
-    # Plans the old scheduler placed in its first timeline attempt are byte-identical.
-    _, slotting, timeline, _, _ = participant_setup.build_plan(7, ORDER)
-    assert plan_digest(slotting, timeline) == '1908019b49c9f8512cffd7d05d84028ba65b4d447694df5ec7ef09903db033e6'
+def test_eight_trial_plan_is_reproducible():
+    # The new stimulus and SOA settings intentionally change the historical digest.
+    first = participant_setup.build_plan(7, ORDER)
+    second = participant_setup.build_plan(7, ORDER)
+    assert plan_digest(first[1], first[2]) == plan_digest(second[1], second[2])
+    assert validate_plan(first[0], first[1], first[2]) == []
 
 
 def test_hundred_trial_plan_is_complete_and_valid(plan_100):
@@ -110,10 +112,10 @@ def _events(corner_roles):
 
 
 def test_overloaded_corner_is_rejected_by_its_lower_bound():
-    # 15 targets holding one corner need 14 * 1.4 + 0.6 = 20.2 s of a 20 s window.
-    assert 'exceeds' in timeline_key._infeasibility(_events([('top_right', 'NPT')] * 15))
-    # 11 targets and 9 distractors need exactly 20 s: valid only with zero slack.
-    full = _events([('top_right', 'NPT')] * 11 + [('top_right', 'NPD')] * 9)
+    # With 0.3 s images, 16 targets need 15 * 1.4 + 0.3 s.
+    assert 'exceeds' in timeline_key._infeasibility(_events([('top_right', 'NPT')] * 16))
+    # 14 targets and 5 distractors need exactly 20 s.
+    full = _events([('top_right', 'NPT')] * 14 + [('top_right', 'NPD')] * 5)
     assert 'no slack' in timeline_key._infeasibility(full)
     assert timeline_key._infeasibility(full[:-1]) == ''
 
@@ -157,3 +159,34 @@ def test_unplaceable_trial_fails_after_the_configured_passes(monkeypatch):
     with pytest.raises(PlacementFailure, match=f'unplaced after {config.MAX_TIMELINE_ATTEMPTS} passes'):
         participant_setup.build_plan(7, ORDER, diagnostics=diagnostics)
     assert diagnostics['timeline_attempts'] == config.MAX_TIMELINE_ATTEMPTS
+
+
+def test_same_sound_spacing_and_planned_sound_end(plan_100):
+    _, _, timeline, _, _ = plan_100
+    sounds = [r for r in timeline if r['event_type'] == 'sound']
+    by_source = {r['source_event_id']: r for r in sounds}
+    intervals = []
+    for visual in (r for r in timeline if r['event_type'] == 'visual' and r['role'] in config.AUDIO_ROLES):
+        sound = by_source[visual['event_id']]
+        end = sound['global_onset'] + config.SOUND_DUR
+        assert end <= visual['global_onset'] + config.VISUAL_DURATION - 0.02 + 1e-9
+        intervals.append(end - visual['global_onset'])
+    assert any(value > 0 for value in intervals)
+    assert any(value < 0 for value in intervals)
+    for block in ORDER:
+        for item in {s['stimulus'] for s in sounds if s['block'] == block}:
+            same = sorted((s for s in sounds if s['block'] == block and s['stimulus'] == item),
+                          key=lambda s: s['global_onset'])
+            assert all(b['global_onset'] - a['global_onset'] >=
+                       config.SOUND_DUR + config.MIN_SAME_SOUND_GAP - 1e-9
+                       for a, b in zip(same, same[1:]))
+
+
+def test_validator_rejects_repeat_sound_gap(plan_100):
+    assignment, slotting, timeline = plan_100[:3]
+    timeline = copy.deepcopy(timeline)
+    sounds = [r for r in timeline if r['event_type'] == 'sound' and r['block'] == 'animate']
+    first = sounds[0]
+    later = next(r for r in sounds[1:] if r['stimulus'] == first['stimulus'])
+    later['global_onset'] = first['global_onset'] + config.SOUND_DUR + config.MIN_SAME_SOUND_GAP - 0.01
+    assert any('same sound too close' in e for e in validate_plan(assignment, slotting, timeline, trials_per_pt=25))
