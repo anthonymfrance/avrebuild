@@ -21,7 +21,7 @@ PD_SOA_MAX = 1.5
 TRIAL_PT_RANGE = (2, 3)
 TRIAL_NPT_RANGE = (6, 10)
 TRIAL_PD_RANGE = (3, 5)
-TRIAL_NPD_RANGE = (28, 36)
+TRIAL_NPD_RANGE = (36, 44)
 MAX_PLACEMENT_ATTEMPTS = 250   # random event orders per trial in the first placement pass
 MAX_TIMELINE_ATTEMPTS = 3      # placement passes; passes after the first retry only unplaced trials
 
