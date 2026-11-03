@@ -116,7 +116,11 @@ FIXATION_LINE_WIDTH = 3     # stroke width for 'cross' and 'circle'
 # A 3 px stroke is a hairline along a 1920 px window edge, so the frame has its
 # own width rather than sharing FIXATION_LINE_WIDTH.
 FIXATION_BORDER_WIDTH = 16
-FIXATION_COLOR = 'white'
+# Grey, not white: the background noise is drawn at BG_NOISE_OPACITY over black,
+# so it averages 0.15 luminance and a mark at that value blends into it instead
+# of pulling the eye back to the centre. Hex, not the name 'gray': PsychoPy
+# reads that as rgb 0.0039, essentially black.
+FIXATION_COLOR = '#262626'   # 0.15 luminance: the noise field's own average
 FIXATION_HIT_COLOR = 'green'
 FIXATION_FLASH_DUR = 0.2
 
