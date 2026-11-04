@@ -3,6 +3,41 @@
 Timing is PTB software-reported only; there is no microphone, photodiode, or loopback measurement
 (the metadata note "PTB software-reported timing, no physical measurement" is kept).
 
+## Corner rule and fixed leads (`477978f`)
+
+- **One fixed lead per sound item.** PT already kept one SOA per stimulus; PD now does too.
+  `build_timeline` freezes `pd_soa_by_identity` beside `pt_soa_by_identity` before any event
+  exists, so no placement retry can change a lead, and both `validate_timeline` and
+  `plan_validator` reject an item whose lead moves. The operator screen lists each PT's and PD's
+  lead per block instead of a PD range. Verified: four PTs and four PDs, one value each.
+- **Four-way favoured corners.** `stimulus_split.draw_favored_corners` shuffles the four corners
+  across each block's two PTs and two PDs; the plan is written to `corner_plan.csv` and listed in
+  the participant metadata artifacts. A privileged item is a PT in one block and absent from the
+  other, or a PD in one block and absent from the other, so it has exactly one favoured corner and
+  each corner serves one PT and one PD. Privileged items aim for `TARGET_SPATIAL_BIAS` /
+  `DISTRACTOR_SPATIAL_BIAS` (0.80); NPT and NPD split evenly.
+- **The slotting key plans the privileged pairing only.** PT and PD rows carry `item`,
+  `total_appearances`, `corner` and `favored_corner`. One PT and one PD are active per trial, each
+  on `TRIALS_PER_PT` trials, and the two sequences are shuffled independently, so a trial's PT–PD
+  pairing is random. NPT and NPD stay sampled per trial; `even_pile` gives them their corners,
+  because `corner_pile` with a zero bias would always leave one corner empty.
+- **Counts.** `TRIAL_PT_RANGE` and `TRIAL_PD_RANGE` are both `(4, 6)`, which gives 8–12
+  appearances per PT and per PD per block.
+- **Measured.** 20/20 seeds place at 8 trials and 4/4 at 100 trials. PT and PD land 75–83% in
+  their own corner (mean 80%); NPT and NPD split within one. A 100-trial plan generates in
+  10.1–11.4 s (mean 10.9 s) with 13.8k–15.3k placement orders and 45–53 trials using the repair
+  pass.
+- **Existing plans are refused**: the config snapshot loses `FAVORED_CORNER` and gains
+  `DISTRACTOR_SPATIAL_BIAS`. Each participant folder still records the commit and config it ran
+  under.
+- **Tests.** `plan_100` uses seed 2 because the stream moved; new tests cover the corner
+  permutation, one active PD per trial, the PD bias and the even splits. The retry test now asserts
+  that every trial is attempted once, only failures are retried and placed trials are never
+  redone.
+- **Not run.** The PsychoPy runtime. `tests/test_load_timeline.py` still fails on this branch
+  because the plan schedules 0.5 s sounds while the stimulus WAVs are 1.0 s; that predates this
+  change.
+
 ## Items
 
 1. **PT SOAs hidden from participants** (`79a066e`). Verified: SOAs appear only on the operator
