@@ -19,7 +19,8 @@ gui_yes() { zenity --question --title='AV study preflight' --width=560 --ok-labe
 gui_debug_choice() { zenity --question --title='AV study preflight' --width=560 --ok-label='Debug run' --cancel-label='Participant run' --default-cancel --text="$1"; }
 
 if [[ ! -d "$study_dir" || ! -f "$study_dir/config.py" || ! -f "$study_dir/experiment.py" ]]; then
-  gui_error "Study directory is missing config.py or experiment.py:\n$study_dir"
+  gui_error "Study directory is missing config.py or experiment.py:
+$study_dir"
   exit 1
 fi
 study_dir="$(cd -- "$study_dir" && pwd)"
@@ -48,7 +49,10 @@ if ! command -v "$python_bin" >/dev/null 2>&1; then
   exit 1
 fi
 if ! "$python_bin" -c 'import importlib.util as u, sys; sys.exit(0 if all(u.find_spec(n) for n in ("psychopy", "numpy", "PIL", "psychtoolbox")) else 1)' >/dev/null 2>&1; then
-  gui_error "The selected Python runtime is missing PsychoPy, NumPy, Pillow, or psychtoolbox:\n$python_bin\n\nSet AV_STUDY_PYTHON to the PsychoPy environment's bin/python3 path."
+  gui_error "The selected Python runtime is missing PsychoPy, NumPy, Pillow, or psychtoolbox:
+$python_bin
+
+Set AV_STUDY_PYTHON to the PsychoPy environment's bin/python3 path."
   exit 1
 fi
 
@@ -176,7 +180,12 @@ active_mode="$(sed -n 's/^mode=//p' <<< "$display_summary")"
 display_refresh_hz="$(sed -n 's/^rate=//p' <<< "$display_summary")"
 [[ "$display_refresh_hz" =~ ^[0-9]+([.][0-9]+)?$ ]] || display_refresh_hz=''
 while IFS= read -r connected_line; do
-  [[ -n "$connected_line" ]] && add_row 'ℹ️' 'Connected output' "$connected_line"
+  [[ -n "$connected_line" ]] || continue
+  # The full xrandr line is much wider than the checklist column, so keep just
+  # the output name and whether it is the primary output.
+  connected_label="${connected_line%% *} connected"
+  [[ "$connected_line" != *" primary "* ]] || connected_label+=" (primary)"
+  add_row 'ℹ️' 'Connected output' "$connected_label"
 done < <(sed -n 's/^connected=//p' <<< "$display_summary")
 expected_mode="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print("%dx%d" % tuple(config.WINDOW_SIZE))')" || expected_mode=''
 expected_refresh="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print(config.REQUIRED_REFRESH_HZ)')" || expected_refresh=''
@@ -267,9 +276,16 @@ add_row '✅' 'Participant ID' "$participant_id (reserved on the lab server)"
 report="$(mktemp "${TMPDIR:-/tmp}/av-preflight-${participant_id}.XXXXXX")"
 add_row '✅' 'Preflight report' 'Will be saved in the participant folder after launch'
 
-summary="Review the checks below. Red items must be fixed before starting. Yellow items need a manual check; if the lab server is unavailable you will be asked to confirm local-only storage. The experiment shows the finger placement screen, then checks the four numpad keys and the sound before creating the participant plan."
+summary="Review the checks below. Red items must be fixed before starting.
+Yellow items need a manual check; if the lab server is unavailable you
+will be asked to confirm local-only storage.
+
+The experiment shows the finger placement screen, then checks the four
+numpad keys and the sound before creating the participant plan."
 zenity --list --title='AV study preflight checklist' --width=900 --height=480 \
-  --text="$summary\n\nParticipant: $participant_id" \
+  --text="$summary
+
+Participant: $participant_id" \
   --column='Status' --column='Check' --column='Result' --print-column=2 \
   "${rows[@]}" >/dev/null || { rm -f -- "$report"; echo 'Preflight window closed.'; exit 1; }
 
@@ -279,13 +295,18 @@ if (( fatal )); then
   exit 1
 fi
 if [[ -z "$server_root" || ! -w "$server_root" ]]; then
-  if ! gui_yes 'The lab server is unavailable or not writable. Data will stay on this computer and will not be copied automatically. Continue with local-only storage?'; then
+  if ! gui_yes "The lab server is unavailable or not writable.
+Data will stay on this computer and will not be copied automatically.
+Continue with local-only storage?"; then
     rm -f -- "$report"
     gui_info 'Preflight stopped. Mount the lab server and run preflight again, or acknowledge local-only storage to continue.'
     exit 1
   fi
 fi
-if gui_debug_choice 'Run this session with the debug/testing screens?\n\nParticipant run is the safe default for real participants. Debug run shows the operator plan screen and a per-frame overlay.'; then
+if gui_debug_choice "Run this session with the debug/testing screens?
+
+Participant run is the safe default for real participants.
+Debug run shows the operator plan screen and a per-frame overlay."; then
   debug_overlay=true
 else
   debug_overlay=false
@@ -310,7 +331,10 @@ planned_block_order="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$pyth
   gui_error 'Could not calculate the planned block order.'
   exit 1
 }
-gui_yes "Preflight checks are complete. Start $participant_id?\n\nPlanned block order: $planned_block_order\nThe participant plan will be created when the experiment starts." || { rm -f -- "$report"; gui_info 'Preflight passed. The experiment was not started.'; exit 0; }
+gui_yes "Preflight checks are complete. Start $participant_id?
+
+Planned block order: $planned_block_order
+The participant plan will be created when the experiment starts." || { rm -f -- "$report"; gui_info 'Preflight passed. The experiment was not started.'; exit 0; }
 export AV_STUDY_PREFLIGHT_REPORT="$report"
 export AV_STUDY_DEBUG_OVERLAY="$debug_overlay"
 export AV_STUDY_PARTICIPANT_CLAIM="$claim_path"
@@ -350,6 +374,10 @@ else
   if [[ -s "$warnings_file" ]]; then
     show_operator_warnings
   fi
-  gui_error "The experiment runner exited with status $run_status.\n\n$error_tail\n\nFull log: $log_copy"
+  gui_error "The experiment runner exited with status $run_status.
+
+$error_tail
+
+Full log: $log_copy"
   exit "$run_status"
 fi
