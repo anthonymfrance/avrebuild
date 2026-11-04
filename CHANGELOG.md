@@ -14,9 +14,12 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
   -40 dBFS then louder than -30 dBFS) that has the most energy, falling back to the loudest
   window when no boundary yields 60% of it. 3 ms raised-cosine fade in, 15 ms fade out. Nine of the
   twenty excerpts start 235-500 ms in, where the curated 1.0 s excerpt holds its body late.
-- **Level.** -20 dBFS RMS measured over the played window, with a -1 dBFS sample-peak guard.
-  Nineteen files land at -20.00 dBFS RMS; `inanimate/snd_7` hits the guard at -21.53 dBFS. The
-  1.0 s excerpts they came from spanned -27.4 to -20.0 dBFS RMS and -12.7 to -1.0 dBFS peak.
+- **Level.** Matched by K-weighted loudness over the played window (BS.1770 K-weighting, mean
+  square over the 0.5 s) to -19.85, the median of the set, under a -1 dBFS sample-peak ceiling.
+  Equal -20 dBFS RMS left an 8.08 dB spread in perceived level, because a door thud and a clink
+  have very different crest factors; loudness matching brings the set to 1.35 dB. Nineteen of the
+  twenty land exactly on the target, and `clock` is the only cue the ceiling holds back (-21.19).
+  Gains run from -6.97 dB (`elephant`) to +5.40 dB (`door`).
 - **Not in the repo.** The cutter was a one-off numpy/`wave` script; the window and level rules
   above are the whole recipe. No `config.py` value changed, so existing plans still load.
 
