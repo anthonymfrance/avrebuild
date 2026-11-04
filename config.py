@@ -77,7 +77,7 @@ AUDIO_DEVICE = 'default'
 AUDIO_SPEAKER = 'default'
 SOUND_DUR = 0.5
 MIN_AUDIO_GAP = 0.2
-MIN_SAME_SOUND_GAP = 0.75  # end of a sound to next onset of the same item
+MIN_SAME_SOUND_GAP = 2.0  # 11.4 was 0.75 trying 2.0 to spread PD/PT apart end of a sound to next onset of the same item
 SOUND_POOL_SIZE = 2          # Sound objects per stimulus, used round-robin
 SOUND_POOL_RESTART_MARGIN = 0.05  # play() must land this long after the previous play on a pooled object ended
 SOUND_REQUEST_MIN_LEAD = 0.01     # seconds of future margin when a play request is already late
@@ -99,7 +99,7 @@ BG_UPDATE_RATE = 0.2
 BG_SEED = 0xA1D0B04A
 
 # --- Images ---
-IMAGE_SIZE = (100, 100) #was at 200, 200
+IMAGE_SIZE = (125, 125) #was at 200, 200
 MAX_OPACITY = 1.0
 
 # --- Fixation / centre mark ---
