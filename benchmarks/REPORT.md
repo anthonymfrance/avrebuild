@@ -4,6 +4,14 @@ Branch `scheduler-100-trials`, forked from `integration` at `920da3a`. No `confi
 value changed, so plans generated before this branch still load (`session_io.load_timeline`
 refuses a plan if any uppercase config value differs from its snapshot).
 
+> **Note (2026-11-04).** This report predates the four-way corner rule (`477978f`). It
+> describes the single global top-right corner, where 80% of *all* targets shared one
+> corner. Targets and distractors now each carry their own favoured corner, the
+> non-privileged roles split evenly, and PT and PD counts are 4-6, so the fit rates, seed
+> counts and per-participant timings below no longer describe the current code. The
+> analysis of the placer itself — lower bounds, repair passes, keeping placed trials —
+> still holds.
+
 ## Summary
 
 - The current code produced a 100-trial plan for **45 of 100 seeds**. Because
