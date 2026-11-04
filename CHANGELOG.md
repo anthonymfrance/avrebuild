@@ -21,6 +21,10 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
   on `TRIALS_PER_PT` trials, and the two sequences are shuffled independently, so a trial's PT–PD
   pairing is random. NPT and NPD stay sampled per trial; `even_pile` gives them their corners,
   because `corner_pile` with a zero bias would always leave one corner empty.
+- **Operator screen and overlay.** `screens.plan_summary` lists each PT's and PD's lead and
+  favoured corner, and the per-frame debug overlay shows the same pair, so session day can check
+  the rule without opening the CSVs. The timeline CSV gained a `favored_corner` column (blank for
+  the non-privileged roles), and `plan_validator` checks it against the slotting key.
 - **Counts.** `TRIAL_PT_RANGE` and `TRIAL_PD_RANGE` are both `(4, 6)`, which gives 8–12
   appearances per PT and per PD per block.
 - **Measured.** 20/20 seeds place at 8 trials and 4/4 at 100 trials. PT and PD land 75–83% in

@@ -46,8 +46,8 @@ from stimulus_split import validate_stimulus_assignment
 # breaks can occur between trials or blocks.
 FIELDS = [
     'block', 'trial', 'event_index', 'order_in_trial', 'event_id', 'source_event_id', 'role',
-    'stimulus', 'slot_number', 'corner', 'x', 'y', 'global_onset', 'trial_onset', 'duration', 'event_type',
-    'soa', 'response_window',
+    'stimulus', 'slot_number', 'corner', 'favored_corner', 'x', 'y', 'global_onset',
+    'trial_onset', 'duration', 'event_type', 'soa', 'response_window',
 ]
 ROLE_ORDER = ('PT', 'PD', 'NPT', 'NPD')
 # Roles the slotting key plans; the rest are sampled per trial.
@@ -126,11 +126,12 @@ def _jitter_position(corner, window_size, rng, image_size=IMAGE_SIZE):
     )
 
 
-def _event(block, trial, role, stimulus, slot, event_id, corner, soa=None):
+def _event(block, trial, role, stimulus, slot, event_id, corner, soa=None, favored=''):
     # slot_number identifies the source slot; it does not assign a temporal order.
     return {
         'block': block, 'trial': trial, 'role': role, 'stimulus': stimulus,
-        'slot_number': slot, 'event_id': event_id, 'corner': corner, 'soa': soa,
+        'slot_number': slot, 'event_id': event_id, 'corner': corner,
+        'favored_corner': favored, 'soa': soa,
     }
 
 
@@ -153,6 +154,7 @@ def _required_events(
         events.append(_event(
             row['block'], row['trial'], row['role'], row['stimulus'],
             row['slot_number'], row['event_id'], row['corner'], soa,
+            row.get('favored_corner', ''),
         ))
 
     # Non-privileged items stay randomly sampled per trial, as before. Only their
@@ -176,7 +178,7 @@ def _required_events(
                 for (trial, slot), corner in zip(slots, pile):
                     events.append(_event(
                         block, trial, role, item, slot,
-                        f'{block}_trial_{trial}_{role}_{slot}', corner, None,
+                        f'{block}_trial_{trial}_{role}_{slot}', corner, None, '',
                     ))
 
     counts = Counter((event['block'], event['trial'], event['role']) for event in events)
@@ -442,6 +444,7 @@ def _schedule_layout(layout, trial_start, rng, separations=None, index_of=None):
                 'event_id': event['event_id'], 'source_event_id': event['event_id'],
                 'role': event['role'], 'stimulus': event['stimulus'],
                 'slot_number': event['slot_number'], 'corner': event['corner'],
+                'favored_corner': event.get('favored_corner', ''),
                 'global_onset': picture_onset, 'trial_onset': picture_onset - trial_start,
                 'duration': VISUAL_DURATION, 'event_type': 'visual',
                 'soa': '',
@@ -455,7 +458,7 @@ def _schedule_layout(layout, trial_start, rng, separations=None, index_of=None):
                     'event_id': f"{event['event_id']}_sound",
                     'source_event_id': event['event_id'], 'role': event['role'],
                     'stimulus': event['stimulus'], 'slot_number': event['slot_number'],
-                    'corner': '', 'global_onset': sound_onset,
+                    'corner': '', 'favored_corner': '', 'global_onset': sound_onset,
                     'trial_onset': sound_onset - trial_start, 'duration': SOUND_DUR,
                     'event_type': 'sound', 'soa': event['soa'], 'response_window': '',
                 })
@@ -616,6 +619,14 @@ def validate_timeline(
             expected_window = RESPONSE_WINDOW if row['role'] in TARGET_ROLES else ''
             if row['response_window'] != expected_window:
                 raise ValueError(f"{row['event_id']}: response window does not match target role.")
+            favored_corner = row['favored_corner']
+            if row['role'] in PRIVILEGED_ROLES:
+                if favored_corner not in CORNERS:
+                    raise ValueError(f"{row['event_id']}: missing favoured corner.")
+            elif favored_corner != '':
+                raise ValueError(
+                    f"{row['event_id']}: only PT and PD rows keep a favoured corner."
+                )
             if expected_window and row['global_onset'] + TARGET_CORNER_HOLD > start + TRIAL_DURATION:
                 raise ValueError(f"{row['event_id']}: response window exceeds trial end.")
 

@@ -109,8 +109,10 @@ def validate_plan(assignment, slotting_rows, timeline, trials_per_pt=None, count
         r = visuals_by_id.get(event_id)
         if r is None:
             continue
-        if (r['block'], r['trial'], r['role'], r['corner'], r['stimulus']) != (
-                s['block'], int(s['trial']), s['role'], s['corner'], s['item']):
+        if (r['block'], r['trial'], r['role'], r['corner'], r['stimulus'],
+                r.get('favored_corner', '')) != (
+                s['block'], int(s['trial']), s['role'], s['corner'], s['item'],
+                s.get('favored_corner', '')):
             err(f'{event_id}: differs from its slotting row.')
 
     role_counts = Counter((r['block'], r['trial'], r['role']) for r in visuals)

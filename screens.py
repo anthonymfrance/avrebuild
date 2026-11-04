@@ -41,6 +41,12 @@ KEY_TO_CORNER = {
     key: corner for corner, keys in RESPONSE_KEYS.items() for key in keys
 }
 ALL_KEYS = list(KEY_TO_CORNER) + ['space', 'escape']
+# Operator-facing corner wording, so the setup screen and the debug overlay
+# name a corner the same way.
+CORNER_LABELS = {
+    'top_left': 'top left', 'top_right': 'top right',
+    'bottom_left': 'bottom left', 'bottom_right': 'bottom right',
+}
 # "any animal" / "any object": the singular of the block label, so the block
 # intro cannot drift from the block name. It lives here rather than in config
 # because every config value is part of the snapshot that existing participant
@@ -277,22 +283,26 @@ def sound_check(window, kb, visual, test_tone):
 
 
 def plan_summary(participant_id, rows, block_order, trials_by_block):
-    """Operator debug-screen lines and the per-item SOA per block (operator-only)."""
-    pt_soa_by_block, pd_soa_by_block = {}, {}
+    """Operator debug-screen lines and each PT's and PD's lead and favoured corner."""
+    pt_soa, pd_soa, favored = {}, {}, {}
     for block in block_order:
-        pt_soa_by_block[block], pd_soa_by_block[block] = {}, {}
+        pt_soa[block], pd_soa[block], favored[block] = {}, {}, {}
         for row in rows:
-            if row['block'] != block or row['event_type'] != 'sound':
+            if row['block'] != block or row['role'] not in ('PT', 'PD'):
+                continue
+            if row.get('favored_corner'):
+                favored[block][row['stimulus']] = row['favored_corner']
+            if row['event_type'] != 'sound':
                 continue
             if row['role'] == 'PT':
-                pt_soa_by_block[block][row['stimulus']] = float(row['soa'])
-            elif row['role'] == 'PD':
-                pd_soa_by_block[block][row['stimulus']] = float(row['soa'])
+                pt_soa[block][row['stimulus']] = float(row['soa'])
+            else:
+                pd_soa[block][row['stimulus']] = float(row['soa'])
     lines = [
         'STUDY SETUP — STIMULUS ASSIGNMENTS',
         f"Participant: {participant_id}    Block order: {' → '.join(BLOCK_LABELS[b] for b in block_order)}",
         f'Target response window: {config.RESPONSE_WINDOW:.1f} seconds',
-        'PT and PD SOAs are fixed for each sound item in this participant plan:',
+        'Each PT and PD keeps one lead and one favoured corner in this plan:',
         f'SOA range: PT {config.PT_SOA_MIN:.2f}–{config.PT_SOA_MAX:.2f} s, '
         f'PD {config.PD_SOA_MIN:.2f}–{config.PD_SOA_MAX:.2f} s',
         '',
@@ -303,16 +313,12 @@ def plan_summary(participant_id, rows, block_order, trials_by_block):
         pd_counts = sum(row['event_type'] == 'visual' and row['role'] == 'PD' for row in block_rows)
         npd_counts = sum(row['event_type'] == 'visual' and row['role'] == 'NPD' for row in block_rows)
         lines.append(f"{BLOCK_LABELS[block]} BLOCK — target group: {BLOCK_LABELS[block]}")
-        lines.append(
-            '  PT SOA by target: ' + ', '.join(
-                f'{name} = {soa:.1f}s' for name, soa in sorted(pt_soa_by_block[block].items())
+        for role, table in (('PT', pt_soa), ('PD', pd_soa)):
+            entries = ', '.join(
+                f'{name} {soa:.2f}s @ {CORNER_LABELS.get(favored[block].get(name), "?")}'
+                for name, soa in sorted(table[block].items())
             )
-        )
-        lines.append(
-            '  PD SOA by distractor: ' + ', '.join(
-                f'{name} = {soa:.1f}s' for name, soa in sorted(pd_soa_by_block[block].items())
-            )
-        )
+            lines.append(f'  {role}: {entries if entries else "none"}')
         lines.append(f'  Events per block — PT: {pt_counts}, PD: {pd_counts}, NPD: {npd_counts}')
         for role, description in (
             ('PT', 'Targets with sound (PT)'),
@@ -329,10 +335,14 @@ def plan_summary(participant_id, rows, block_order, trials_by_block):
         )
         lines.append('')
     lines.append('Operator review: press SPACE to continue to the instructions.')
-    soa_by_block = {
-        block: {**pt_soa_by_block[block], **pd_soa_by_block[block]} for block in block_order
+    details = {
+        block: {
+            name: f'{soa:.2f}s @ {CORNER_LABELS.get(favored[block].get(name), "?")}'
+            for name, soa in {**pt_soa[block], **pd_soa[block]}.items()
+        }
+        for block in block_order
     }
-    return lines, soa_by_block
+    return lines, details
 
 
 def operator_screen(window, kb, visual, lines):

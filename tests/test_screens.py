@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import config
+import participant_setup
 from scoring import trial_recap_lines
 import screens
 
@@ -218,6 +219,19 @@ def test_rest_break_continues_by_itself_when_the_countdown_ends():
     assert outcome == 'completed' and elapsed >= 30
     assert keyboard.calls > 1
     assert 'in 0 seconds' in FakeText.instances[-1].text
+
+
+def test_operator_summary_shows_each_lead_and_favoured_corner():
+    _, slotting, timeline, _, _ = participant_setup.build_plan(7, ['animate', 'inanimate'])
+    trials = {block: [1, 2, 3, 4] for block in ('animate', 'inanimate')}
+    lines, details = screens.plan_summary('participant_01', timeline, ['animate', 'inanimate'], trials)
+    text = '\n'.join(lines)
+    favored = {(row['block'], row['item']): row['favored_corner'] for row in slotting}
+    for block in ('animate', 'inanimate'):
+        assert set(details[block]) == {item for b, item in favored if b == block}
+        for item, detail in details[block].items():
+            assert screens.CORNER_LABELS[favored[(block, item)]] in detail
+            assert detail in text
 
 
 def test_scoring_rules_screen_defines_every_outcome_across_pages():

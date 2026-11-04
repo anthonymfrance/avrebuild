@@ -342,7 +342,8 @@ def run(args):
         for row in sound_rows:
             row['sound_slot'] = slots[row['event_id']]
 
-        debug_lines, soa_by_block = screens.plan_summary(args.pid, rows, block_order, trials_by_block)
+        debug_lines, item_details_by_block = screens.plan_summary(
+            args.pid, rows, block_order, trials_by_block)
         debug_overlay_enabled = os.environ.get('AV_STUDY_DEBUG_OVERLAY', 'false').lower() == 'true'
         metadata['debug_overlay_enabled'] = debug_overlay_enabled
         metadata['debug_overlay_note'] = (
@@ -423,7 +424,7 @@ def run(args):
                     fixation=fixation, frame_period=frame_period, metadata=metadata,
                     overlay=(debug_overlay, (
                         f'{args.pid} | {BLOCK_LABELS[block]} | trial {trial}\n'
-                        f'SOA: {soa_by_block[block]}'
+                        f'PT/PD: {item_details_by_block[block]}'
                     )) if debug_overlay_enabled else None,
                 )
                 trial_complete = trial_row['trial_complete']
