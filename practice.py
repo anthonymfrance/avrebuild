@@ -26,7 +26,7 @@ from __future__ import annotations
 import config
 from config import VISUAL_DURATION
 from scoring import classify_press, finalize_targets
-from screens import ALL_KEYS, KEY_TO_CORNER, recap_pages
+from screens import ALL_KEYS, KEY_TO_CORNER, MARK_GREY, mark_rest_color, recap_pages
 from trial_runner import planned_image_alpha
 
 KEY_NUMBER = {
@@ -39,7 +39,8 @@ KEY_NUMBER = {
 # Grey, not white: a solid white shape on the dark background noise reads much
 # heavier than a grayscale stimulus photo. Named 'gray' is wrong here -- PsychoPy
 # resolves it to rgb 0.0039, essentially black -- so the value is given as hex.
-SHAPE_COLOR = '#B4B4B4'
+# The centre ring uses the same grey (screens.MARK_GREY).
+SHAPE_COLOR = MARK_GREY
 
 # Circles are targets, squares are distractors. Onsets are seconds from the
 # paced-round start. Gaps stay wider than the hit window plus the late window.
@@ -375,7 +376,7 @@ def run(window, kb, visual, fixation, clock, backgrounds):
             return finish('abort')
         return finish('completed')
     finally:
-        fixation.lineColor = config.FIXATION_COLOR
+        fixation.lineColor = mark_rest_color()
 
 
 def _make_shapes(window, visual):
@@ -400,7 +401,7 @@ def _text(window, visual, height=26):
 def _frame(window, fixation, text, shapes, caption, green, background=None):
     if background is not None:
         background.draw()
-    fixation.lineColor = config.FIXATION_HIT_COLOR if green else config.FIXATION_COLOR
+    fixation.lineColor = config.FIXATION_HIT_COLOR if green else mark_rest_color()
     fixation.draw()
     for stim, pos, opacity in shapes:
         stim.pos = pos

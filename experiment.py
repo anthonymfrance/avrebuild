@@ -16,12 +16,13 @@ from pathlib import Path
 
 import config
 from config import BLOCK_LABELS, TARGET_ROLES
+from stimulus_split import ANIMATE, INANIMATE
 from participant_setup import create_participant_plan, derive_rng, verify_participant_claim
 import practice
 import screens
 from session_io import (
     first_screen_elapsed_seconds, load_timeline, operator_warn, save_session, sha256_file,
-    sync_participant, write_practice_log,
+    stimulus_paths, sync_participant, write_practice_log,
 )
 from audio_ptb import (
     AUDIO_START_SOURCE, assign_sound_slots, backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio,
@@ -183,7 +184,7 @@ def run(args):
                 config.FIXATION_BORDER_WIDTH if config.FIXATION_SHAPE == 'border'
                 else config.FIXATION_LINE_WIDTH
             ),
-            'color': config.FIXATION_COLOR,
+            'color': screens.mark_rest_color(),
             'hit_color': config.FIXATION_HIT_COLOR,
             'flash_seconds': config.FIXATION_FLASH_DUR,
             'participant_wording': screens.mark_flash_phrase(),
@@ -354,6 +355,38 @@ def run(args):
         )
         if debug_overlay_enabled and not screens.operator_screen(window, kb, visual, debug_lines):
             return
+        if debug_overlay_enabled:
+            # Every stimulus at the size it is drawn during the task, so the
+            # operator can check the pool and its cues before the session.
+            inventory_groups = []
+            for block in ('animate', 'inanimate'):
+                items = []
+                for name in (ANIMATE if block == 'animate' else INANIMATE):
+                    image_path, sound_path = stimulus_paths(ROOT, block, 'PT', name)
+                    items.append((
+                        name,
+                        visual.ImageStim(
+                            window, image=str(image_path), size=config.IMAGE_SIZE,
+                            units='pix', autoLog=False,
+                        ),
+                        sound.Sound(
+                            str(sound_path), speaker=shared_speaker, stereo=True,
+                            preBuffer=-1, volume=config.AUDIO_VOLUME, autoLog=False,
+                        ),
+                    ))
+                inventory_groups.append((BLOCK_LABELS[block], items))
+            inventory_images = [
+                (name, image) for _label, items in inventory_groups
+                for name, image, _cue in items
+            ]
+            if not screens.stimulus_inventory(
+                window, kb, visual, session_clock, inventory_groups,
+            ):
+                return
+            # The same pictures overlaid at the centre, so an object drawn
+            # much larger than the rest is obvious before the session.
+            if not screens.stimulus_stack(window, kb, visual, inventory_images):
+                return
         if not screens.instructions(window, kb, visual):
             return
         if not screens.scoring_rules(window, kb, visual):

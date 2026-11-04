@@ -152,11 +152,19 @@ def test_center_mark_draws_each_option_as_an_unfilled_stim_at_the_centre(monkeyp
         monkeypatch.setattr(config, 'FIXATION_SHAPE', shape)
         mark = screens.center_mark(FakeWindow(), MarkVisual)
         assert type(mark) is stim_class
-        assert mark.lineColor == config.FIXATION_COLOR
+        assert mark.lineColor == screens.mark_rest_color()
         assert mark.pos == (0, 0)
         # Unfilled: the hit flash is a lineColor change, which is why
         # trial_runner and practice need no per-mark case.
         assert mark.kwargs.get('fillColor', None) is None
+
+
+def test_the_ring_rests_in_the_practice_grey_and_the_others_stay_white(monkeypatch):
+    monkeypatch.setattr(config, 'FIXATION_SHAPE', 'circle')
+    assert screens.center_mark(FakeWindow(), MarkVisual).lineColor == '#B4B4B4'
+    for shape in ('cross', 'border'):
+        monkeypatch.setattr(config, 'FIXATION_SHAPE', shape)
+        assert screens.center_mark(FakeWindow(), MarkVisual).lineColor == config.FIXATION_COLOR
 
 
 def test_border_frame_is_inset_so_the_whole_stroke_stays_on_screen(monkeypatch):
@@ -194,6 +202,102 @@ def test_an_unknown_mark_shape_is_rejected(monkeypatch):
         screens.mark_shape()
     with pytest.raises(ValueError, match='FIXATION_SHAPE'):
         screens.center_mark(FakeWindow(), MarkVisual)
+
+
+def test_stimulus_inventory_shows_every_item_at_study_size_and_plays_sounds():
+    class FakeImage:
+        def __init__(self, window, image, size=None, **kwargs):
+            self.image = image
+            self.size = size
+            self.pos = (0, 0)
+
+        def draw(self):
+            pass
+
+    class FakeSound:
+        def __init__(self, clock):
+            self.clock = clock
+            self.plays = []
+            self.stopped = 0
+
+        def play(self):
+            self.plays.append(self.clock.getTime())
+
+        def stop(self):
+            self.stopped += 1
+
+    class InventoryVisual:
+        TextStim = FakeText
+        ImageStim = FakeImage
+
+    class ScriptedKeyboard:
+        def __init__(self, schedule):
+            self.schedule = schedule
+            self.calls = 0
+
+        def getKeys(self, **kwargs):
+            self.calls += 1
+            return [SimpleNamespace(name=name) for name in self.schedule.get(self.calls, ())]
+
+    clock = FakeClock(advance=0.05)
+    groups = []
+    sounds = []
+    for label in ('ANIMALS', 'OBJECTS'):
+        items = []
+        for index in range(10):
+            cue = FakeSound(clock)
+            sounds.append(cue)
+            items.append((f'item{index}', FakeImage(None, f'{index}.png'), cue))
+        groups.append((label, items))
+
+    keyboard = ScriptedKeyboard({1: ['p'], 800: ['space']})
+    assert screens.stimulus_inventory(
+        FakeWindow(), keyboard, InventoryVisual, clock, groups,
+    ) is True
+
+    images = [image for _label, items in groups for _name, image, _cue in items]
+    assert len(images) == 20
+    assert all(image.size == config.IMAGE_SIZE for image in images)
+    assert len({image.pos[0] for image in images}) == 5
+    top = {image.pos[1] for _label, items in groups[:1] for _name, image, _cue in items}
+    bottom = {image.pos[1] for _label, items in groups[1:] for _name, image, _cue in items}
+    assert len(top) == len(bottom) == 2
+    assert top == {-y for y in bottom}
+    assert all(len(cue.plays) == 1 for cue in sounds)
+    starts = [cue.plays[0] for cue in sounds]
+    assert all(b - a >= config.SOUND_DUR + 1.0 - 1e-9 for a, b in zip(starts, starts[1:]))
+
+    escape = ScriptedKeyboard({1: ['escape']})
+    assert screens.stimulus_inventory(
+        FakeWindow(), escape, InventoryVisual, clock, groups,
+    ) is False
+
+
+def test_stimulus_stack_layers_every_image_at_the_centre():
+    class StackImage:
+        def __init__(self):
+            self.pos = (25, 25)
+            self.size = None
+            self.opacity = 1.0
+            self.draws = 0
+
+        def draw(self):
+            self.draws += 1
+
+    images = [StackImage() for _ in range(6)]
+    items = [(f'item{index}', image) for index, image in enumerate(images)]
+
+    assert screens.stimulus_stack(
+        FakeWindow(), FakeKeyboard(['space']), FakeVisual, items,
+    ) is True
+    assert all(image.pos == (0, 0) for image in images)
+    assert all(image.size == config.IMAGE_SIZE for image in images)
+    assert all(image.opacity == screens.STACK_OPACITY for image in images)
+    assert all(image.draws > 0 for image in images)
+
+    assert screens.stimulus_stack(
+        FakeWindow(), FakeKeyboard(['escape']), FakeVisual, items,
+    ) is False
 
 
 def test_rest_break_counts_down_and_space_ends_it_early():

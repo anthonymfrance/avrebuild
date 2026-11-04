@@ -78,6 +78,18 @@ def mark_shape():
     return shape
 
 
+# The centre ring rests in the same grey as the practice shapes
+# (practice.SHAPE_COLOR): a solid white stroke over the dark noise
+# background reads much heavier than a grayscale photo, and the two greys
+# are the same surface so they should not drift apart.
+MARK_GREY = '#B4B4B4'
+
+
+def mark_rest_color():
+    """The mark's lineColor between hit flashes: grey ring, else FIXATION_COLOR."""
+    return MARK_GREY if mark_shape() == 'circle' else config.FIXATION_COLOR
+
+
 def mark_flash_phrase():
     """How the screens name the hit flash, for the configured mark."""
     return f'the {MARK_NAMES[mark_shape()]} flashes green'
@@ -156,8 +168,9 @@ def center_mark(window, visual):
     """The configured centre mark: the stim whose lineColor is the hit flash.
 
     Every option is an outline, so trial_runner and practice flash all of them
-    the same way (FIXATION_COLOR -> FIXATION_HIT_COLOR) without knowing which
-    one is drawn.
+    the same way (mark_rest_color() -> FIXATION_HIT_COLOR) without knowing
+    which one is drawn. The ring rests in the practice grey; the cross and
+    the frame rest in config.FIXATION_COLOR.
     """
     shape = mark_shape()
     if shape == 'border':
@@ -176,7 +189,7 @@ def center_mark(window, visual):
     if shape == 'circle':
         return visual.Circle(
             window, radius=config.FIXATION_SIZE / 2,
-            fillColor=None, lineColor=config.FIXATION_COLOR,
+            fillColor=None, lineColor=mark_rest_color(),
             lineWidth=config.FIXATION_LINE_WIDTH, pos=(0, 0),
             units='pix', autoLog=False,
         )
@@ -355,6 +368,128 @@ def operator_screen(window, kb, visual, lines):
         text.draw()
         window.flip()
         presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+        if any(key.name == 'escape' for key in presses):
+            return False
+        if any(key.name == 'space' for key in presses):
+            return True
+
+
+def stimulus_inventory(window, kb, visual, clock, groups, gap_seconds=1.0):
+    """Operator-only grid of every stimulus at study size. False if ESCAPE.
+
+    groups is ((label, ((name, image, sound), ...)), ...), in display order.
+    Each group is five columns wide, so the two ten-item groups make two rows of
+    five. Every image is forced to config.IMAGE_SIZE, the size it is drawn at
+    during the study, so the operator sees the real on-screen size. P plays
+    every sound once, in display order, with gap_seconds of silence after each;
+    SPACE continues.
+    """
+    win_w, win_h = window.size
+    img_w, img_h = config.IMAGE_SIZE
+    title = visual.TextStim(
+        window, text='', color='white', height=26, anchorVert='top',
+        units='pix', autoLog=False,
+    )
+    name_text = visual.TextStim(
+        window, text='', color='white', height=16, anchorVert='top',
+        units='pix', autoLog=False,
+    )
+    footer = visual.TextStim(
+        window,
+        text='P plays every sound, one second apart. Press SPACE to continue.',
+        color='white', height=22, anchorVert='bottom', units='pix',
+        autoLog=False, pos=(0, -win_h * 0.47),
+    )
+    column_step = win_w * 0.175
+    row_step = img_h + 52
+    titles = []
+    placed = []
+    for group_index, (label, items) in enumerate(groups):
+        rows = max(1, math.ceil(len(items) / 5))
+        centre = win_h * (0.5 - (group_index + 0.5) / len(groups))
+        titles.append((label, centre + (rows - 1) * row_step / 2 + img_h / 2 + 34))
+        for position, (name, image, cue) in enumerate(items):
+            row, column = divmod(position, 5)
+            image.size = (img_w, img_h)
+            placed.append((
+                (column - 2) * column_step,
+                centre + (rows - 1) * row_step / 2 - row * row_step,
+                name, image, cue,
+            ))
+    pending = []
+    next_play_at = 0.0
+    while True:
+        for label, y in titles:
+            title.text = label
+            title.pos = (0, y)
+            title.draw()
+        for x, y, name, image, cue in placed:
+            image.pos = (x, y)
+            image.draw()
+            name_text.text = name
+            name_text.pos = (x, y - img_h / 2 - 8)
+            name_text.draw()
+        footer.draw()
+        window.flip()
+        if pending and clock.getTime() >= next_play_at:
+            pending.pop(0).play()
+            next_play_at = clock.getTime() + config.SOUND_DUR + gap_seconds
+        presses = kb.getKeys(
+            keyList=['space', 'p', 'escape'], waitRelease=False, clear=True,
+        )
+        if any(key.name == 'escape' for key in presses):
+            for cue in pending:
+                cue.stop()
+            return False
+        if any(key.name == 'p' for key in presses):
+            pending = [
+                cue for _label, items in groups for _name, _image, cue in items
+                if cue is not None
+            ]
+            next_play_at = clock.getTime()
+        if any(key.name == 'space' for key in presses):
+            for cue in pending:
+                cue.stop()
+            return True
+
+
+STACK_OPACITY = 0.35  # low enough that all 20 silhouettes stay visible
+
+
+def stimulus_stack(window, kb, visual, items, opacity=STACK_OPACITY):
+    """Every stimulus drawn at the same centre, one over another. False if ESCAPE.
+
+    items is ((name, image), ...). Each image is drawn at its study size in the
+    window centre; the PNGs have transparent backgrounds, so lower layers stay
+    visible and an object drawn much larger than the rest shows up as the widest
+    silhouette. SPACE continues, ESCAPE aborts.
+    """
+    win_w, win_h = window.size
+    title = visual.TextStim(
+        window, text='ALL STIMULI STACKED AT THE CENTRE', color='white',
+        height=26, anchorVert='top', units='pix', autoLog=False,
+        pos=(0, win_h * 0.44),
+    )
+    footer = visual.TextStim(
+        window,
+        text=f'All {len(items)} pictures at study size, {opacity:.0%} opacity.\n'
+             'Press SPACE to continue.',
+        color='white', height=22, anchorVert='bottom', units='pix',
+        autoLog=False, pos=(0, -win_h * 0.47),
+    )
+    for _name, image in items:
+        image.size = config.IMAGE_SIZE
+        image.pos = (0, 0)
+        image.opacity = opacity
+    while True:
+        for _name, image in items:
+            image.draw()
+        title.draw()
+        footer.draw()
+        window.flip()
+        presses = kb.getKeys(
+            keyList=['space', 'escape'], waitRelease=False, clear=True,
+        )
         if any(key.name == 'escape' for key in presses):
             return False
         if any(key.name == 'space' for key in presses):

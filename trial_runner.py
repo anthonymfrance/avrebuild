@@ -11,7 +11,7 @@ import config
 from audio_ptb import AUDIO_START_SOURCE, backend_start_time, ptb_to_session, resolve_trial_audio
 from config import TARGET_ROLES, TRIAL_DURATION, VISUAL_DURATION
 from scoring import classify_press, finalize_targets, response_deadline
-from screens import KEY_TO_CORNER
+from screens import KEY_TO_CORNER, mark_rest_color
 
 
 def planned_image_alpha(time_to_onset):
@@ -158,7 +158,7 @@ def run_trial(
         backgrounds[int(max(0.0, now - trial_start) / config.BG_UPDATE_RATE) % len(backgrounds)].draw()
         fixation.lineColor = (
             config.FIXATION_HIT_COLOR
-            if now < fixation_green_until else config.FIXATION_COLOR
+            if now < fixation_green_until else mark_rest_color()
         )
         fixation.draw()
         if overlay is not None:

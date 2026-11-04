@@ -9,7 +9,7 @@ import pytest
 
 import config
 from scoring import classify_press, trial_recap_lines
-from screens import RESPONSE_KEYS
+from screens import RESPONSE_KEYS, mark_rest_color
 import practice
 import trial_runner
 
@@ -564,7 +564,7 @@ def test_full_practice_run_walks_the_three_rounds():
         'easy', 'medium', 'hard',
     }
     assert all(row['tier'] == 'coached' for row in result['rows'] if row['phase'] == 'coached')
-    assert fixation.lineColor == config.FIXATION_COLOR
+    assert fixation.lineColor == mark_rest_color()
     # A scripted participant never wanders: the whole run stays well inside a minute.
     assert clock.now < 60
 
