@@ -43,8 +43,10 @@ def trial_load(events):
     audio = sum(e['role'] in c.AUDIO_ROLES for e in events)
     bounds = _lower_bounds(events)
     binding = max(bounds, key=bounds.get)
+    corner_counts = Counter(e['corner'] for e in targets)
     return {'visuals': len(events), 'targets': len(targets), 'audio': audio,
-            'favored_targets': sum(e['corner'] == c.FAVORED_CORNER for e in targets),
+            'max_target_corner_share': (
+                round(max(corner_counts.values()) / len(targets), 3) if targets else None),
             'binding': binding, 'load': bounds[binding] / c.TRIAL_CONTENT_DUR,
             **{f'lb_{k}': round(v, 3) for k, v in bounds.items()}}
 

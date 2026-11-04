@@ -39,8 +39,7 @@ def features(rows):
         f[f"onset_{r['role']}"].append(r['trial_onset'] - c.TRIAL_BUFFER_DUR)
         if r['role'] in c.TARGET_ROLES:
             f['target_rank'].append(i / (len(vis) - 1))
-            if r['corner'] == c.FAVORED_CORNER:
-                f['favored_target_onset'].append(r['trial_onset'] - c.TRIAL_BUFFER_DUR)
+            f[f"target_onset_{r['corner']}"].append(r['trial_onset'] - c.TRIAL_BUFFER_DUR)
     gaps = [b['global_onset'] - a['global_onset'] for a, b in zip(vis, vis[1:])]
     f['gap'] = gaps
     f['gap_at_minimum'] = [g < c.MIN_VISUAL_ONSET_GAP + 1e-3 for g in gaps]

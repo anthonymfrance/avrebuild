@@ -128,10 +128,10 @@ MEDIUM_OFFSETS = (
 # 0.6 s life, three shapes on screen at the busiest moment, and 1.25 other
 # onsets inside each target's 0.9 s window against 1.16 averaged over all 88 real
 # trials (which themselves run at a median 1.98 items/s and peak at 3-4 on
-# screen). Only the corners are repacked: real trials put 79% of targets in the
-# favoured corner (config.TARGET_SPATIAL_BIAS = 0.80), which would leave keys 1,
-# 2 and 4 barely trained, so the four targets sit one to a corner and the
-# distractors are spread evenly over the four quadrants. Every gap still
+# screen). Only the corners are repacked: in a real trial each PT puts 80% of its
+# appearances in its own favoured corner and each NPT spreads evenly, so every
+# key is trained; practice still puts one target in each corner and spreads the
+# distractors evenly, which is slightly harder than the real mix. Every gap still
 # satisfies the rules the timeline enforces: MIN_VISUAL_ONSET_GAP, target onsets
 # at least RESPONSE_WINDOW apart, a target's corner empty for
 # TARGET_CORNER_HOLD, and no same-corner overlap.

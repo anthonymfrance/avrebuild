@@ -21,16 +21,27 @@ def expected_trials_per_block(trials_per_pt=None):
     return c.PT_COUNT_PER_BLOCK * (c.TRIALS_PER_PT if trials_per_pt is None else trials_per_pt)
 
 
-def _corner_rule_errors(label, corners):
-    """Favored corner gets round(n * bias); the others split the rest within one."""
+def _corner_rule_errors(label, corners, favored, bias):
+    """The item's own corner gets round(n * bias); the others split the rest within one."""
     counts = Counter(corners)
     total = len(corners)
-    favored = math.floor(total * c.TARGET_SPATIAL_BIAS + 0.5)
-    others = [counts[k] for k in c.CORNERS if k != c.FAVORED_CORNER]
-    if counts[c.FAVORED_CORNER] != favored or sum(others) != total - favored \
+    if favored not in c.CORNERS:
+        return [f'{label}: favoured corner {favored!r} is not one of {c.CORNERS}.']
+    favored_count = math.floor(total * bias + 0.5)
+    others = [counts[k] for k in c.CORNERS if k != favored]
+    if counts[favored] != favored_count or sum(others) != total - favored_count \
             or max(others) - min(others) > 1:
-        return [f'{label}: corner counts {dict(counts)} break the {c.TARGET_SPATIAL_BIAS:.0%} '
-                f'{c.FAVORED_CORNER} rule for {total} appearances.']
+        return [f'{label}: corner counts {dict(counts)} break the {bias:.0%} '
+                f'{favored} rule for {total} appearances.']
+    return []
+
+
+def _even_rule_errors(label, corners):
+    """Non-privileged roles spread their appearances over all four corners."""
+    counts = Counter(corners)
+    values = [counts[k] for k in c.CORNERS]
+    if max(values) - min(values) > 1:
+        return [f'{label}: corner counts {dict(counts)} are not split evenly.']
     return []
 
 
@@ -61,21 +72,22 @@ def validate_plan(assignment, slotting_rows, timeline, trials_per_pt=None, count
         if set(roles['PD']) | set(roles['NPD']) != other - set(assignment[OTHER[block]]['PT']):
             err(f'{block}: distractors must be every {OTHER[block]} item except that block\'s PTs.')
 
-    # --- Slotting key: trial count, one active PT per trial, balanced PT use ---
+    # --- Slotting key: trial count, one active PT and PD per trial, balanced use ---
     for block in blocks:
         rows = [r for r in slotting_rows if r['block'] == block]
         trials = {int(r['trial']) for r in rows}
         if trials != set(range(1, n_trials + 1)):
             err(f'{block}: slotting trials {sorted(trials)[:3]}..., expected 1..{n_trials}.')
-        active = {}
-        for r in rows:
-            if r['role'] == 'PT':
-                active.setdefault(int(r['trial']), set()).add(r['active_pt'])
-        if any(len(v) != 1 for v in active.values()) or set(active) != trials:
-            err(f'{block}: every trial needs exactly one active PT.')
-        uses = Counter(next(iter(v)) for v in active.values() if len(v) == 1)
-        if set(uses) != set(assignment[block]['PT']) or set(uses.values()) != {per_pt}:
-            err(f'{block}: PT active-trial counts {dict(uses)}, expected {per_pt} each.')
+        for role in ('PT', 'PD'):
+            active = {}
+            for r in rows:
+                if r['role'] == role:
+                    active.setdefault(int(r['trial']), set()).add(r['item'])
+            if any(len(v) != 1 for v in active.values()) or set(active) != trials:
+                err(f'{block}: every trial needs exactly one active {role}.')
+            uses = Counter(next(iter(v)) for v in active.values() if len(v) == 1)
+            if set(uses) != set(assignment[block][role]) or set(uses.values()) != {per_pt}:
+                err(f'{block}: {role} active-trial counts {dict(uses)}, expected {per_pt} each.')
 
     # --- Timeline rows: counts, sources, timing, audio ---
     visuals = [r for r in timeline if r['event_type'] == 'visual']
@@ -90,13 +102,15 @@ def validate_plan(assignment, slotting_rows, timeline, trials_per_pt=None, count
         err(f'Timeline does not contain exactly {len(blocks) * n_trials} trials.')
 
     slot_by_id = {r['event_id']: r for r in slotting_rows}
-    timeline_targets = {r['event_id']: r for r in visuals if r['role'] in c.TARGET_ROLES}
-    if set(slot_by_id) != set(timeline_targets):
-        err('Timeline targets do not match the slotting key one to one.')
-    for event_id, r in timeline_targets.items():
-        s = slot_by_id.get(event_id)
-        if s and (r['block'], r['trial'], r['corner'], r['stimulus']) != (
-                s['block'], int(s['trial']), s['corner'], s['active_pt'] or s['npt_item']):
+    visuals_by_id = {r['event_id']: r for r in visuals}
+    if set(slot_by_id) - set(visuals_by_id):
+        err('A slotting row has no matching timeline visual.')
+    for event_id, s in slot_by_id.items():
+        r = visuals_by_id.get(event_id)
+        if r is None:
+            continue
+        if (r['block'], r['trial'], r['role'], r['corner'], r['stimulus']) != (
+                s['block'], int(s['trial']), s['role'], s['corner'], s['item']):
             err(f'{event_id}: differs from its slotting row.')
 
     role_counts = Counter((r['block'], r['trial'], r['role']) for r in visuals)
@@ -111,11 +125,27 @@ def validate_plan(assignment, slotting_rows, timeline, trials_per_pt=None, count
             err(f'{r["event_id"]}: {r["stimulus"]} is not in the {r["block"]} {r["role"]} pool.')
 
     # Corner balance per identity is checked on the timeline itself.
+    favored = defaultdict(dict)
+    for row in slotting_rows:
+        if row.get('favored_corner'):
+            favored[row['block']][row['item']] = row['favored_corner']
     by_identity = defaultdict(list)
-    for r in timeline_targets.values():
+    for r in visuals_by_id.values():
         by_identity[(r['block'], r['role'], r['stimulus'])].append(r['corner'])
+    for block in blocks:
+        privileged = {
+            row['item']: row['favored_corner'] for row in slotting_rows
+            if row['block'] == block and row['role'] in ('PT', 'PD')
+        }
+        if len(privileged) != len(c.CORNERS) or set(privileged.values()) != set(c.CORNERS):
+            err(f'{block}: privileged favoured corners {privileged} are not one per corner.')
+    bias = {'PT': c.TARGET_SPATIAL_BIAS, 'PD': c.DISTRACTOR_SPATIAL_BIAS}
     for (block, role, item), corners in by_identity.items():
-        errors.extend(_corner_rule_errors(f'{block} {role} {item}', corners))
+        if role in bias:
+            errors.extend(_corner_rule_errors(
+                f'{block} {role} {item}', corners, favored[block].get(item, ''), bias[role]))
+        else:
+            errors.extend(_even_rule_errors(f'{block} {role} {item}', corners))
 
     x_lo, y_lo = c.IMAGE_SIZE[0] / 2, c.IMAGE_SIZE[1] / 2
     x_hi, y_hi = c.WINDOW_SIZE[0] / 2 - x_lo, c.WINDOW_SIZE[1] / 2 - y_lo
@@ -124,7 +154,7 @@ def validate_plan(assignment, slotting_rows, timeline, trials_per_pt=None, count
         if s['source_event_id'] in sound_by_source:
             err(f'{s["source_event_id"]}: more than one sound.')
         sound_by_source[s['source_event_id']] = s
-    pt_soa = {}
+    soa_by_identity = {}
     for r in timeline:
         start = (blocks.index(r['block']) * n_trials + r['trial'] - 1) * c.TRIAL_DURATION
         content_start = start + c.TRIAL_BUFFER_DUR
@@ -155,8 +185,10 @@ def validate_plan(assignment, slotting_rows, timeline, trials_per_pt=None, count
         low, high = (c.PT_SOA_MIN, c.PT_SOA_MAX) if r['role'] == 'PT' else (c.PD_SOA_MIN, c.PD_SOA_MAX)
         if not low - EPS <= soa <= high + EPS or abs(soa - sound['soa']) > 1e-6:
             err(f'{r["event_id"]}: SOA {soa:.4f} invalid.')
-        if r['role'] == 'PT' and abs(pt_soa.setdefault((r['block'], r['stimulus']), soa) - soa) > 1e-6:
-            err(f'{r["event_id"]}: PT SOA differs from the identity\'s first SOA.')
+        if r['role'] in c.AUDIO_ROLES and abs(
+                soa_by_identity.setdefault(
+                    (r['role'], r['block'], r['stimulus']), soa) - soa) > 1e-6:
+            err(f'{r["event_id"]}: {r["role"]} SOA differs from the identity\'s first SOA.')
     if len(sound_by_source) != len(sounds) or set(sound_by_source) - {r['event_id'] for r in visuals}:
         err('A sound has no matching PT/PD visual.')
 

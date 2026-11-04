@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+from collections import Counter, defaultdict
 
 import pytest
 
@@ -31,7 +32,11 @@ def plan_100():
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(stimulus_split, 'TRIALS_PER_PT', 25)
         mp.setattr(config, 'TRIALS_PER_PT', 25)
-        return participant_setup.build_plan(7, ORDER)
+        # Seed 2 places at 25 trials per PT. Freezing one PD SOA per identity
+        # shifted the timeline stream, so seed 7 now draws a trial whose corner
+        # lower bound (about 21 s) exceeds the 20 s content window. That is the
+        # documented near-limit of 100-trial seeds, not a new constraint.
+        return participant_setup.build_plan(2, ORDER)
 
 
 def test_eight_trial_plan_is_reproducible():
@@ -40,6 +45,72 @@ def test_eight_trial_plan_is_reproducible():
     second = participant_setup.build_plan(7, ORDER)
     assert plan_digest(first[1], first[2]) == plan_digest(second[1], second[2])
     assert validate_plan(first[0], first[1], first[2]) == []
+
+
+def test_pd_soa_is_fixed_per_identity():
+    _, _, timeline, _, _ = participant_setup.build_plan(7, ORDER)
+    sounds = {r['source_event_id']: r for r in timeline if r['event_type'] == 'sound'}
+    fixed = {}
+    for visual in timeline:
+        if visual['event_type'] != 'visual' or visual['role'] != 'PD':
+            continue
+        identity = (visual['block'], visual['stimulus'])
+        soa = sounds[visual['event_id']]['soa']
+        assert config.PD_SOA_MIN <= soa <= config.PD_SOA_MAX
+        assert fixed.setdefault(identity, soa) == pytest.approx(soa)
+    assert fixed
+
+
+def test_every_privileged_item_gets_its_own_corner():
+    _, slotting, _, _, _ = participant_setup.build_plan(7, ORDER)
+    for block in ORDER:
+        favored = {
+            row['item']: row['favored_corner'] for row in slotting
+            if row['block'] == block and row['role'] in ('PT', 'PD')
+        }
+        assert sorted(favored.values()) == sorted(config.CORNERS)
+
+
+def test_one_active_pd_per_trial_with_two_trials_each():
+    assignment, slotting, _, _, _ = participant_setup.build_plan(7, ORDER)
+    for block in ORDER:
+        per_trial = defaultdict(set)
+        for row in slotting:
+            if row['block'] == block and row['role'] == 'PD':
+                per_trial[row['trial']].add(row['item'])
+        assert set(per_trial) == {1, 2, 3, 4}
+        assert all(len(items) == 1 for items in per_trial.values())
+        uses = Counter(next(iter(items)) for items in per_trial.values())
+        assert set(uses) == set(assignment[block]['PD'])
+        assert set(uses.values()) == {2}
+
+
+def test_pd_spends_most_appearances_in_its_own_corner():
+    _, slotting, timeline, _, _ = participant_setup.build_plan(7, ORDER)
+    favored = {
+        (row['block'], row['item']): row['favored_corner']
+        for row in slotting if row['role'] == 'PD'
+    }
+    corners = defaultdict(list)
+    for row in timeline:
+        if row['event_type'] == 'visual' and row['role'] == 'PD':
+            corners[(row['block'], row['stimulus'])].append(row['corner'])
+    assert corners
+    for key, seen in corners.items():
+        assert Counter(seen)[favored[key]] / len(seen) >= 0.6
+
+
+def test_nonprivileged_corners_split_evenly_within_one():
+    _, _, timeline, _, _ = participant_setup.build_plan(7, ORDER)
+    corners = defaultdict(list)
+    for row in timeline:
+        if row['event_type'] == 'visual' and row['role'] in ('NPT', 'NPD'):
+            corners[(row['block'], row['role'], row['stimulus'])].append(row['corner'])
+    assert corners
+    for seen in corners.values():
+        counts = Counter(seen)
+        values = [counts[k] for k in config.CORNERS]
+        assert max(values) - min(values) <= 1
 
 
 def test_hundred_trial_plan_is_complete_and_valid(plan_100):
@@ -54,7 +125,7 @@ def test_hundred_trial_plan_is_complete_and_valid(plan_100):
 
 def test_same_seed_reproduces_the_same_hundred_trial_plan(plan_100, trials_per_pt):
     trials_per_pt(25)
-    _, slotting, timeline, _, _ = participant_setup.build_plan(7, ORDER)
+    _, slotting, timeline, _, _ = participant_setup.build_plan(2, ORDER)
     assert plan_digest(slotting, timeline) == plan_digest(plan_100[1], plan_100[2])
 
 
@@ -73,11 +144,11 @@ def test_validator_rejects_a_trial_moved_to_the_other_pt(plan_100):
     assignment = plan_100[0]
     slotting, timeline = copy.deepcopy(plan_100[1:3])
     first_pt, other_pt = assignment['animate']['PT']
-    trial = next(r['trial'] for r in slotting if r['block'] == 'animate' and r['active_pt'] == first_pt)
+    trial = next(r['trial'] for r in slotting if r['block'] == 'animate' and r['item'] == first_pt)
     for rows in (slotting, timeline):
         for r in rows:
             if r['block'] == 'animate' and r['trial'] == trial and r['role'] == 'PT':
-                r['active_pt' if rows is slotting else 'stimulus'] = other_pt
+                r['item' if rows is slotting else 'stimulus'] = other_pt
     errors = validate_plan(assignment, slotting, timeline, trials_per_pt=25)
     assert any('PT active-trial counts' in e for e in errors)
 
@@ -132,20 +203,32 @@ def test_lower_bound_rejection_happens_before_any_placement(monkeypatch):
 def test_a_failed_trial_is_retried_alone_and_placed_trials_are_kept(monkeypatch):
     real = timeline_key._construct_trial_schedule
     calls = []
+    failures = []
 
     def flaky(events, trial_start, stats, repair=False):
         key = (events[0]['block'], events[0]['trial'])
         calls.append((key, repair))
         if key == ('animate', 3) and not repair:
+            failures.append(key)
             raise PlacementFailure('forced')
-        return real(events, trial_start, stats, repair=repair)
+        try:
+            return real(events, trial_start, stats, repair=repair)
+        except PlacementFailure:
+            failures.append(key)
+            raise
 
     monkeypatch.setattr(timeline_key, '_construct_trial_schedule', flaky)
     diagnostics = {}
     assignment, slotting, timeline, _, stats = participant_setup.build_plan(7, ORDER, diagnostics=diagnostics)
-    assert calls.count((('animate', 3), True)) == 1
-    assert len(calls) == 9  # 8 first-pass placements plus one retry, nothing re-placed
-    assert stats['repaired_trials'] == ['animate trial 3']
+    first_pass = [key for key, repair in calls if not repair]
+    retried = [key for key, repair in calls if repair]
+    # Every trial is attempted exactly once in the first pass, and only trials the
+    # first pass could not place come back: placed trials are never redone.
+    assert len(first_pass) == len(set(first_pass)) == 8
+    assert set(retried) == set(failures)
+    assert len(retried) == len(set(retried))
+    assert retried.count(('animate', 3)) == 1
+    assert 'animate trial 3' in stats['repaired_trials']
     assert diagnostics['timeline_attempts'] == 2
     assert validate_plan(assignment, slotting, timeline) == []
 

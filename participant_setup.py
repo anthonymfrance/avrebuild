@@ -18,7 +18,7 @@ import config
 from plan_validator import validate_plan
 from session_io import config_snapshot, json_default, server_data_directory, sha256_file
 from slotting_key import build_slotting_key, write_slotting_key
-from stimulus_split import split_pool
+from stimulus_split import draw_favored_corners, split_pool
 from timeline_key import (
     PlacementFailure,
     build_timeline,
@@ -59,10 +59,11 @@ def build_plan(seed, block_order, count_ranges=None, diagnostics=None):
     split = split_pool(slotting_rng)
     assignment = MappingProxyType({block: split[block] for block in block_order})
     ranges = dict(count_ranges or {})
+    corner_plan = draw_favored_corners(assignment, slotting_rng)
     slotting_rows = prepare_slotting_rows(build_slotting_key(
-        slotting_rng, assignment,
+        slotting_rng, assignment, corner_plan,
         pt_count_range=ranges.get('PT', config.TRIAL_PT_RANGE),
-        npt_count_range=ranges.get('NPT', config.TRIAL_NPT_RANGE),
+        pd_count_range=ranges.get('PD', config.TRIAL_PD_RANGE),
     ))
     timeline, required, stats = build_timeline(
         slotting_rows, derive_rng(seed, 'timeline'), assignment, config.WINDOW_SIZE,
@@ -386,6 +387,7 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
             'config': config_snapshot(),
             'artifacts': {
                 'stimulus_assignment': 'stimulus_assignment.csv',
+                'corner_plan': 'corner_plan.csv',
                 'slotting_key': 'slotting_key.csv',
                 'timeline': 'timeline_key.csv',
                 'seed': 'seed.txt',

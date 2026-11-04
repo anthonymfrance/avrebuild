@@ -37,6 +37,7 @@ from config import (
     VISUAL_DURATION,
     VISUAL_ROLES,
 )
+from slotting_key import even_pile
 from stimulus_split import validate_stimulus_assignment
 
 
@@ -49,6 +50,8 @@ FIELDS = [
     'soa', 'response_window',
 ]
 ROLE_ORDER = ('PT', 'PD', 'NPT', 'NPD')
+# Roles the slotting key plans; the rest are sampled per trial.
+PRIVILEGED_ROLES = frozenset({'PT', 'PD'})
 RANGES = {
     'PT': TRIAL_PT_RANGE,
     'NPT': TRIAL_NPT_RANGE,
@@ -69,7 +72,7 @@ class PlacementFailure(RuntimeError):
 
 def prepare_slotting_rows(rows):
     """Normalize slotting rows in place (typed trial/slot, stimulus field) and check them."""
-    required = {'block', 'trial', 'role', 'slot_number', 'event_id', 'corner'}
+    required = {'block', 'trial', 'role', 'slot_number', 'event_id', 'corner', 'item'}
     if not rows or not required.issubset(rows[0]):
         raise ValueError(f'Slotting key must have rows and columns: {sorted(required)}')
     ids = [row['event_id'] for row in rows]
@@ -79,15 +82,12 @@ def prepare_slotting_rows(rows):
         row['trial'] = int(row['trial'])
         row['slot_number'] = int(row['slot_number'])
         row['role'] = row['role'].strip()
-        row['stimulus'] = (
-            row.get('active_pt', '').strip() if row['role'] == 'PT'
-            else row.get('npt_item', '').strip() if row['role'] == 'NPT'
-            else ''
-        )
-        if row['role'] not in TARGET_ROLES or not row['stimulus']:
-            raise ValueError(f"Unsupported role or missing stimulus in {row['event_id']}.")
+        row['stimulus'] = row.get('item', '').strip()
+        if row['role'] not in PRIVILEGED_ROLES or not row['stimulus']:
+            raise ValueError(f"Unsupported role or missing item in {row['event_id']}.")
         if row['corner'] not in CORNERS:
             raise ValueError(f"Invalid corner in slotting event {row['event_id']}.")
+        row.setdefault('favored_corner', '')
     return rows
 
 
@@ -135,44 +135,60 @@ def _event(block, trial, role, stimulus, slot, event_id, corner, soa=None):
 
 
 def _required_events(
-    slotting_rows, stimulus_assignment, rng, pt_soa_by_identity, trial_count, ranges,
+    slotting_rows, stimulus_assignment, rng, pt_soa_by_identity, pd_soa_by_identity,
+    trial_count, ranges,
 ):
     events = []
-    counts = Counter((row['block'], row['trial'], row['role']) for row in slotting_rows)
     blocks = list(dict.fromkeys(row['block'] for row in slotting_rows))
-    for block in blocks:
-        for trial in range(1, trial_count + 1):
-            for role in ('PT', 'NPT'):
-                count = counts[(block, trial, role)]
-                low, high = ranges[role]
-                if not low <= count <= high:
-                    raise ValueError(f'{block} trial {trial}: {role} count {count} outside {low}..{high}.')
     for row in slotting_rows:
         if row['stimulus'] not in stimulus_assignment[row['block']][row['role']]:
             raise ValueError(
                 f"{row['block']} trial {row['trial']} {row['event_id']}: "
                 f"{row['stimulus']} is absent from the persisted {row['role']} pool."
             )
+        if row['role'] == 'PT':
+            soa = pt_soa_by_identity[(row['block'], row['stimulus'])]
+        else:
+            soa = pd_soa_by_identity[(row['block'], row['stimulus'])]
         events.append(_event(
             row['block'], row['trial'], row['role'], row['stimulus'],
-            row['slot_number'], row['event_id'], row['corner'],
-            pt_soa_by_identity[(row['block'], row['stimulus'])] if row['role'] == 'PT' else None,
+            row['slot_number'], row['event_id'], row['corner'], soa,
         ))
 
+    # Non-privileged items stay randomly sampled per trial, as before. Only their
+    # corners are dealt from an even four-way budget, so each item still spreads
+    # across the keys without the slotting key having to plan them.
     trials = range(1, trial_count + 1)
     for block in blocks:
         pools = stimulus_assignment[block]
-        for trial in trials:
-            for role in ('PD', 'NPD'):
-                low, high = ranges[role]
-                for slot in range(1, rng.randint(low, high) + 1):
-                    item = rng.choice(pools[role])
-                    corner = rng.choice(CORNERS)
-                    soa = rng.uniform(PD_SOA_MIN, PD_SOA_MAX) if role == 'PD' else None
+        for role in ('NPT', 'NPD'):
+            low, high = ranges[role]
+            trial_items = {
+                trial: rng.choices(pools[role], k=rng.randint(low, high))
+                for trial in trials
+            }
+            appearances = defaultdict(list)
+            for trial, items in trial_items.items():
+                for slot, item in enumerate(items, start=1):
+                    appearances[item].append((trial, slot))
+            for item, slots in appearances.items():
+                pile, _counts = even_pile(len(slots), rng)
+                for (trial, slot), corner in zip(slots, pile):
                     events.append(_event(
                         block, trial, role, item, slot,
-                        f'{block}_trial_{trial}_{role}_{slot}', corner, soa,
+                        f'{block}_trial_{trial}_{role}_{slot}', corner, None,
                     ))
+
+    counts = Counter((event['block'], event['trial'], event['role']) for event in events)
+    for block in blocks:
+        for trial in range(1, trial_count + 1):
+            for role in ('PT', 'PD', 'NPT', 'NPD'):
+                count = counts[(block, trial, role)]
+                low, high = ranges[role]
+                if not low <= count <= high:
+                    raise ValueError(
+                        f'{block} trial {trial}: {role} count {count} outside {low}..{high}.'
+                    )
     return events
 
 
@@ -672,20 +688,20 @@ def validate_timeline(
                     hold_start - sound['global_onset'], sound['soa']
                 ):
                     raise ValueError(f"{visual['block']} trial {visual['trial']} {visual['event_id']}: invalid SOA.")
-    pt_soa_by_identity = {}
+    soa_by_identity = {}
     for visual in visuals:
-        if visual['role'] != 'PT':
+        if visual['role'] not in AUDIO_ROLES:
             continue
         sound = next(row for row in sounds if row['source_event_id'] == visual['event_id'])
-        identity = (visual['block'], visual['stimulus'])
-        if identity in pt_soa_by_identity and not math.isclose(
-            pt_soa_by_identity[identity], sound['soa']
+        identity = (visual['role'], visual['block'], visual['stimulus'])
+        if identity in soa_by_identity and not math.isclose(
+            soa_by_identity[identity], sound['soa']
         ):
             raise ValueError(
                 f"{visual['block']} trial {visual['trial']} {visual['event_id']}: "
-                f'PT SOA changed for identity {visual["stimulus"]!r}.'
+                f'{visual["role"]} SOA changed for identity {visual["stimulus"]!r}.'
             )
-        pt_soa_by_identity[identity] = sound['soa']
+        soa_by_identity[identity] = sound['soa']
     return True
 
 
@@ -739,10 +755,20 @@ def build_timeline(
     pt_soa_by_identity = {
         identity: rng.uniform(PT_SOA_MIN, PT_SOA_MAX) for identity in pt_identities
     }
-    # _required_events assigns each PD instance its own SOA once; the resulting
-    # required-event list is reused unchanged across all placement retries.
+    # PD identities keep one SOA for the whole experiment too: one draw per
+    # (block, PD item), frozen before any event exists, so no placement retry
+    # can change it.
+    pd_identities = list(dict.fromkeys(
+        (block, item) for block in blocks for item in stimulus_assignment[block]['PD']
+    ))
+    pd_soa_by_identity = {
+        identity: rng.uniform(PD_SOA_MIN, PD_SOA_MAX) for identity in pd_identities
+    }
+    # The required-event list is built once and reused unchanged across all
+    # placement retries.
     required = _required_events(
-        slotting_rows, stimulus_assignment, rng, pt_soa_by_identity, trial_count, ranges,
+        slotting_rows, stimulus_assignment, rng, pt_soa_by_identity, pd_soa_by_identity,
+        trial_count, ranges,
     )
     required_by_trial = defaultdict(list)
     for event in required:

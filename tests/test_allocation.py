@@ -306,7 +306,7 @@ def test_failure_retries_with_new_seed_and_records_failed_seed(tmp_path, monkeyp
     assert metadata['failed_plan_seeds'] == [100]
     assert int((participant_dir / 'seed.txt').read_text()) == 200
     assert {path.name for path in participant_dir.iterdir()} == {
-        'seed.txt', 'slotting_key.csv', 'stimulus_assignment.csv',
+        'seed.txt', 'slotting_key.csv', 'stimulus_assignment.csv', 'corner_plan.csv',
         'timeline_key.csv', 'participant_metadata.json',
     }
     stored = json.loads((participant_dir / 'participant_metadata.json').read_text())

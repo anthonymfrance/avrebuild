@@ -13,7 +13,13 @@ import csv
 from pathlib import Path
 from types import MappingProxyType
 
-from config import PD_COUNT_PER_BLOCK, PT_COUNT_PER_BLOCK, TRIALS_PER_PT, VISUAL_ROLES
+from config import (
+    CORNERS,
+    PD_COUNT_PER_BLOCK,
+    PT_COUNT_PER_BLOCK,
+    TRIALS_PER_PT,
+    VISUAL_ROLES,
+)
 
 ANIMATE = ['cat', 'frog', 'duck', 'cow', 'rooster', 'dog', 'horse', 'lion', 'pig', 'elephant']
 INANIMATE = ['camera', 'door', 'phone', 'toilet', 'clock', 'car', 'wineglass', 'helicopter', 'motorcycle', 'ship']
@@ -94,8 +100,32 @@ def write_stimulus_assignment(path, assignment):
     return path
 
 
-def pt_sequence(pts, rng):
-    """Shuffle an equal number of active trials for each PT."""
-    sequence = [pt for pt in pts for _ in range(TRIALS_PER_PT)]
+def active_sequence(items, rng):
+    """Shuffle an equal number of active trials for each PT or PD."""
+    sequence = [item for item in items for _ in range(TRIALS_PER_PT)]
     rng.shuffle(sequence)
     return sequence
+
+
+def draw_favored_corners(assignment, rng):
+    """Shuffle the four corners across each block's two PTs and two PDs.
+
+    A privileged item is a PT in one block and absent from the other, or a PD in
+    one block and absent from the other, so one shuffle per block gives every
+    privileged item exactly one favoured corner for the whole experiment and
+    leaves each corner serving one PT and one PD.
+    """
+    plan = {}
+    for block, roles in assignment.items():
+        privileged = list(roles['PT']) + list(roles['PD'])
+        if len(privileged) != len(CORNERS):
+            raise ValueError(
+                f'{block}: {len(privileged)} privileged items, but the four-way '
+                f'corner rule needs exactly {len(CORNERS)}.'
+            )
+        corners = list(CORNERS)
+        rng.shuffle(corners)
+        plan[block] = dict(zip(privileged, corners))
+    return MappingProxyType({
+        block: MappingProxyType(mapping) for block, mapping in plan.items()
+    })
