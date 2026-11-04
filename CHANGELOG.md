@@ -3,6 +3,23 @@
 Timing is PTB software-reported only; there is no microphone, photodiode, or loopback measurement
 (the metadata note "PTB software-reported timing, no physical measurement" is kept).
 
+## 0.5 s stimulus audio
+
+- **Runtime assets are 0.5 s.** `20_stimuli/*/obj_snds/_cleaned_0p5/snd_*.wav` are 48 kHz,
+  stereo, 16-bit and exactly 24 000 frames, cut from the curated 1.0 s excerpts in `_cleaned/`,
+  which are kept for A/B listening. `stimulus_paths` now resolves sounds to the new folder, so the
+  plan's `SOUND_DUR = 0.5` and the files agree. `tests/test_load_timeline.py` passes again; the
+  1.0 s duration mismatch was the last known failing test.
+- **Which half-second.** Start at the last quiet-to-loud boundary (10 ms blocks, quieter than
+  -40 dBFS then louder than -30 dBFS) that has the most energy, falling back to the loudest
+  window when no boundary yields 60% of it. 3 ms raised-cosine fade in, 15 ms fade out. Nine of the
+  twenty excerpts start 235-500 ms in, where the curated 1.0 s excerpt holds its body late.
+- **Level.** -20 dBFS RMS measured over the played window, with a -1 dBFS sample-peak guard.
+  Nineteen files land at -20.00 dBFS RMS; `inanimate/snd_7` hits the guard at -21.53 dBFS. The
+  1.0 s excerpts they came from spanned -27.4 to -20.0 dBFS RMS and -12.7 to -1.0 dBFS peak.
+- **Not in the repo.** The cutter was a one-off numpy/`wave` script; the window and level rules
+  above are the whole recipe. No `config.py` value changed, so existing plans still load.
+
 ## Corner rule and fixed leads (`477978f`)
 
 - **One fixed lead per sound item.** PT already kept one SOA per stimulus; PD now does too.

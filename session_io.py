@@ -96,7 +96,7 @@ def stimulus_paths(root, block, role, stimulus):
         raise ValueError(f'{stimulus!r} is not in the {category} stimulus pool.') from exc
     root = Path(root)
     image = root / '20_stimuli' / category / 'objects_numbered' / '_normalized' / f'obj_{number}_bw.png'
-    sound = root / '20_stimuli' / category / 'obj_snds' / '_cleaned' / f'snd_{number}.wav'
+    sound = root / '20_stimuli' / category / 'obj_snds' / '_cleaned_0p5' / f'snd_{number}.wav'
     return image, sound
 
 
