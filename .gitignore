@@ -1,10 +1,10 @@
 __pycache__/
 *.py[cod]
 data/
-__pycache__/
 .pytest_cache/
 build/
 .Rhistory
+.freebuff-backup/
 
 # audition output from tools/trim_stimuli.py --out
 20_stimuli/_trim_candidates/
