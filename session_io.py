@@ -96,7 +96,9 @@ def stimulus_paths(root, block, role, stimulus):
         raise ValueError(f'{stimulus!r} is not in the {category} stimulus pool.') from exc
     root = Path(root)
     image = root / '20_stimuli' / category / 'objects_numbered' / '_normalized' / f'obj_{number}_bw.png'
-    sound = root / '20_stimuli' / category / 'obj_snds' / '_cleaned_0p5' / f'snd_{number}.wav'
+    # _cleaned holds the 1 s recordings; _cleaned_0.5 is the 0.5 s re-cut the
+    # timeline schedules (tools/trim_stimuli.py writes it).
+    sound = root / '20_stimuli' / category / 'obj_snds' / '_cleaned_0.5' / f'snd_{number}.wav'
     return image, sound
 
 

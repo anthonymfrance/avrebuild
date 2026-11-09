@@ -5,23 +5,27 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
 
 ## 0.5 s stimulus audio
 
-- **Runtime assets are 0.5 s.** `20_stimuli/*/obj_snds/_cleaned_0p5/snd_*.wav` are 48 kHz,
+- **Runtime assets are 0.5 s.** `20_stimuli/*/obj_snds/_cleaned_0.5/snd_*.wav` are 48 kHz,
   stereo, 16-bit and exactly 24 000 frames, cut from the curated 1.0 s excerpts in `_cleaned/`,
-  which are kept for A/B listening. `stimulus_paths` now resolves sounds to the new folder, so the
-  plan's `SOUND_DUR = 0.5` and the files agree. `tests/test_load_timeline.py` passes again; the
-  1.0 s duration mismatch was the last known failing test.
-- **Which half-second.** Start at the last quiet-to-loud boundary (10 ms blocks, quieter than
-  -40 dBFS then louder than -30 dBFS) that has the most energy, falling back to the loudest
-  window when no boundary yields 60% of it. 3 ms raised-cosine fade in, 15 ms fade out. Nine of the
-  twenty excerpts start 235-500 ms in, where the curated 1.0 s excerpt holds its body late.
-- **Level.** Matched by K-weighted loudness over the played window (BS.1770 K-weighting, mean
-  square over the 0.5 s) to -19.85, the median of the set, under a -1 dBFS sample-peak ceiling.
-  Equal -20 dBFS RMS left an 8.08 dB spread in perceived level, because a door thud and a clink
-  have very different crest factors; loudness matching brings the set to 1.35 dB. Nineteen of the
-  twenty land exactly on the target, and `clock` is the only cue the ceiling holds back (-21.19).
-  Gains run from -6.97 dB (`elephant`) to +5.40 dB (`door`).
-- **Not in the repo.** The cutter was a one-off numpy/`wave` script; the window and level rules
-  above are the whole recipe. No `config.py` value changed, so existing plans still load.
+  which are kept for A/B listening (`tools/ab_audio.sh` plays each pair). `stimulus_paths` resolves
+  sounds to that folder, so the plan's `SOUND_DUR = 0.5` and the files agree.
+  `tests/test_load_timeline.py` passes again; the 1.0 s duration mismatch was the last known
+  failing test.
+- **Which half-second.** `tools/trim_stimuli.py --policy hybrid --install`: start each clip on its
+  own attack, and for a slow swell put the envelope peak 0.40 s into the clip. 5 ms fade in, 40 ms
+  fade out, so a cut through the waveform cannot click. The tool measures the `onset`, `peak` and
+  `loudest` windows beside the shipped `hybrid` one; `--report` re-runs the comparison.
+- **Level.** Matched on the loudest 200 ms K-weighted level (BS.1770) to -17.5 LUFS under a
+  -1 dBFS sample-peak ceiling, which brings a 9.4 dB spread in the 1 s set down to 2.38 dB
+  measured on the delivered files (integrated spread 4.20 dB). No `config.py` value changed, so
+  existing plans still load.
+- **A second 0.5 s cut was removed.** `_cleaned_0p5` started each clip at the last quiet-to-loud
+  boundary and matched K-weighted level over the whole window. Measured on its own files that
+  matching did not hold: 8 of 20 cues sat within 0.02 dB of the -19.85 target, integrated spread
+  4.39 dB and loudest-200 ms spread 6.17 dB, and 14 of 20 clips ended within 25 dB of their own
+  peak, so the decay was cut short. The two sets share the same half-second on 15 of 20 cues. Its
+  one advantage survives as a follow-up: on `animate/5`, `animate/8`, `animate/9` and `inanimate/2`
+  a boundary start gives a real attack where the hybrid peak anchor begins inside a swell.
 
 ## Corner rule and fixed leads (`477978f`)
 
@@ -394,3 +398,43 @@ No participant-facing behavior changed: `config.py`, `experiment.py`, `trial_run
 - **`tests/test_session_timing.py`** covers the model arithmetic, the solver and its quantization,
   the cadence table, prevalence, scenario completeness, and pilot calibration on a synthetic
   session folder.
+
+## 2026-11-03 half-second stimulus sounds
+
+- **The 1 s sounds are re-cut to the 0.5 s the timeline schedules.** `config.SOUND_DUR`
+  has been 0.5 since `c629e0d`, `timeline_key` writes 0.5 into every sound row, and
+  `session_io.load_timeline` rejects a WAV that differs by more than 2 ms — so the branch
+  could not load any plan (`tests/test_load_timeline.py` failed with *"WAV for toilet lasts
+  1.0000s but the plan schedules 0.5000s"*). The new set lives in
+  `20_stimuli/*/obj_snds/_cleaned_0.5` (20 files, 24 000 frames, 48 kHz stereo);
+  `_cleaned` keeps the 1 s recordings untouched and `session_io.stimulus_paths` reads the
+  new folder.
+- **Where the cut goes** (`tools/trim_stimuli.py`, `--report` prints the full table). Every
+  `_cleaned` file is a 1 s excerpt of the longer recording beside it, and 17 of 20 carry
+  energy past 0.5 s, so every policy loses something. Chosen `hybrid`: start at the natural
+  attack, but for slow-attack swells move the window so the envelope peak sits 0.40 s in
+  (a 10-90 % rise time above 0.25 s marks a swell). Two dense textures (ani 7, ina 9) are
+  pinned to the onset cut in `OVERRIDES`, because their loudest 10 ms frame is a
+  fluctuation rather than a swell, and the peak anchor would start them mid-texture.
+  The six swells (ani 4, ani 10, ina 8, ina 10, and the more compact ina 2, ina 4) keep
+  69-84 % of their energy instead of the 12-26 % the plain onset cut would keep.
+- **Every clip has a 5 ms fade-in and a 40 ms fade-out baked in**, so a cut through a
+  sounding waveform cannot click; PsychoPy plays the file as-is and has no envelope stage.
+- **Loudness is matched on the loudest 200 ms K-weighted level** (BS.1770 pre-filter) to
+  -17.5 dB, not on RMS: the 1 s set was already at -20 dBFS RMS but still spanned 9.4 dB of
+  momentary loudness, because a 100 ms click and a sustained texture of equal RMS do not
+  sound equally loud. The re-cut set spans 2.4 dB. ina 5 (-19.9) and ina 7 (-18.3) are held
+  1.7-2.4 dB under target by the -1 dBFS peak ceiling — both are already at full scale in
+  the source, and limiting them would distort rather than raise them.
+- **No config constant was added**; the folder name lives in `session_io.stimulus_paths`
+  and `tools/trim_stimuli.py`, next to the existing `_normalized` image path.
+- Audition scratch output (`--out`, the HTML page with all three cut policies) is written
+  to `20_stimuli/_trim_candidates/`, which is git-ignored.
+
+### Verify in pilot
+- The eight swells (ani 4, ani 10, ina 2, ina 4, ina 8, ina 10 and the two pinned textures)
+  still read as their object over headphones and do not sound like a cut-off ramp.
+- ina 5 and ina 7 are audibly a little quieter than the rest but not weak next to the
+  background noise; if they are, the ceiling has to move rather than the target.
+- Sound onsets still line up with `realized_soa_seconds` near 0, now that every clip starts
+  at its attack instead of carrying pre-onset recording noise.

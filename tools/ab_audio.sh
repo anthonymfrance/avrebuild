@@ -47,7 +47,7 @@ for block in "${blocks[@]}"; do
   for index in "${!names[@]}"; do
     number=$((index + 1))
     one="20_stimuli/$block/obj_snds/_cleaned/snd_$number.wav"
-    half="20_stimuli/$block/obj_snds/_cleaned_0p5/snd_$number.wav"
+    half="20_stimuli/$block/obj_snds/_cleaned_0.5/snd_$number.wav"
     if [ ! -f "$one" ] || [ ! -f "$half" ]; then
       echo "missing audio: $one or $half" >&2
       exit 1

@@ -5,3 +5,6 @@ __pycache__/
 .pytest_cache/
 build/
 .Rhistory
+
+# audition output from tools/trim_stimuli.py --out
+20_stimuli/_trim_candidates/
