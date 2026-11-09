@@ -186,6 +186,24 @@ def test_mark_wording_follows_the_configured_shape(monkeypatch):
         assert screens.mark_flash_phrase() == f'the {name} flashes green'
 
 
+def test_mark_location_phrase_follows_the_configured_shape(monkeypatch):
+    for shape, name in screens.MARK_NAMES.items():
+        monkeypatch.setattr(config, 'FIXATION_SHAPE', shape)
+        phrase = screens.mark_location_phrase()
+        if shape == 'border':
+            assert phrase == 'the frame around the edge of the screen'
+        else:
+            assert phrase == f'the {name} in the middle of the screen'
+
+
+def test_instructions_let_the_eyes_wander_and_call_the_mark_feedback_only():
+    page = next(page for page in screens.INSTRUCTION_PAGES if 'eyes may wander' in page)
+    assert screens.mark_location_phrase() in page
+    assert 'You do not need to watch' in page
+    assert 'not something to concentrate on' in page
+    assert 'Press SPACE to continue.' in page
+
+
 def test_instruction_and_scoring_pages_name_the_configured_mark():
     """The pages read the mark from config instead of a hardcoded word."""
     phrase = screens.mark_flash_phrase()

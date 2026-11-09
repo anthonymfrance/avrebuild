@@ -95,6 +95,13 @@ def mark_flash_phrase():
     return f'the {MARK_NAMES[mark_shape()]} flashes green'
 
 
+def mark_location_phrase():
+    """Where the mark sits, in words that fit the configured shape."""
+    if mark_shape() == 'border':
+        return 'the frame around the edge of the screen'
+    return f'the {MARK_NAMES[mark_shape()]} in the middle of the screen'
+
+
 # The instructions and the scoring rules are shown one page at a time: each page
 # is short enough to read in one look and waits for SPACE, so the participant
 # never faces a full wall of text. Every page carries its own advance line.
@@ -118,6 +125,13 @@ INSTRUCTION_PAGES = (
     'explains the difference.\n\n'
     'If you react to the wrong corner or to the wrong type of picture you gain a\n'
     'false alarm. Aim to keep these low.\n\n'
+    'Press SPACE to continue.',
+
+    # Eyes may wander: the mark is feedback, not a fixation task. This comes
+    # after the hit page so the flash has already been described.
+    f'You do not need to watch {mark_location_phrase()}. Your eyes may wander over\n'
+    'the picture while you watch it. That mark only flashes when a response is\n'
+    'correct: it is feedback, not something to concentrate on.\n\n'
     'Press SPACE to continue.',
 )
 
