@@ -222,6 +222,18 @@ def test_an_unknown_mark_shape_is_rejected(monkeypatch):
         screens.center_mark(FakeWindow(), MarkVisual)
 
 
+def test_the_helicopter_is_drawn_larger_without_moving_the_layout_footprint():
+    scale = config.STIMULUS_SIZE_SCALE['helicopter']
+    assert screens.stimulus_size('helicopter') == (
+        config.IMAGE_SIZE[0] * scale, config.IMAGE_SIZE[1] * scale,
+    )
+    assert screens.stimulus_size('car') == config.IMAGE_SIZE
+    # Positions are sampled for the unscaled IMAGE_SIZE footprint, and the
+    # helicopter's ink covers 80% of its canvas, so above 1.25 the drawn
+    # picture could leave the area its position was checked against.
+    assert scale <= 1.25
+
+
 def test_stimulus_inventory_shows_every_item_at_study_size_and_plays_sounds():
     class FakeImage:
         def __init__(self, window, image, size=None, **kwargs):
@@ -265,7 +277,8 @@ def test_stimulus_inventory_shows_every_item_at_study_size_and_plays_sounds():
         for index in range(10):
             cue = FakeSound(clock)
             sounds.append(cue)
-            items.append((f'item{index}', FakeImage(None, f'{index}.png'), cue))
+            name = 'helicopter' if label == 'OBJECTS' and index == 0 else f'item{index}'
+            items.append((name, FakeImage(None, f'{index}.png'), cue))
         groups.append((label, items))
 
     keyboard = ScriptedKeyboard({1: ['p'], 800: ['space']})
@@ -273,9 +286,11 @@ def test_stimulus_inventory_shows_every_item_at_study_size_and_plays_sounds():
         FakeWindow(), keyboard, InventoryVisual, clock, groups,
     ) is True
 
+    names = [name for _label, items in groups for name, _image, _cue in items]
     images = [image for _label, items in groups for _name, image, _cue in items]
     assert len(images) == 20
-    assert all(image.size == config.IMAGE_SIZE for image in images)
+    assert all(image.size == screens.stimulus_size(name) for name, image in zip(names, images))
+    assert screens.stimulus_size('helicopter') != config.IMAGE_SIZE
     assert len({image.pos[0] for image in images}) == 5
     top = {image.pos[1] for _label, items in groups[:1] for _name, image, _cue in items}
     bottom = {image.pos[1] for _label, items in groups[1:] for _name, image, _cue in items}
@@ -316,6 +331,23 @@ def test_stimulus_stack_layers_every_image_at_the_centre():
     assert screens.stimulus_stack(
         FakeWindow(), FakeKeyboard(['escape']), FakeVisual, items,
     ) is False
+
+
+def test_stimulus_stack_draws_the_helicopter_at_its_scaled_size():
+    class StackImage:
+        def __init__(self):
+            self.pos = (0, 0)
+            self.size = None
+            self.opacity = 1.0
+
+        def draw(self):
+            pass
+
+    image = StackImage()
+    assert screens.stimulus_stack(
+        FakeWindow(), FakeKeyboard(['space']), FakeVisual, [('helicopter', image)],
+    ) is True
+    assert image.size == screens.stimulus_size('helicopter')
 
 
 def test_rest_break_counts_down_and_space_ends_it_early():

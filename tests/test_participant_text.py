@@ -33,14 +33,16 @@ def test_block_wording_is_not_a_config_snapshot_value():
 
 
 def test_center_mark_is_presentation_only_in_the_config_snapshot():
-    """Switching the mark shape must not refuse a plan made with another one.
+    """Switching the mark shape or a draw scale must not refuse an existing plan.
 
-    Only the two constants added for the option are left out: the mark values
-    that predate it stay study parameters, so no existing plan's stored snapshot
-    changed when it was added.
+    Only presentation-only constants are left out; the values that predate them
+    stay study parameters, so no existing plan's stored snapshot changed when
+    they were added.
     """
     snapshot = session_io.config_snapshot()
-    assert session_io.PRESENTATION_ONLY == {'FIXATION_SHAPE', 'FIXATION_BORDER_WIDTH'}
+    assert session_io.PRESENTATION_ONLY == {
+        'FIXATION_SHAPE', 'FIXATION_BORDER_WIDTH', 'STIMULUS_SIZE_SCALE',
+    }
     assert not session_io.PRESENTATION_ONLY & set(snapshot)
     assert {'FIXATION_COLOR', 'FIXATION_HIT_COLOR', 'FIXATION_FLASH_DUR'} <= set(snapshot)
 
