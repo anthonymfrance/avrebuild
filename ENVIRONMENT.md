@@ -10,6 +10,7 @@ match.
 sudo apt-get update
 sudo apt-get install -y \
   zenity \
+  xdg-utils \
   pipewire pipewire-pulse pipewire-jack wireplumber \
   pulseaudio-utils \
   x11-xserver-utils \
@@ -23,6 +24,7 @@ Why each is required:
 | Package | Why |
 | --- | --- |
 | `zenity` | `preflight.sh` GUI dialogs |
+| `xdg-utils` | `xdg-open` opens the consent form and the participant log in the default browser |
 | `pipewire`, `pipewire-pulse`, `wireplumber` | Default Ubuntu audio stack; drives the analog headphone sink |
 | `pipewire-jack` | Ships `pw-jack` and the PipeWire JACK `libjack.so`; **this one is easy to miss** — it is *not* a dependency of the base PipeWire install. Without it the PTB audio-route check fails and preflight will not pass. |
 | `pulseaudio-utils` | `pactl` (reads/clears the headphone L/R balance) |

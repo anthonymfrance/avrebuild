@@ -446,3 +446,29 @@ No participant-facing behavior changed: `config.py`, `experiment.py`, `trial_run
   background noise; if they are, the ceiling has to move rather than the target.
 - Sound onsets still line up with `realized_soa_seconds` near 0, now that every clip starts
   at its attack instead of carrying pre-onset recording noise.
+
+## 2026-11-09 preflight browser gates
+
+- **Consent, participant log, and browser closing happen before the experiment window opens.**
+  They run in `preflight.sh` after the debug/participant choice and before the report is written,
+  because the browser cannot be used from inside the fullscreen PsychoPy window while the reserved
+  PID is already known there. Preflight shows the PID in its own dialog, opens
+  `PREFLIGHT_CONSENT_URL`, waits for `Consent completed`, opens `PREFLIGHT_PARTICIPANT_LOG_URL`,
+  waits for `Added to the log`, then carries the reminder to close the browser, which must be
+  confirmed so the fullscreen window is not opened behind it. The two URLs live in
+  `preflight_config.sh` beside the lab-server settings.
+- **The report records every answer.** `consent_form=`, `participant_log=`, `browser_close=`
+  (`completed`/`confirmed`, `declined`, `skipped`, `not_requested` or `not_configured`) and
+  `browser_urls_opened=` are written to the preflight report and reach the session metadata, so a
+  session can be audited without asking the RA what was done.
+- **Debug runs can skip the block.** Each gate carries a `Skip (debug)` button (zenity cannot bind
+  a bare letter key) that ends the remaining browser steps for that run. Participant runs have only
+  `No, stop`, which exits before any participant folder exists, so the reserved ID is not consumed.
+- `xdg-open` is now a hard dependency (`xdg-utils`, added to the apt list in ENVIRONMENT.md).
+- **No `config.py` value changed**, so existing plans still load.
+
+### Verify in pilot
+- Both URLs open in the default browser, in that order, on the lab machine and on a fresh device
+  that has only the apt list in ENVIRONMENT.md installed.
+- The PID in the first dialog matches the folder created for the session.
+- A debug run can skip every gate; a participant run is offered no skip button.

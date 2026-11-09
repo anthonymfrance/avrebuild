@@ -10,6 +10,10 @@ if ! command -v zenity >/dev/null 2>&1; then
   echo 'Zenity is required for the graphical preflight. Install zenity, then run this launcher again.' >&2
   exit 1
 fi
+if ! command -v xdg-open >/dev/null 2>&1; then
+  echo 'xdg-open is required to open the consent form and the participant log. Install xdg-utils, then run this launcher again.' >&2
+  exit 1
+fi
 gui_error() { zenity --error --title='AV study preflight' --width=520 --text="$1"; }
 gui_info() { zenity --info --title='AV study preflight' --width=520 --text="$1"; }
 gui_yes() { zenity --question --title='AV study preflight' --width=560 --ok-label='Yes, continue' --cancel-label='No, stop' --text="$1"; }
@@ -17,6 +21,26 @@ gui_yes() { zenity --question --title='AV study preflight' --width=560 --ok-labe
 # debug run by mistake. Participant is the default and the cancel button, so
 # Enter or closing the dialog never enables debug.
 gui_debug_choice() { zenity --question --title='AV study preflight' --width=560 --ok-label='Debug run' --cancel-label='Participant run' --default-cancel --text="$1"; }
+# The browser steps are gates: the RA confirms the outside action before the
+# session continues. Debug runs may skip the remaining steps; a participant run
+# has no skip button, only a stop. Returns 0 confirmed, 2 skip, 1 stop.
+gui_browser_gate() {
+  local ok_label="$1" text="$2" answer='' status=0
+  local -a extra=()
+  if [[ "${debug_overlay:-false}" == true ]]; then
+    extra=(--extra-button='Skip (debug)')
+  fi
+  answer="$(zenity --question --title='AV study preflight' --width=600 \
+    --ok-label="$ok_label" --cancel-label='No, stop' ${extra[@]+"${extra[@]}"} \
+    --text="$text" 2>/dev/null)" || status=$?
+  if (( status == 0 )); then
+    return 0
+  fi
+  if [[ "$answer" == 'Skip (debug)' ]]; then
+    return 2
+  fi
+  return 1
+}
 
 if [[ ! -d "$study_dir" || ! -f "$study_dir/config.py" || ! -f "$study_dir/experiment.py" ]]; then
   gui_error "Study directory is missing config.py or experiment.py:
@@ -312,6 +336,93 @@ else
   debug_overlay=false
 fi
 
+# The consent form and the participant log live in the browser, which cannot be
+# used from inside the fullscreen PsychoPy window. These steps run here: after
+# the debug choice (a debug run may skip them) and before the report is written
+# (so the report records what the RA confirmed). No participant folder exists
+# yet, so stopping at a gate does not consume the reserved ID.
+consent_form='not_requested'
+participant_log='not_requested'
+browser_close='not_requested'
+browser_urls_opened=''
+browser_gate_status=0
+
+zenity --info --title='AV study preflight' --width=600 \
+  --text="Participant ID for this session:
+
+        $participant_id
+
+Use this ID on the consent form and in the participant log." \
+  >/dev/null || { rm -f -- "$report"; echo 'Preflight window closed.'; exit 1; }
+
+open_in_browser() {
+  [[ -n "$1" ]] || return 0
+  xdg-open "$1" >/dev/null 2>&1 &
+  browser_urls_opened+="${browser_urls_opened:+ }$1"
+}
+
+browser_gate() {
+  gui_browser_gate "$1" "$2" && browser_gate_status=0 || browser_gate_status=$?
+}
+
+stop_at_browser_gate() {
+  rm -f -- "$report"
+  gui_info "The session was stopped at the $1 step. No participant folder was created; run preflight again when the participant is ready." || true
+  exit 1
+}
+
+if [[ -z "${PREFLIGHT_CONSENT_URL:-}" || -z "${PREFLIGHT_PARTICIPANT_LOG_URL:-}" ]]; then
+  consent_form='not_configured'
+  participant_log='not_configured'
+  browser_close='not_configured'
+else
+  open_in_browser "$PREFLIGHT_CONSENT_URL"
+  browser_gate 'Consent completed' "The consent form was opened in the default browser.
+
+Ask the participant to complete it, then confirm here.
+
+Participant: $participant_id"
+  case "$browser_gate_status" in
+    0) consent_form='completed' ;;
+    2) consent_form='skipped'; participant_log='skipped'; browser_close='skipped' ;;
+    *) consent_form='declined' ;;
+  esac
+  if [[ "$consent_form" == 'declined' ]]; then
+    stop_at_browser_gate 'consent'
+  fi
+
+  if [[ "$consent_form" == 'completed' ]]; then
+    open_in_browser "$PREFLIGHT_PARTICIPANT_LOG_URL"
+    browser_gate 'Added to the log' "The participant log was opened in the default browser.
+
+Add $participant_id to the log, then confirm here."
+    case "$browser_gate_status" in
+      0) participant_log='confirmed' ;;
+      2) participant_log='skipped'; browser_close='skipped' ;;
+      *) participant_log='declined' ;;
+    esac
+    if [[ "$participant_log" == 'declined' ]]; then
+      stop_at_browser_gate 'participant-log'
+    fi
+  fi
+
+  if [[ "$participant_log" == 'confirmed' ]]; then
+    browser_gate 'Browser closed' "Remember to close your browser before the study starts.
+
+The experiment opens a fullscreen window, so close or hide every browser window first.
+
+Participant: $participant_id"
+    case "$browser_gate_status" in
+      0) browser_close='confirmed' ;;
+      2) browser_close='skipped' ;;
+      *) browser_close='declined' ;;
+    esac
+    if [[ "$browser_close" == 'declined' ]]; then
+      stop_at_browser_gate 'browser'
+    fi
+  fi
+fi
+
 # Written here rather than with the checklist above so the saved report (and the
 # session metadata parsed from it) records whether the debug overlay ran.
 {
@@ -322,6 +433,8 @@ fi
   printf 'system_volume_percent=%s\nsystem_volume_actual=%s\nsystem_volume_status=%s\n' "$system_volume" "$system_volume_actual" "$system_volume_status"
   printf 'audio_balance=%s\naudio_balance_status=%s\n' "${audio_balance:-unknown}" "$audio_balance_status"
   printf 'debug_overlay=%s\n' "$debug_overlay"
+  printf 'consent_form=%s\nparticipant_log=%s\nbrowser_close=%s\n' "$consent_form" "$participant_log" "$browser_close"
+  printf 'browser_urls_opened=%s\n' "$browser_urls_opened"
   printf 'server_mounted=%s\n' "$([[ -n "$server_root" && -w "$server_root" ]] && printf true || printf false)"
   [[ -z "$server_root" ]] || printf 'server_root=%s\nserver_data_path=%s\n' "$server_root" "$PREFLIGHT_SERVER_DATA_PATH"
   printf '\nConnected display modes:\n%s\n' "$display_info"

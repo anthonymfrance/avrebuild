@@ -6,6 +6,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +15,8 @@ import config
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CONSENT_URL = 'https://example.test/consent'
+PARTICIPANT_LOG_URL = 'https://example.test/log'
 
 
 def executable(path, content):
@@ -20,8 +24,12 @@ def executable(path, content):
     path.chmod(0o755)
 
 
-@pytest.mark.parametrize('mounted,plan_created', [(True, False), (False, False), (True, True)])
-def test_launcher_uses_final_storage_roots_and_preserves_failure_log(tmp_path, mounted, plan_created):
+def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip_gates=False):
+    """Run preflight.sh in an isolated study directory with fake system commands.
+
+    ``debug=False`` makes the fake zenity choose the participant run, and
+    ``skip_gates=True`` makes it press the skip button whenever one is offered.
+    """
     study = tmp_path / 'study'
     study.mkdir()
     # Real allocation modules and settings, but all participant data is isolated.
@@ -42,17 +50,24 @@ def test_launcher_uses_final_storage_roots_and_preserves_failure_log(tmp_path, m
     commands.mkdir()
     dialogs = tmp_path / 'dialogs.jsonl'
     pactl_log = tmp_path / 'pactl.jsonl'
+    browser_log = tmp_path / 'browser.jsonl'
     capture = tmp_path / 'runner.json'
     expected_volume = f'{config.SYSTEM_VOLUME_PERCENT}%'
     executable(commands / 'zenity', f'''#!{sys.executable}
 import json, sys
+args = sys.argv[1:]
 with open({str(dialogs)!r}, 'a') as output:
-    output.write(json.dumps(sys.argv[1:]) + '\\n')
+    output.write(json.dumps(args) + chr(10))
+if '--ok-label=Debug run' in args and not {debug!r}:
+    sys.exit(1)
+if {skip_gates!r} and '--extra-button=Skip (debug)' in args:
+    print('Skip (debug)')
+    sys.exit(1)
 ''')
     executable(commands / 'pactl', f'''#!{sys.executable}
 import json, sys
 with open({str(pactl_log)!r}, 'a') as output:
-    output.write(json.dumps(sys.argv[1:]) + '\\n')
+    output.write(json.dumps(sys.argv[1:]) + chr(10))
 if sys.argv[1:2] == ['get-sink-volume']:
     print('Volume: front-left: 49152 /  {expected_volume} / -7.50 dB,   front-right: 49152 /  {expected_volume} / -7.50 dB')
     print('        balance 0.00')
@@ -60,11 +75,18 @@ else:
     print('balance 0.00')
 ''')
     executable(commands / 'xrandr', "#!/bin/sh\nprintf 'HDMI-1 connected primary\\n   1920x1080 120.00*+\\n'\n")
+    executable(commands / 'xdg-open', f'''#!{sys.executable}
+import json, sys
+with open({str(browser_log)!r}, 'a') as output:
+    output.write(json.dumps(sys.argv[1:]) + chr(10))
+''')
     (tmp_path / 'gvfs').mkdir()
     mount_glob = '../server' if mounted else '../missing'
     (study / 'preflight_config.sh').write_text(
         f'PREFLIGHT_SERVER_MOUNT_GLOB={mount_glob!r}\n'
-        "PREFLIGHT_SERVER_DATA_PATH='study_data'\n", encoding='utf-8',
+        "PREFLIGHT_SERVER_DATA_PATH='study_data'\n"
+        f'PREFLIGHT_CONSENT_URL={CONSENT_URL!r}\n'
+        f'PREFLIGHT_PARTICIPANT_LOG_URL={PARTICIPANT_LOG_URL!r}\n', encoding='utf-8',
     )
     executable(commands / 'pw-jack', '#!/bin/sh\nexec "$@"\n')
     python = commands / 'python'
@@ -94,46 +116,100 @@ os.execv({sys.executable!r}, [{sys.executable!r}] + args)
         ['bash', str(study / 'preflight.sh')], env=env,
         capture_output=True, text=True, timeout=30,
     )
-    assert result.returncode == 1, result.stdout + result.stderr
-    recorded = json.loads(capture.read_text())
+    # The launcher backgrounds xdg-open, so wait for the fake to finish writing.
+    count = -1
+    for _ in range(100):
+        lines = browser_log.read_text().splitlines() if browser_log.is_file() else []
+        if len(lines) == count:
+            break
+        count = len(lines)
+        time.sleep(0.02)
+    return SimpleNamespace(
+        result=result,
+        recorded=json.loads(capture.read_text()),
+        messages=[json.loads(line) for line in dialogs.read_text().splitlines()],
+        browsers=[json.loads(line) for line in browser_log.read_text().splitlines()]
+        if browser_log.is_file() else [],
+        pactl=[json.loads(line) for line in pactl_log.read_text().splitlines()],
+        study=study,
+        server=server,
+        server_data=server_data,
+        tmp_path=tmp_path,
+    )
+
+
+@pytest.mark.parametrize('mounted,plan_created', [(True, False), (False, False), (True, True)])
+def test_launcher_uses_final_storage_roots_and_preserves_failure_log(tmp_path, mounted, plan_created):
+    run = run_launcher(tmp_path, mounted=mounted, plan_created=plan_created)
+    assert run.result.returncode == 1, run.result.stdout + run.result.stderr
+    recorded = run.recorded
     pid = 'participant_03' if mounted else 'participant_02'
     assert recorded['pid'] == pid
     assert f'participant_id={pid}\n' in recorded['report']
     # The debug-screen choice is recorded so debug sessions stay identifiable
     # after the fact (the fake zenity accepts every dialog).
     assert 'debug_overlay=true\n' in recorded['report']
+    # Both browser steps open, in order, and the confirmations reach the report.
+    assert run.browsers == [[CONSENT_URL], [PARTICIPANT_LOG_URL]]
+    assert f'browser_urls_opened={CONSENT_URL} {PARTICIPANT_LOG_URL}\n' in recorded['report']
+    assert 'consent_form=completed\n' in recorded['report']
+    assert 'participant_log=confirmed\n' in recorded['report']
+    assert 'browser_close=confirmed\n' in recorded['report']
     if mounted:
         reported_root = next(line.split('=', 1)[1] for line in recorded['report'].splitlines()
                              if line.startswith('server_root='))
-        assert Path(reported_root).resolve() == server
-    pactl_calls = [json.loads(line) for line in pactl_log.read_text().splitlines()]
-    assert ['set-sink-volume', '@DEFAULT_SINK@', expected_volume] in pactl_calls
+        assert Path(reported_root).resolve() == run.server
+    assert ['set-sink-volume', '@DEFAULT_SINK@', f'{config.SYSTEM_VOLUME_PERCENT}%'] in run.pactl
     assert f'system_volume_percent={config.SYSTEM_VOLUME_PERCENT}\n' in recorded['report']
     assert 'system_volume_status=pinned\n' in recorded['report']
-    messages = [json.loads(line) for line in dialogs.read_text().splitlines()]
-    debug_dialog = next(args for args in messages if '--ok-label=Debug run' in args)
+    debug_dialog = next(args for args in run.messages if '--ok-label=Debug run' in args)
     assert '--cancel-label=Participant run' in debug_dialog
     assert '--default-cancel' in debug_dialog
-    error = next(args for args in messages if '--error' in args)
+    error = next(args for args in run.messages if '--error' in args)
     text = next(arg.removeprefix('--text=') for arg in error if arg.startswith('--text='))
     log = Path(text.split('Full log: ', 1)[1])
     assert log.is_file()
     assert 'simulated runner failure' in log.read_text()
-    participant = study / 'data' / pid
+    participant = run.study / 'data' / pid
     assert participant.exists() == plan_created
     if plan_created:
         assert log == participant / 'launch_error.log'
-        assert not list(tmp_path.glob('av-experiment-*'))
+        assert not list(run.tmp_path.glob('av-experiment-*'))
     else:
-        assert log.parent == tmp_path
+        assert log.parent == run.tmp_path
     expected_server_entries = {'participant_02', '.claims'} if plan_created else {'participant_02'}
-    assert {path.name for path in server_data.iterdir()} == expected_server_entries
+    assert {path.name for path in run.server_data.iterdir()} == expected_server_entries
     if plan_created:
-        claim_files = list((server_data / '.claims').glob('participant_03.lock'))
+        claim_files = list((run.server_data / '.claims').glob('participant_03.lock'))
         assert len(claim_files) == 1
         claim = json.loads(claim_files[0].read_text())
         assert claim['participant_id'] == 'participant_03'
         assert isinstance(claim['pid'], int)
         assert claim['host'] and claim['started_utc'] and claim['token']
     else:
-        assert not (server_data / '.claims').exists()
+        assert not (run.server_data / '.claims').exists()
+
+
+@pytest.mark.parametrize('debug', [True, False])
+def test_browser_gates_offer_skip_only_on_debug_runs(tmp_path, debug):
+    run = run_launcher(tmp_path, debug=debug, skip_gates=True)
+    gate = next(args for args in run.messages if '--ok-label=Consent completed' in args)
+    assert ('--extra-button=Skip (debug)' in gate) == debug
+    assert '--cancel-label=No, stop' in gate
+    pid = run.recorded['pid']
+    pid_dialog = next(
+        args for args in run.messages
+        if '--info' in args and any(pid in arg for arg in args)
+    )
+    assert run.messages.index(pid_dialog) < run.messages.index(gate)
+    if debug:
+        # Skipping one gate ends the browser block and the session still continues.
+        assert run.browsers == [[CONSENT_URL]]
+        assert 'consent_form=skipped\n' in run.recorded['report']
+        assert 'participant_log=skipped\n' in run.recorded['report']
+        assert 'browser_close=skipped\n' in run.recorded['report']
+    else:
+        assert run.browsers == [[CONSENT_URL], [PARTICIPANT_LOG_URL]]
+        assert 'consent_form=completed\n' in run.recorded['report']
+        assert 'participant_log=confirmed\n' in run.recorded['report']
+        assert 'browser_close=confirmed\n' in run.recorded['report']
