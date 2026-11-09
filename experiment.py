@@ -189,6 +189,7 @@ def run(args):
             'flash_seconds': config.FIXATION_FLASH_DUR,
             'participant_wording': screens.mark_flash_phrase(),
         },
+        'mouse_cursor_hidden': True,
         'audio_start_source': None,
         'audio_clock_conversion': 'session_time = PTB time - session_clock.getLastResetTime()',
         'audio_clock_offset_check_seconds': clock_offset,
@@ -208,6 +209,10 @@ def run(args):
             size=config.WINDOW_SIZE, fullscr=True, screen=0,
             units='pix', color=[0, 0, 0], checkTiming=True, waitBlanking=True,
         )
+        # The pointer is never an input device here, and one drifting over the
+        # stimuli is a visible distraction, so hide the OS cursor for the whole
+        # session and put it back when the window closes.
+        window.setMouseVisible(False)
         window_size = tuple(int(value) for value in window.size)
         if window_size != tuple(config.WINDOW_SIZE):
             raise RuntimeError(
@@ -221,6 +226,9 @@ def run(args):
             raise RuntimeError('Could not measure a stable display refresh rate with getActualFrameRate().')
         measured_refresh_hz = float(measured_refresh_hz)
         frame_period = 1.0 / measured_refresh_hz
+        # Re-assert after the timing probe's flips, the point where the backend
+        # has finished settling the window.
+        window.setMouseVisible(False)
         metadata.update({
             'window_size': list(window_size),
             'display_refresh_hz': measured_refresh_hz,
@@ -584,6 +592,10 @@ def run(args):
             save_session(session_dir, all_events, key_rows, trial_rows, metadata)
         Path(report_source).unlink(missing_ok=True)
         if window is not None:
+            try:
+                window.setMouseVisible(True)
+            except Exception:
+                pass
             window.close()
         sounds_to_close = [
             sound_obj for pool in locals().get('sound_pool', {}).values() for sound_obj in pool
