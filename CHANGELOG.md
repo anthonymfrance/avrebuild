@@ -19,6 +19,14 @@ Timing is PTB software-reported only; there is no microphone, photodiode, or loo
   -1 dBFS sample-peak ceiling, which brings a 9.4 dB spread in the 1 s set down to 2.38 dB
   measured on the delivered files (integrated spread 4.20 dB). No `config.py` value changed, so
   existing plans still load.
+- **Four slow-swell cues were re-cut.** `animate/5`, `animate/8`, `animate/9` and
+  `inanimate/2` open on a swell, so the `peak` anchor started the clip inside that swell: the cue
+  needed 121-301 ms to reach half level and its audible onset sat late against the visual peak the
+  study times. `EDGE_OVERRIDES` starts those four at the earliest point where the clip reaches half
+  its own peak within `RISE_SECONDS` (60 ms), with the same level target, fades and 0.5 s length.
+  Measured after the re-cut: 5-67 ms to half level, loudest-200 ms spread still 2.38 dB, and no cue
+  ends above -25 dB of its own peak except `inanimate/2` at -25.0. Slow attacks fall from 7 of 20
+  to the 3 that are slow in the recording itself (`animate/10`, `inanimate/1`, `inanimate/5`).
 - **A second 0.5 s cut was removed.** `_cleaned_0p5` started each clip at the last quiet-to-loud
   boundary and matched K-weighted level over the whole window. Measured on its own files that
   matching did not hold: 8 of 20 cues sat within 0.02 dB of the -19.85 target, integrated spread

@@ -90,46 +90,53 @@ EASY_OFFSETS = (
     (20, -35),
 )
 
-# Round 2: shapes start crowding each other (three of the eleven gaps are
-# shorter than the 0.6 s a shape is visible, 27%), so up to two are on screen at
-# once, and one target sits in each corner. 12 items over 8.3 s, 1.45 items/s.
+# Round 2: shapes start crowding each other (four of the eleven gaps are
+# shorter than the 0.3 s a shape is visible, 36%), so two share the screen at
+# those moments, and one target sits in each corner. 12 items, 1.20 items/s
+# under the paced measure the test uses. Three distractors stay clear of the
+# 0.9 s window after each target, so no target window holds more than one other
+# onset: the overlap is trained away from the decision the round is training.
 MEDIUM = (
     (0.60, 'target', 'top_right'),
-    (1.05, 'distractor', 'bottom_left'),
-    (1.60, 'distractor', 'bottom_right'),
-    (2.30, 'distractor', 'top_left'),
-    (3.10, 'target', 'bottom_left'),
-    (3.70, 'distractor', 'top_right'),
-    (4.25, 'distractor', 'bottom_right'),
-    (5.00, 'distractor', 'top_left'),
-    (5.80, 'target', 'top_left'),
-    (6.60, 'distractor', 'bottom_left'),
-    (7.40, 'distractor', 'top_right'),
-    (8.30, 'target', 'bottom_right'),
+    (1.30, 'distractor', 'bottom_left'),
+    (1.52, 'distractor', 'bottom_right'),
+    (2.40, 'distractor', 'top_left'),
+    (2.62, 'distractor', 'top_right'),
+    (3.10, 'target', 'top_left'),
+    (4.30, 'distractor', 'bottom_right'),
+    (4.52, 'distractor', 'top_right'),
+    (5.80, 'target', 'bottom_right'),
+    (6.80, 'distractor', 'top_left'),
+    (7.02, 'distractor', 'bottom_left'),
+    (8.30, 'target', 'bottom_left'),
 )
 MEDIUM_OFFSETS = (
-    (30, -25),
-    (-25, 30),
-    (35, 25),
-    (-30, -30),
-    (-35, -20),
-    (20, -38),
-    (25, -32),
-    (-20, 35),
-    (38, -15),
-    (30, -25),
-    (-15, 38),
-    (20, -38),
+    (25, 20),
+    (25, 20),
+    (25, 20),
+    (25, 20),
+    (38, 26),
+    (38, 26),
+    (38, 26),
+    (22, 38),
+    (22, 38),
+    (22, 38),
+    (38, 26),
+    (22, 38),
 )
 
-# Round 3: the picture stream of a real trial, cut to its first 20 items (12.9 s
-# from the first onset to the last shape disappearing). The onsets are a
-# generated trial's own schedule, and deliberately the densest-sharing slice on
-# the server: 20 items at 1.62 items/s, 8 of its 19 gaps shorter than a shape's
-# 0.6 s life, three shapes on screen at the busiest moment, and 1.25 other
-# onsets inside each target's 0.9 s window against 1.16 averaged over all 88 real
-# trials (which themselves run at a median 1.98 items/s and peak at 3-4 on
-# screen). Only the corners are repacked: in a real trial each PT puts 80% of its
+# Round 3: the picture stream of a real trial, cut to its first 20 items (7.1 s
+# from the first onset to the last, 6.9 s until the last shape has faded). The
+# onsets are a generated trial's own schedule, so the stream runs at a real
+# trial's rate: 2.28 items/s under the paced measure, against 2.09-2.60 measured
+# over 40 trials at the current config (median 2.36), with 10 of the 19 gaps
+# shorter than the 0.3 s a shape is visible (53%, against a real median of 55%).
+# Two shapes therefore share the screen for most of the round, and some target
+# windows hold three onsets, as they do in the task. No round can show three at
+# once at this config: MIN_VISUAL_ONSET_GAP is 0.15 s and a shape lives 0.3 s,
+# so a third shape would arrive exactly as the first vanishes.
+#
+# Only the corners are repacked: in a real trial each PT puts 80% of its
 # appearances in its own favoured corner and each NPT spreads evenly, so every
 # key is trained; practice still puts one target in each corner and spreads the
 # distractors evenly, which is slightly harder than the real mix. Every gap still
@@ -137,48 +144,48 @@ MEDIUM_OFFSETS = (
 # at least RESPONSE_WINDOW apart, a target's corner empty for
 # TARGET_CORNER_HOLD, and no same-corner overlap.
 HARD = (
-    (0.500, 'distractor', 'bottom_left'),
-    (1.194, 'target', 'top_right'),
-    (1.398, 'distractor', 'bottom_right'),
-    (2.775, 'distractor', 'top_left'),
-    (3.526, 'target', 'top_left'),
-    (3.820, 'distractor', 'bottom_left'),
-    (5.005, 'distractor', 'top_right'),
-    (5.618, 'distractor', 'bottom_right'),
-    (6.299, 'distractor', 'top_left'),
-    (7.102, 'distractor', 'bottom_left'),
-    (7.403, 'distractor', 'top_right'),
-    (7.725, 'distractor', 'bottom_right'),
-    (8.775, 'distractor', 'top_left'),
-    (8.989, 'target', 'bottom_right'),
-    (9.286, 'distractor', 'bottom_left'),
-    (9.607, 'distractor', 'top_right'),
-    (10.645, 'distractor', 'top_left'),
-    (11.350, 'distractor', 'bottom_right'),
-    (12.034, 'target', 'bottom_left'),
-    (12.257, 'distractor', 'top_right'),
+    (0.500, 'distractor', 'top_right'),
+    (0.652, 'distractor', 'top_left'),
+    (0.803, 'distractor', 'bottom_right'),
+    (1.703, 'distractor', 'top_right'),
+    (2.008, 'target', 'bottom_right'),
+    (2.160, 'distractor', 'top_right'),
+    (2.311, 'distractor', 'bottom_left'),
+    (2.462, 'distractor', 'top_right'),
+    (3.062, 'target', 'bottom_left'),
+    (3.409, 'distractor', 'top_left'),
+    (3.966, 'target', 'top_left'),
+    (4.465, 'distractor', 'bottom_right'),
+    (4.616, 'distractor', 'bottom_left'),
+    (4.768, 'distractor', 'bottom_right'),
+    (5.367, 'target', 'top_right'),
+    (5.518, 'distractor', 'top_left'),
+    (5.823, 'distractor', 'bottom_right'),
+    (6.770, 'distractor', 'bottom_left'),
+    (6.922, 'distractor', 'top_left'),
+    (7.074, 'distractor', 'bottom_left'),
 )
 HARD_OFFSETS = (
-    (-25, 30),
-    (30, -25),
-    (38, -15),
-    (-30, -30),
-    (20, -38),
-    (35, 25),
-    (20, -38),
-    (-35, -20),
-    (35, 25),
-    (-35, -20),
-    (-30, -30),
-    (20, -38),
-    (-15, 38),
-    (25, -32),
-    (25, -32),
-    (-20, 35),
-    (-25, 30),
-    (-25, 30),
-    (-15, 38),
-    (38, -15),
+    (25, 20),
+    (25, 20),
+    (25, 20),
+    (38, 26),
+    (38, 26),
+    (22, 38),
+    (25, 20),
+    (40, 20),
+    (38, 26),
+    (38, 26),
+    (22, 38),
+    (22, 38),
+    (22, 38),
+    (40, 20),
+    (26, 40),
+    (40, 20),
+    (26, 40),
+    (40, 20),
+    (26, 40),
+    (26, 40),
 )
 
 # The order participants see, and the words they read between rounds.

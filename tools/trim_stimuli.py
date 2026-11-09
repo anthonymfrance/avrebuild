@@ -61,6 +61,16 @@ MEASURED_POLICIES = POLICIES + ('loudest',)
 # --report and the audition page still compare the raw policies.
 OVERRIDES = {'animate/7': 0.0, 'inanimate/9': 0.0}
 
+# Four recordings open on a slow swell. The `peak` anchor starts them inside that
+# swell, so the cue needs 0.12-0.30 s to reach half level and its audible onset
+# drifts late against the visual peak, which is the interval the study times.
+# These start at the earliest point where the clip reaches half its own peak
+# within RISE_SECONDS instead: the sound announces itself on the first frame
+# while keeping the rise, and more of the body survives than a boundary cut.
+# Only --policy hybrid reads these.
+RISE_SECONDS = 0.06
+EDGE_OVERRIDES = frozenset({'animate/5', 'animate/8', 'animate/9', 'inanimate/2'})
+
 
 def cleaned_path(category, number):
     return ROOT / '20_stimuli' / category / 'obj_snds' / '_cleaned' / f'snd_{number}.wav'
@@ -144,6 +154,19 @@ def loudest_start(weighted_square):
     return float(np.argmax(windows)) / SAMPLE_RATE
 
 
+def audible_start(mono):
+    """Earliest 0.5 s window whose level reaches half its peak within RISE_SECONDS."""
+    frame = 0.01
+    levels = frame_levels_db(mono, frame)
+    clip_frames = int(CLIP_SECONDS / frame)
+    rise_frames = max(1, int(round(RISE_SECONDS / frame)))
+    for start in range(0, len(levels) - clip_frames + 1):
+        window = levels[start:start + clip_frames]
+        if levels[start + rise_frames] >= window.max() - 6.02:
+            return start * frame
+    return 0.0
+
+
 def clip_start(policy, info, weighted_square, source_seconds):
     """Where the 0.5 s window begins for one policy, in seconds."""
     if policy == 'loudest':
@@ -184,8 +207,14 @@ def build(category, number, policy):
     info = analyse(samples)
     weighted = k_weighted_square(mono)
     length = int(CLIP_SECONDS * SAMPLE_RATE)
-    override = OVERRIDES.get(f'{category}/{number}') if policy == 'hybrid' else None
-    start = override if override is not None else clip_start(policy, info, weighted, len(mono) / SAMPLE_RATE)
+    key = f'{category}/{number}'
+    override = OVERRIDES.get(key) if policy == 'hybrid' else None
+    if override is not None:
+        start = override
+    elif policy == 'hybrid' and key in EDGE_OVERRIDES:
+        start = audible_start(mono)
+    else:
+        start = clip_start(policy, info, weighted, len(mono) / SAMPLE_RATE)
     begin = min(int(round(start * SAMPLE_RATE)), len(samples) - length)
     cut = samples[begin:begin + length]
     segment = apply_fades(cut)

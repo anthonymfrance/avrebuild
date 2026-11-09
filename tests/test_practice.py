@@ -189,13 +189,18 @@ def test_difficulty_rises_from_one_round_to_the_next():
     )
     assert easy['targets'] < hard['targets']
     assert easy['density'] < medium['density'] < hard['density']
-    # Generated real trials run 1.4-2.2 items per second; hard is inside that band.
-    assert 1.4 <= hard['density'] <= 2.2
+    # Generated real trials measure 2.09-2.60 items per second under this same
+    # paced measure (median 2.36, 40 trials); hard is inside that band.
+    assert 2.0 <= hard['density'] <= 2.6
     assert medium['density'] < 1.4
 
-    # One picture at a time, then two, then the three-deep pile-up of a real
-    # trial (the median real trial also peaks at three pictures on screen).
-    assert [easy['peak_on_screen'], medium['peak_on_screen'], hard['peak_on_screen']] == [1, 2, 3]
+    # One picture at a time, then two sharing the screen. Three at once is
+    # impossible at this config, in practice and in the real task alike:
+    # MIN_VISUAL_ONSET_GAP is 0.15 s and a shape lives VISUAL_DURATION = 0.3 s,
+    # so the earliest third onset lands exactly as the first has faded out. The
+    # ladder therefore steps on how much of the round overlaps, not on depth:
+    # 36% of medium's gaps overlap against 53% of hard's (a real median of 55%).
+    assert [easy['peak_on_screen'], medium['peak_on_screen'], hard['peak_on_screen']] == [1, 2, 2]
     assert easy['co_present'] == []
     assert all(gap > config.VISUAL_DURATION + 1e-6 for gap in _gaps(practice.EASY))
     assert len(medium['co_present']) >= 3 and len(hard['co_present']) >= 5
@@ -529,7 +534,7 @@ def test_full_practice_run_walks_the_three_rounds():
     clock = AdvancingClock()
     participant = ScriptedParticipant(
         clock,
-        miss={('easy', 4), ('medium', 8), ('hard', 13)},
+        miss={('easy', 4), ('medium', 8), ('hard', 8)},
         false_alarms={('easy', 1): 'num_2'},
     )
     fixation = FakeFixation()
