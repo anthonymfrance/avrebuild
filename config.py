@@ -4,7 +4,7 @@ Derived constants (computed from constants above them) are allowed so every
 module shares one definition."""
 
 # --- Stimulus split ---
-TRIALS_PER_PT = 2   # trials in which each PT is the active PT (per block)
+TRIALS_PER_PT = 25  # trials in which each PT is the active PT (per block); 2 PTs x 25 x 2 blocks = 100 trials per session
 PT_COUNT_PER_BLOCK = 2
 PD_COUNT_PER_BLOCK = 2
 

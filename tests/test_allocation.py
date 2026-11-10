@@ -104,7 +104,9 @@ for row in visuals:
     assert x_min <= abs(row['x']) <= x_max
     assert y_min <= abs(row['y']) <= y_max
 '''],
-        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30,
+        # Building a plan at the configured session length is not instant:
+        # 100 trials take roughly half a minute, so the timeout has to cover it.
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

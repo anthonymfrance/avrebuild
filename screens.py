@@ -291,7 +291,13 @@ def sound_check(window, kb, visual, test_tone):
         'Listen for a short sound.\n\n'
         'Press R to hear it again.\n'
         'Press SPACE if you heard it.\n'
-        'Press N if you did not hear it.'
+        'Press N if you did not hear it.\n\n'
+        # The plan is generated the moment SPACE confirms the sound check, and
+        # the last frame stays on screen while it runs, so this is the screen
+        # that has to ask for patience.
+        'After you press SPACE, the study needs about\n'
+        '30 seconds to prepare. Please be patient;\n'
+        'the screen will not change while it does.'
     )
     test_tone.play()
     while True:
