@@ -68,7 +68,7 @@ def sha256_file(path: Path) -> str:
 # adding it, for plans generated before it existed) cannot refuse a participant
 # plan that was already generated. Each session records the value it ran with in
 # its metadata. Keep this list to presentation-only values.
-PRESENTATION_ONLY = frozenset({'FIXATION_SHAPE', 'FIXATION_BORDER_WIDTH', 'STIMULUS_SIZE_SCALE'})
+PRESENTATION_ONLY = frozenset({'FIXATION_SHAPE', 'FIXATION_BORDER_WIDTH'})
 
 
 def config_snapshot():

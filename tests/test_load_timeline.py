@@ -45,14 +45,6 @@ def test_rejects_config_that_differs_from_plan_snapshot(plan):
         load_timeline(timeline_path, metadata, ROOT)
 
 
-def test_a_plan_made_before_a_draw_scale_still_loads(plan):
-    """A presentation-only draw scale stays out of the plan snapshot too."""
-    timeline_path, metadata = plan
-    assert 'STIMULUS_SIZE_SCALE' not in metadata['config']
-    rows, assets, block_order, trials_by_block = load_timeline(timeline_path, metadata, ROOT)
-    assert block_order == metadata['block_order']
-
-
 def test_a_plan_made_before_the_center_mark_option_still_loads(plan):
     """The center mark is presentation only, so it stays out of the plan snapshot.
 

@@ -190,13 +190,6 @@ def run(args):
             'participant_wording': screens.mark_flash_phrase(),
         },
         'mouse_cursor_hidden': True,
-        # Presentation only, like the centre mark: this records the draw scale
-        # each stimulus ran with, since it is not part of the plan snapshot.
-        'stimulus_size_scale': dict(config.STIMULUS_SIZE_SCALE),
-        'stimulus_sizes_pixels': {
-            stimulus: list(screens.stimulus_size(stimulus))
-            for stimulus in sorted(config.STIMULUS_SIZE_SCALE)
-        },
         'audio_start_source': None,
         'audio_clock_conversion': 'session_time = PTB time - session_clock.getLastResetTime()',
         'audio_clock_offset_check_seconds': clock_offset,
@@ -335,7 +328,7 @@ def run(args):
         )
         image_cache = {
             stimulus: visual.ImageStim(
-                window, image=str(path), size=screens.stimulus_size(stimulus),
+                window, image=str(path), size=config.IMAGE_SIZE,
                 units='pix', autoLog=False,
             )
             for stimulus, path in assets['images'].items()
@@ -381,7 +374,7 @@ def run(args):
                     items.append((
                         name,
                         visual.ImageStim(
-                            window, image=str(image_path), size=screens.stimulus_size(name),
+                            window, image=str(image_path), size=config.IMAGE_SIZE,
                             units='pix', autoLog=False,
                         ),
                         sound.Sound(

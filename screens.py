@@ -178,12 +178,6 @@ def _fit_image(window, visual, path, max_fraction_w, max_fraction_h):
     return image
 
 
-def stimulus_size(stimulus):
-    """The size a stimulus is drawn at: config.IMAGE_SIZE times its own scale."""
-    scale = config.STIMULUS_SIZE_SCALE.get(stimulus, 1.0)
-    return config.IMAGE_SIZE[0] * scale, config.IMAGE_SIZE[1] * scale
-
-
 def center_mark(window, visual):
     """The configured centre mark: the stim whose lineColor is the hit flash.
 
@@ -399,8 +393,8 @@ def stimulus_inventory(window, kb, visual, clock, groups, gap_seconds=1.0):
 
     groups is ((label, ((name, image, sound), ...)), ...), in display order.
     Each group is five columns wide, so the two ten-item groups make two rows of
-    five. Every image is forced to its study size (stimulus_size), so the
-    operator sees the real on-screen size. P plays
+    five. Every image is forced to config.IMAGE_SIZE, the size it is drawn at
+    during the study, so the operator sees the real on-screen size. P plays
     every sound once, in display order, with gap_seconds of silence after each;
     SPACE continues.
     """
@@ -430,7 +424,7 @@ def stimulus_inventory(window, kb, visual, clock, groups, gap_seconds=1.0):
         titles.append((label, centre + (rows - 1) * row_step / 2 + img_h / 2 + 34))
         for position, (name, image, cue) in enumerate(items):
             row, column = divmod(position, 5)
-            image.size = stimulus_size(name)
+            image.size = (img_w, img_h)
             placed.append((
                 (column - 2) * column_step,
                 centre + (rows - 1) * row_step / 2 - row * row_step,
@@ -447,7 +441,7 @@ def stimulus_inventory(window, kb, visual, clock, groups, gap_seconds=1.0):
             image.pos = (x, y)
             image.draw()
             name_text.text = name
-            name_text.pos = (x, y - image.size[1] / 2 - 8)
+            name_text.pos = (x, y - img_h / 2 - 8)
             name_text.draw()
         footer.draw()
         window.flip()
@@ -497,8 +491,8 @@ def stimulus_stack(window, kb, visual, items, opacity=STACK_OPACITY):
         color='white', height=22, anchorVert='bottom', units='pix',
         autoLog=False, pos=(0, -win_h * 0.47),
     )
-    for name, image in items:
-        image.size = stimulus_size(name)
+    for _name, image in items:
+        image.size = config.IMAGE_SIZE
         image.pos = (0, 0)
         image.opacity = opacity
     while True:

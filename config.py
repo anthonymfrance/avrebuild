@@ -100,16 +100,6 @@ BG_SEED = 0xA1D0B04A
 
 # --- Images ---
 IMAGE_SIZE = (125, 125) #was at 200, 200
-# Per-stimulus draw multiplier, keyed by stimulus name. Presentation only, so it
-# stays out of the participant-plan snapshot (session_io.PRESENTATION_ONLY) and
-# adding it cannot refuse a plan generated before it existed. The helicopter is
-# the thinnest silhouette in the pool (its ink covers 7% of its canvas, against
-# 13-33% for every other object), so it read as smaller than it is; 1.2 matches
-# its apparent weight. Kept at or below 1.25 because timeline_key and
-# plan_validator sample positions for the unscaled IMAGE_SIZE footprint, and the
-# helicopter's visible content is 80% of its canvas, so up to 1.25 every visible
-# pixel still lands inside the area its position was checked against.
-STIMULUS_SIZE_SCALE = {'helicopter': 1.2}
 MAX_OPACITY = 1.0
 
 # --- Fixation / centre mark ---
