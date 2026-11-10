@@ -1,0 +1,152 @@
+{
+ "variants": [
+  [
+   "baseline",
+   []
+  ],
+  [
+   "NPD 40-48",
+   [
+    "TRIAL_NPD_RANGE=(40, 48)"
+   ]
+  ],
+  [
+   "NPD 44-52",
+   [
+    "TRIAL_NPD_RANGE=(44, 52)"
+   ]
+  ],
+  [
+   "window 0.8",
+   [
+    "RESPONSE_WINDOW=0.8"
+   ]
+  ]
+ ],
+ "rows": [
+  {
+   "variant": "baseline",
+   "overrides": [],
+   "total_trials": 8,
+   "success_rate": 1.0,
+   "first_attempt_rate": 0.0,
+   "visuals_per_trial": 58.06,
+   "targets_per_trial": 12.97,
+   "target_prevalence": 0.223,
+   "other_onsets_in_target_window": 1.83,
+   "median_orders_per_plan": 1672.0,
+   "failed_trial_placements": 23,
+   "trial_placements": 55
+  },
+  {
+   "variant": "baseline",
+   "overrides": [],
+   "total_trials": 12,
+   "success_rate": 1.0,
+   "first_attempt_rate": 0.0,
+   "visuals_per_trial": 57.92,
+   "targets_per_trial": 12.67,
+   "target_prevalence": 0.219,
+   "other_onsets_in_target_window": 1.81,
+   "median_orders_per_plan": 2699.5,
+   "failed_trial_placements": 41,
+   "trial_placements": 89
+  },
+  {
+   "variant": "NPD 40-48",
+   "overrides": [
+    "TRIAL_NPD_RANGE=(40, 48)"
+   ],
+   "total_trials": 8,
+   "success_rate": 1.0,
+   "first_attempt_rate": 0.0,
+   "visuals_per_trial": 61.38,
+   "targets_per_trial": 13.22,
+   "target_prevalence": 0.215,
+   "other_onsets_in_target_window": 1.94,
+   "median_orders_per_plan": 1918.0,
+   "failed_trial_placements": 28,
+   "trial_placements": 60
+  },
+  {
+   "variant": "NPD 40-48",
+   "overrides": [
+    "TRIAL_NPD_RANGE=(40, 48)"
+   ],
+   "total_trials": 12,
+   "success_rate": 1.0,
+   "first_attempt_rate": 0.0,
+   "visuals_per_trial": 62.52,
+   "targets_per_trial": 13.02,
+   "target_prevalence": 0.208,
+   "other_onsets_in_target_window": 2.01,
+   "median_orders_per_plan": 3014.0,
+   "failed_trial_placements": 47,
+   "trial_placements": 95
+  },
+  {
+   "variant": "NPD 44-52",
+   "overrides": [
+    "TRIAL_NPD_RANGE=(44, 52)"
+   ],
+   "total_trials": 8,
+   "success_rate": 1.0,
+   "first_attempt_rate": 0.0,
+   "visuals_per_trial": 65.88,
+   "targets_per_trial": 12.94,
+   "target_prevalence": 0.196,
+   "other_onsets_in_target_window": 2.14,
+   "median_orders_per_plan": 2008.5,
+   "failed_trial_placements": 31,
+   "trial_placements": 63
+  },
+  {
+   "variant": "NPD 44-52",
+   "overrides": [
+    "TRIAL_NPD_RANGE=(44, 52)"
+   ],
+   "total_trials": 12,
+   "success_rate": 1.0,
+   "first_attempt_rate": 0.0,
+   "visuals_per_trial": 65.83,
+   "targets_per_trial": 12.96,
+   "target_prevalence": 0.197,
+   "other_onsets_in_target_window": 2.16,
+   "median_orders_per_plan": 3018.0,
+   "failed_trial_placements": 48,
+   "trial_placements": 96
+  },
+  {
+   "variant": "window 0.8",
+   "overrides": [
+    "RESPONSE_WINDOW=0.8"
+   ],
+   "total_trials": 8,
+   "success_rate": 1.0,
+   "first_attempt_rate": 0.0,
+   "visuals_per_trial": 58.06,
+   "targets_per_trial": 12.97,
+   "target_prevalence": 0.223,
+   "other_onsets_in_target_window": 1.59,
+   "median_orders_per_plan": 1400.0,
+   "failed_trial_placements": 20,
+   "trial_placements": 52
+  },
+  {
+   "variant": "window 0.8",
+   "overrides": [
+    "RESPONSE_WINDOW=0.8"
+   ],
+   "total_trials": 12,
+   "success_rate": 1.0,
+   "first_attempt_rate": 0.0,
+   "visuals_per_trial": 57.92,
+   "targets_per_trial": 12.67,
+   "target_prevalence": 0.219,
+   "other_onsets_in_target_window": 1.57,
+   "median_orders_per_plan": 2274.0,
+   "failed_trial_placements": 31,
+   "trial_placements": 79
+  }
+ ]
+}
