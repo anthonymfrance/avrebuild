@@ -70,8 +70,6 @@ def timing_profile(timelines):
     import config as c
     onsets = defaultdict(list)
     gaps, packed, spans, first_target_pos = [], 0, [], []
-    visuals_per_trial, targets_per_trial = [], []
-    crowding, prevalence = [], []
     for timeline in timelines:
         by_trial = defaultdict(list)
         for r in timeline:
@@ -86,31 +84,12 @@ def timing_profile(timelines):
             spans.append(rows[-1]['global_onset'] + c.VISUAL_DURATION - rows[0]['global_onset'])
             first_target_pos.extend(i / (len(rows) - 1) for i, r in enumerate(rows)
                                     if r['role'] in c.TARGET_ROLES)
-            targets = [r for r in rows if r['role'] in c.TARGET_ROLES]
-            visuals_per_trial.append(len(rows))
-            targets_per_trial.append(len(targets))
-            if rows:
-                prevalence.append(len(targets) / len(rows))
-            # Pictures that appear inside each target's response window: the
-            # crowding a heavier load setting is meant to raise, and the load
-            # the pilot data could not judge because hits were at ceiling.
-            for target in targets:
-                start = target['global_onset']
-                end = start + c.RESPONSE_WINDOW
-                crowding.append(sum(
-                    other is not target and start <= other['global_onset'] < end
-                    for other in rows
-                ))
     return {
         'content_onset_by_role': {role: dist(v) for role, v in sorted(onsets.items())},
         'adjacent_visual_gap': dist(gaps),
         'gaps_at_minimum_onset_gap_pct': round(100 * packed / len(gaps), 2) if gaps else None,
         'trial_span_seconds': dist(spans),
         'target_rank_in_trial_0_to_1': dist(first_target_pos),
-        'visuals_per_trial': dist(visuals_per_trial),
-        'targets_per_trial': dist(targets_per_trial),
-        'target_prevalence': dist(prevalence),
-        'other_onsets_in_target_window': dist(crowding),
     }
 
 
