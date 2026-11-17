@@ -294,6 +294,26 @@ def participant_number(participant_id: str) -> int:
     return int(match.group(1))
 
 
+def git_state():
+    """HEAD commit and whether tracked files differ from it; (None, None) outside a repo.
+
+    The commit alone does not identify the code that built a plan: a dirty tree
+    can run constants HEAD has not committed yet, so the flag is stored beside it.
+    """
+    root = Path(__file__).resolve().parent
+    try:
+        commit = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=root, text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+        dirty = bool(subprocess.check_output(
+            ['git', 'status', '--porcelain', '--untracked-files=no'],
+            cwd=root, text=True, stderr=subprocess.DEVNULL,
+        ).strip())
+    except (OSError, subprocess.CalledProcessError):
+        return None, None
+    return commit, dirty
+
+
 def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> tuple[Path, dict]:
     """Reserve the participant folder and create all immutable session plans."""
     data_dir = Path(data_dir).resolve()
@@ -358,13 +378,7 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
             validation_report(slotting_rows, required, timeline, stats)
             write_timeline(temp_dir / 'timeline_key.csv', timeline)
             break
-        try:
-            git_commit = subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'], cwd=Path(__file__).resolve().parent,
-            text=True, stderr=subprocess.DEVNULL,
-            ).strip()
-        except (OSError, subprocess.CalledProcessError):
-            git_commit = None
+        git_commit, git_dirty = git_state()
         snapshot = {
             'participant_id': participant_id,
             'participant_number': number,
@@ -384,6 +398,7 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
             'timeline_sha256': sha256_file(temp_dir / 'timeline_key.csv'),
             'generated_utc': datetime.now(timezone.utc).isoformat(),
             'git_commit': git_commit,
+            'git_dirty': git_dirty,
             'config': config_snapshot(),
             'artifacts': {
                 'stimulus_assignment': 'stimulus_assignment.csv',

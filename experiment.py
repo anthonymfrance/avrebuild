@@ -9,7 +9,6 @@ import math
 import os
 import platform
 import shutil
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +16,7 @@ from pathlib import Path
 import config
 from config import BLOCK_LABELS, TARGET_ROLES
 from stimulus_split import ANIMATE, INANIMATE
-from participant_setup import create_participant_plan, derive_rng, verify_participant_claim
+from participant_setup import create_participant_plan, derive_rng, git_state, verify_participant_claim
 import practice
 import screens
 from session_io import (
@@ -418,13 +417,7 @@ def run(args):
         session_name = f'session_{session_number:02d}'
         session_dir = pid_dir / session_name
         session_dir.mkdir(parents=True, exist_ok=False)
-        try:
-            metadata['git_commit'] = subprocess.check_output(
-                ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
-        except (OSError, subprocess.CalledProcessError):
-            metadata['git_commit'] = None
+        metadata['git_commit'], metadata['git_dirty'] = git_state()
         metadata['session_dir'] = str(session_dir)
         write_practice_log(session_dir / 'practice_log.csv', practice_result['rows'])
 
