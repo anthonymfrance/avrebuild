@@ -173,11 +173,14 @@ fi
 machine_name="${PREFLIGHT_MACHINE_NAME:-}"
 [[ -n "$machine_name" ]] || machine_name="$(uname -n 2>/dev/null || true)"
 machine_uuid="$(cat /etc/machine-id 2>/dev/null || true)"
-machine_model="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"
+machine_vendor="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"
 machine_product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
-if [[ -n "$machine_product" && -n "$machine_model" ]]; then
-  machine_model+=" $machine_product"
-elif [[ -z "$machine_model" ]]; then
+# 'Alienware' plus 'Alienware Aurora R6' would repeat the vendor.
+if [[ -n "$machine_vendor" && "$machine_product" == "$machine_vendor"* ]]; then
+  machine_model="$machine_product"
+elif [[ -n "$machine_vendor" ]]; then
+  machine_model="$machine_vendor $machine_product"
+else
   machine_model="$machine_product"
 fi
 # A wired NIC is stable across reboots; enx* devices are USB adapters that move.

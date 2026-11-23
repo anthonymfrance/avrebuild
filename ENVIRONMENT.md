@@ -4,6 +4,25 @@ Ubuntu 24.04 LTS. Everything below was captured from a known-working install on
 2026-10-12. Keep versions identical across devices so timing and audio behavior
 match.
 
+## 0. Quick start on a new computer
+
+1. Install the system packages in section 1 (needs `sudo`, once per machine).
+2. Clone and build the runtime:
+
+   ```bash
+   git clone --branch feat/soa-corner-redesign https://github.com/anthonymfrance/avrebuild.git
+   cd avrebuild
+   curl -LsSf https://astral.sh/uv/install.sh | sh   # once per machine, no sudo
+   uv venv --python 3.10 .venv
+   uv pip install --python .venv/bin/python -r requirements-lock.txt
+   .venv/bin/python -c 'import psychopy, psychtoolbox, numpy, PIL; print("runtime ok")'
+   ```
+
+3. Name the computer: write `preflight_local.sh` (section 3, *Name this computer*).
+4. Mount the lab share once through Files and tick **Remember forever** (section 5).
+5. Log in on **Xorg**, then run `./preflight.sh` — every row should be green or a
+   yellow you have deliberately accepted.
+
 ## 1. System packages (apt)
 
 ```bash
@@ -78,13 +97,20 @@ uv venv --python 3.10 .venv
 uv pip install --python .venv/bin/python -r requirements-lock.txt
 ```
 
-Without `uv`, the standard library equivalent needs nothing extra:
+Without `uv` you need `sudo apt-get install python3-venv` first: stock Ubuntu
+24.04 has no working `ensurepip`, so `python3 -m venv` silently creates a venv
+with no pip in it.
 
 ```bash
+sudo apt-get install -y python3-venv
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements-lock.txt
 ```
+
+The lock also installs on 3.12 (verified), but run 3.10 to match the pilots;
+`uv venv --python 3.10` fetches that interpreter without apt. If a `.venv`
+already exists and is broken, rebuild it with `uv venv --clear --python 3.10 .venv`.
 
 `preflight.sh` uses `./.venv/bin/python` automatically once it imports PsychoPy,
 and falls back to the PsychoPy app runtime only when it does not.
