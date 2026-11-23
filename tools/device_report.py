@@ -27,6 +27,7 @@ FIELDS = OrderedDict([
     ('machine_name', 'machine'),
     ('machine_uuid', 'uuid'),
     ('machine_model', 'model'),
+    ('machine_serial', 'serial'),
     ('machine_mac', 'mac'),
     ('hardware_host', 'host'),
     ('hardware_cpu', 'cpu'),
@@ -50,7 +51,9 @@ FIELDS = OrderedDict([
 
 # Columns that are expected to differ (a device name or id) and are never
 # reported as a parity problem.
-EXPECTED_DIFFERENCES = {'machine', 'uuid', 'model', 'mac', 'host', 'commit', 'dirty'}
+EXPECTED_DIFFERENCES = {
+    'machine', 'uuid', 'model', 'serial', 'mac', 'host', 'commit', 'dirty',
+}
 
 
 def default_roots():

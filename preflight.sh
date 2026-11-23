@@ -172,7 +172,13 @@ fi
 # swapped disk cannot silently merge two computers into one row of the data.
 machine_name="${PREFLIGHT_MACHINE_NAME:-}"
 [[ -n "$machine_name" ]] || machine_name="$(uname -n 2>/dev/null || true)"
-machine_uuid="$(cat /etc/machine-id 2>/dev/null || true)"
+# The DMI product UUID and serial are root-only, so preflight cannot read them at
+# launch. Values read once with sudo into preflight_local.sh are used when present;
+# /etc/machine-id is the readable fallback (unique per install, not per machine).
+machine_uuid="${PREFLIGHT_MACHINE_UUID:-}"
+[[ -n "$machine_uuid" ]] || machine_uuid="$(cat /etc/machine-id 2>/dev/null || true)"
+machine_serial="${PREFLIGHT_MACHINE_SERIAL:-}"
+[[ -n "$machine_serial" ]] || machine_serial="$(cat /sys/class/dmi/id/product_serial 2>/dev/null || true)"
 machine_vendor="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"
 machine_product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
 # 'Alienware' plus 'Alienware Aurora R6' would repeat the vendor.
@@ -718,8 +724,8 @@ print(f"pillow_version={PIL.__version__}")
   printf 'git_branch=%s\ngit_commit=%s\ngit_dirty=%s\ngit_behind=%s\ngit_upstream=%s\n' "${git_branch:-}" "${git_commit:-}" "${git_dirty:-}" "${git_behind:-}" "${git_upstream:-}"
   # Machine identity belongs in the saved report only; the checklist does not show
   # it. glxinfo comes from mesa-utils and is absent on some machines.
-  printf 'machine_name=%s\nmachine_uuid=%s\nmachine_model=%s\nmachine_mac=%s\nmachine_host=%s\n' \
-    "$machine_name" "$machine_uuid" "$machine_model" "$machine_mac" "$(uname -n 2>/dev/null || true)"
+  printf 'machine_name=%s\nmachine_uuid=%s\nmachine_model=%s\nmachine_serial=%s\nmachine_mac=%s\nmachine_host=%s\n' \
+    "$machine_name" "$machine_uuid" "$machine_model" "$machine_serial" "$machine_mac" "$(uname -n 2>/dev/null || true)"
   printf 'hardware_host=%s\nhardware_cpu=%s\nhardware_cores=%s\nhardware_memory=%s\nhardware_kernel=%s\nhardware_gpu=%s\n' \
     "$(uname -n 2>/dev/null || true)" \
     "$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)" \

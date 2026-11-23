@@ -139,11 +139,28 @@ PREFLIGHT_AUDIO_HEADPHONES=''
 EOF
 ```
 
-The name, plus `/etc/machine-id`, the DMI model and the wired NIC's MAC, is written
-into every session as `machine_name`, `machine_uuid`, `machine_model` and
-`machine_mac`, and is the first column of `tools/device_report.py`. A changed
-hostname or a moved disk therefore cannot merge two computers in the data. The DMI
-product UUID and serial are root-only, which is why the machine-id is used instead.
+The name, plus the machine's UUID, DMI model, serial and wired NIC MAC, is written
+into every session as `machine_name`, `machine_uuid`, `machine_model`,
+`machine_serial` and `machine_mac`, and is the first column of
+`tools/device_report.py`. A changed hostname, a moved disk or a swapped NIC
+cannot merge two computers in the data.
+
+`/sys/class/dmi/id/product_uuid` and `product_serial` are root-only, and preflight
+runs as the normal user, so read them **once** with `sudo` and keep the values in
+`preflight_local.sh` — never in the tracked config:
+
+```bash
+sudo cat /sys/class/dmi/id/product_uuid /sys/class/dmi/id/product_serial
+```
+
+```bash
+# preflight_local.sh
+PREFLIGHT_MACHINE_UUID='...'
+PREFLIGHT_MACHINE_SERIAL='...'
+```
+
+Without them preflight falls back to `/etc/machine-id`, which is unique per
+install but changes if the OS is reinstalled.
 
 ## 4. Display + session
 
@@ -165,14 +182,18 @@ starts. The claim records the allocating PID, host, and UTC start time, so two
 lab computers cannot both run the same participant number. Abandoned claims
 expire after `config.PARTICIPANT_CLAIM_TTL_HOURS` (12 hours).
 
-## 6. Optional (dev only)
+## 6. Running the tests
 
-- `pytest` is **not** installed in either Python on this machine. If you want to
-  run `tests/`, install it into the PsychoPy runtime:
+`pytest` is part of the lock, so it is already in `.venv`:
 
-  ```bash
-  ~/.config/psychopy4/.python/2026.1.3/bin/python3 -m pip install pytest
-  ```
+```bash
+.venv/bin/python -m pytest tests/test_preflight.py -q
+```
+
+`tests/test_preflight.py` writes fake `zenity`/`pactl`/`xrandr` scripts whose
+shebang is the interpreter's absolute path. If the project sits under a path with
+a space in it, run the suite from a copy without one (for example `tar` the tree
+into `/tmp/run-tests`); the study itself is unaffected.
 
 ## 7. Sanity checks after setup
 
