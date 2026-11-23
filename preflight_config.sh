@@ -11,6 +11,12 @@ PREFLIGHT_SERVER_URI='smb://psyc-files.ucsc.edu/jamal'
 PREFLIGHT_SERVER_MOUNT_GLOB='smb-share:server=psyc-files.ucsc.edu,share=jamal*'
 PREFLIGHT_SERVER_DATA_PATH='Experiments/Anthony/data'
 
+# Headphones plugged into the output above. The machine can only see the codec or
+# DAC, never the headphones, so this is the one part of the audio chain that has
+# to be written down per computer. It is recorded in every session's metadata and
+# reported by tools/device_report.py; leave it empty and preflight warns.
+PREFLIGHT_AUDIO_HEADPHONES=''
+
 # Browser steps before the experiment starts. Preflight opens the consent form,
 # then the participant log, and waits for the RA to confirm each one before
 # showing the reminder to close the browser. Set either to '' to skip that step

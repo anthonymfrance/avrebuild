@@ -40,47 +40,65 @@ be cleaned with `sudo apt autoremove` if desired.
 ## 2. Audio route used by the study
 
 The experiment runs PTB (PortAudio) through `pw-jack` so audio goes
-PTB → PipeWire JACK → built-in analog headphone out.
+PTB → PipeWire JACK → whatever sink the system default points at. The sink is
+resolved at run time, so a different codec, chassis or USB DAC is fine; a
+digital sink (S/PDIF, HDMI) is rejected because it is not the headphone route.
 
 1. Install `pipewire-jack` (see above).
 2. Confirm PipeWire daemons are running: `pgrep -c pipewire` should print ≥ 3
    (`pipewire`, the `filter-chain.conf` instance, and `pipewire-pulse`).
-3. Default sink must be the built-in analog stereo output with balance 0.00:
+3. Default sink must be the wired headphone output (any analog sink) with
+   balance 0.00:
 
    ```bash
    pactl get-sink-volume @DEFAULT_SINK@   # front-left and front-right equal, balance 0.00
    ```
 
    `preflight.sh` automatically sets the default sink to
-   `config.SYSTEM_VOLUME_PERCENT` (75%) on every launch and verifies the level,
-   so output volume does not drift between sessions or devices.
+   `config.SYSTEM_VOLUME_PERCENT` (50% on the piloted branch) on every launch and
+   verifies the level, so output volume does not drift between sessions or
+   devices.
 
-4. `preflight.sh` verifies the full route itself (PTB sees the JACK-built-in
-   device); it is the source of truth.
+4. `preflight.sh` verifies the full route itself (PTB must see the configured
+   sink through PipeWire JACK); it is the source of truth.
+5. Record the headphones: set `PREFLIGHT_AUDIO_HEADPHONES` in
+   `preflight_config.sh` (for example `'Sony MDR-7506'`). The machine can see the
+   codec or DAC but never the headphones, so this is the one part of the audio
+   chain that has to be written down per computer. It lands in every session's
+   metadata and in `tools/device_report.py`.
 
-## 3. PsychoPy runtime
+## 3. Study runtime (one command per machine)
 
-- PsychoPy **2026.1.3**, provisioned by the PsychoPy app under
-  `~/.config/psychopy4/.python/2026.1.3/bin/python3` (Python 3.10.18).
-- On a fresh device, launch the PsychoPy app once so it creates that runtime,
-  or set `AV_STUDY_PYTHON` to an equivalent `bin/python3` path.
-- Frozen Python package list: see
-  [`requirements-psychopy-2026.1.3.txt`](requirements-psychopy-2026.1.3.txt).
-  The packages the study code touches directly (versions must match):
+Every computer installs the same pinned package set, so timing and audio
+behaviour match:
 
-  - psychopy-lib 2026.1.3
-  - psychtoolbox 3.0.19.14
-  - numpy 2.2.6
-  - pillow 11.3.0
-  - pyglet 1.5.27
-  - questplus 2023.1
+```bash
+cd /path/to/avrebuild
+uv venv --python 3.10 .venv
+uv pip install --python .venv/bin/python -r requirements-lock.txt
+```
+
+- **[`requirements-lock.txt`](requirements-lock.txt) is the source of truth:**
+  92 pinned packages, verified to install into a clean Python 3.10 environment.
+  Launching the PsychoPy app is no longer needed to provision the experiments.
+- [`requirements-psychopy-2026.1.3.txt`](requirements-psychopy-2026.1.3.txt) is a
+  **reference snapshot** of the PsychoPy app's own runtime. It does not resolve
+  (`javascripthon 0.13` requires `dukpy<=0.2.3` while the app ships `dukpy 0.5.1`),
+  so do not install from it.
+- The versions a session actually ran on are written into its metadata
+  (`python_version`, `psychopy_version`, `psychtoolbox_version`, `numpy_version`,
+  `pillow_version`). Compare machines with `python3 tools/device_report.py`.
+- `pytest` is part of the lock, so `tests/` runs on any machine that uses it.
 
 ## 4. Display + session
 
-- X11 session (`XDG_SESSION_TYPE=x11`), not Wayland.
-- Screen: HDMI-1, primary, **1920×1080 @ 120 Hz**
-  (`config.WINDOW_SIZE = (1920, 1080)`, `config.REQUIRED_REFRESH_HZ = 120`,
-  tolerance 1 Hz).
+- X11 session (`XDG_SESSION_TYPE=x11`), not Wayland. The display automation uses
+  `xrandr`, which cannot change modes under Wayland.
+- **1920×1080 @ 120 Hz** (`config.WINDOW_SIZE = (1920, 1080)`,
+  `config.REQUIRED_REFRESH_HZ = 120`, tolerance 1 Hz).
+- `preflight.sh` switches the active output to that mode when it launches, fails
+  clearly if the panel cannot offer it, and restores the panel's largest, fastest
+  mode when the launcher exits (including a failure or ESC).
 
 ## 5. Lab server mount
 

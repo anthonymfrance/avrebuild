@@ -169,6 +169,18 @@ else
   add_row '✅' 'PTB audio route' "PipeWire JACK exposes $default_sink_desc"
 fi
 
+# The machine knows the codec or DAC and nothing about the headphones plugged
+# into it, so the headphone model is configuration and is recorded beside the
+# detected output.
+audio_headphones="${PREFLIGHT_AUDIO_HEADPHONES:-}"
+audio_chain="${default_sink_desc:-unknown output}"
+if [[ -n "$audio_headphones" ]]; then
+  audio_chain+=" + $audio_headphones"
+  add_row '✅' 'Audio chain' "$audio_chain"
+else
+  add_row '⚠️' 'Audio chain' 'Headphones not recorded; set PREFLIGHT_AUDIO_HEADPHONES in preflight_config.sh'
+fi
+
 # Pin the level on the sink the route check just validated, so the route check
 # and the volume cannot disagree if the system default changes between them.
 volume_target="${default_sink:-@DEFAULT_SINK@}"
@@ -639,15 +651,33 @@ Participant: $participant_id"
   fi
 fi
 
+# Versions the session actually ran on, so parity between machines is recorded
+# rather than assumed. An import failure leaves this empty, which the report
+# parser skips, instead of aborting the launcher.
+runtime_versions="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c '
+import platform
+import numpy
+import PIL
+import psychopy
+import psychtoolbox
+print(f"python_version={platform.python_version()}")
+print(f"psychopy_version={psychopy.__version__}")
+print(f"psychtoolbox_version={psychtoolbox.__version__}")
+print(f"numpy_version={numpy.__version__}")
+print(f"pillow_version={PIL.__version__}")
+' 2>/dev/null || true)"
+
 # Written here rather than with the checklist above so the saved report (and the
 # session metadata parsed from it) records whether the debug overlay ran.
 {
   printf 'measured_at=%s\n' "$(date --iso-8601=seconds)"
   printf 'study_dir=%s\nparticipant_id=%s\n' "$study_dir" "$participant_id"
+  printf '%s\n' "$runtime_versions"
   printf 'session_type=%s\ndisplay_output=%s\nactive_mode=%s\ndisplay_refresh_hz=%s\n' "$session_type" "$display_output" "$active_mode" "$display_refresh_hz"
   printf 'display_mode_action=%s\ndisplay_mode_set=%s\n' "$display_mode_action" "${display_mode_set:-}"
   printf 'audio_route=%s\npipewire_jack_library=%s\n' 'PTB via PipeWire JACK' "$pipewire_jack_lib"
   printf 'audio_route_device=%s\naudio_route_sink=%s\n' "${default_sink_desc:-}" "${default_sink:-}"
+  printf 'audio_chain=%s\naudio_headphones=%s\n' "$audio_chain" "$audio_headphones"
   printf 'git_branch=%s\ngit_commit=%s\ngit_dirty=%s\ngit_behind=%s\ngit_upstream=%s\n' "${git_branch:-}" "${git_commit:-}" "${git_dirty:-}" "${git_behind:-}" "${git_upstream:-}"
   # Machine identity belongs in the saved report only; the checklist does not show
   # it. glxinfo comes from mesa-utils and is absent on some machines.
