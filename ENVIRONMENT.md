@@ -21,8 +21,18 @@ match.
 
 3. Name the computer: write `preflight_local.sh` (section 3, *Name this computer*).
 4. Mount the lab share once through Files and tick **Remember forever** (section 5).
-5. Log in on **Xorg**, then run `./preflight.sh` — every row should be green or a
-   yellow you have deliberately accepted.
+5. Log in on **Xorg**, confirm it with the command below, then run `./preflight.sh`
+   — every row should be green or a yellow you have deliberately accepted.
+
+   ```bash
+   echo "$XDG_SESSION_TYPE"     # must print: x11
+   ```
+
+   This is a gate, not a formality. On GNOME with the proprietary NVIDIA driver a
+   login can default to Wayland without anything looking wrong, and `xrandr`
+   cannot set or restore a mode there — the display rows would "pass" while the
+   mode was never switched. If it prints `wayland`, log out, pick **Xorg** on the
+   login screen's gear menu, and re-check before going further.
 
 ## 1. System packages (apt)
 
@@ -53,9 +63,34 @@ Why each is required:
 | `git` | experiment metadata records the commit hash |
 | `mesa-utils` | `glxinfo` sanity check of the GL stack when debugging display timing |
 
-This machine uses **Intel HD Graphics 530** graphics (no NVIDIA card is present).
-The leftover `nvidia-535` packages installed by an old image are unused; they can
-be cleaned with `sudo apt autoremove` if desired.
+### Graphics: integrated Intel **plus** a discrete NVIDIA card
+
+An earlier version of this file claimed the lab machines use Intel HD Graphics 530
+with "no NVIDIA card present" and that the NVIDIA packages were leftovers safe to
+autoremove. Both statements are wrong on the machines in use, and the autoremove
+advice is dangerous.
+
+What the lab computers actually report:
+
+```bash
+lspci | grep -Ei 'vga|3d'        # Intel HD Graphics 630 + NVIDIA GP104 [GeForce GTX 1080]
+nvidia-smi --query-gpu=name,driver_version --format=csv,noheader   # GTX 1080, 580.178.04
+glxinfo -B | grep renderer      # OpenGL renderer: NVIDIA GeForce GTX 1080/PCIe/SSE2
+```
+
+The NVIDIA 580 driver is the **live** display driver (`nvidia`, `nvidia_drm`,
+`nvidia_modeset` are loaded), not a leftover. Do **not** run `sudo apt autoremove`,
+`apt remove` or `apt purge` against the `nvidia-*` / `libnvidia-*` packages on a
+lab machine: stripping the running driver can drop the session out of the
+120 Hz display mode, and doing that the night before a participant is a data
+loss, not an inconvenience.
+
+`apt autoremove` may offer to remove an orphaned `nvidia-firmware-580-server`
+firmware blob left by an older driver version. That one is harmless, but it is
+the only NVIDIA package that is, so remove it by exact name at most.
+
+Check the graphics stack with `lspci` and `glxinfo -B` on each computer rather
+than trusting a model name written in this file.
 
 ## 2. Audio route used by the study
 
@@ -165,7 +200,8 @@ install but changes if the OS is reinstalled.
 
 ## 4. Display + session
 
-- X11 session (`XDG_SESSION_TYPE=x11`), not Wayland. The display automation uses
+- X11 session (`XDG_SESSION_TYPE=x11`), not Wayland — verify with
+  `echo "$XDG_SESSION_TYPE"` (see section 0, step 5). The display automation uses
   `xrandr`, which cannot change modes under Wayland.
 - **1920×1080 @ 120 Hz** (`config.WINDOW_SIZE = (1920, 1080)`,
   `config.REQUIRED_REFRESH_HZ = 120`, tolerance 1 Hz).
