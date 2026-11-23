@@ -37,7 +37,7 @@ FIELDS = OrderedDict([
     ('active_mode', 'mode'),
     ('display_refresh_hz', 'refresh'),
     ('audio_route_device', 'output device'),
-    ('audio_chain', 'headphones'),
+    ('audio_chain', 'audio chain'),
     ('system_volume_percent', 'volume %'),
     ('git_branch', 'branch'),
     ('git_commit', 'commit'),
