@@ -4,33 +4,41 @@ Derived constants (computed from constants above them) are allowed so every
 module shares one definition."""
 
 # --- Stimulus split ---
-TRIALS_PER_PT = 2   # trials in which each PT is the active PT (per block)
+TRIALS_PER_PT = 25  # trials in which each PT is the active PT (per block); 2 PTs x 25 x 2 blocks = 100 trials per session
 PT_COUNT_PER_BLOCK = 2
 PD_COUNT_PER_BLOCK = 2
 
 # --- SOAs ---
+# SOA is sound onset to the visual peak (onset + FADE_IN_DUR).
+# With a 0.5 s sound, SOAs below 0.65 s overlap the 0.3 s image;
+# longer SOAs end before image onset.
 PT_SOA_MIN = 0.5
 PT_SOA_MAX = 1.5
 PD_SOA_MIN = 0.5
 PD_SOA_MAX = 1.5
 
 # --- Items per trial (min, max) ---
-TRIAL_PT_RANGE = (2, 3)
-TRIAL_NPT_RANGE = (3, 8)
-TRIAL_PD_RANGE = (3, 5)
-TRIAL_NPD_RANGE = (20, 28) #used to be 11 - 15
-MAX_PLACEMENT_ATTEMPTS = 250
-MAX_TIMELINE_ATTEMPTS = 3
+TRIAL_PT_RANGE = (4, 6)
+TRIAL_NPT_RANGE = (6, 10)
+TRIAL_PD_RANGE = (4, 6)
+TRIAL_NPD_RANGE = (36, 44)
+MAX_PLACEMENT_ATTEMPTS = 250   # random event orders per trial in the first placement pass
+MAX_TIMELINE_ATTEMPTS = 3      # placement passes; passes after the first retry only unplaced trials
 
-TARGET_SPATIAL_BIAS = 0.80
+# --- Corner rule ---
+# Each block shuffles the four corners across its two PTs and two PDs, so every
+# privileged item has its own favoured corner and each corner serves exactly one
+# PT and one PD across the experiment. Privileged items aim for their bias in
+# that corner; non-privileged roles split evenly.
+TARGET_SPATIAL_BIAS = 0.80      # PT targets
+DISTRACTOR_SPATIAL_BIAS = 0.80  # PD distractors
 CORNERS = ('top_left', 'top_right', 'bottom_left', 'bottom_right')
-FAVORED_CORNER = 'top_right'
 
 # --- Visual timing (seconds) ---
 WINDOW_SIZE = (1920, 1080)
-FADE_IN_DUR = 0.3
+FADE_IN_DUR = 0.15
 PEAK_HOLD_DUR = 0.0
-FADE_OUT_DUR = 0.3
+FADE_OUT_DUR = 0.15
 MIN_VISUAL_ONSET_GAP = 0.15
 MIN_TARGET_END_TO_ONSET_GAP = 0.15
 MIN_SAME_ITEM_GAP = 0.75
@@ -39,6 +47,11 @@ MIN_SAME_ITEM_GAP = 0.75
 TRIAL_BUFFER_DUR = 2.0     # applied at both the start and the end of the trial
 TRIAL_CONTENT_DUR = 20.0
 BETWEEN_PT_STIMULUS_GAP = 0.5
+
+# --- Between-block break ---
+# The break screen counts down from this and continues on its own at zero; the
+# elapsed time a participant actually takes is recorded in session metadata.
+BREAK_OFFER_SECONDS = 30
 
 # --- Derived timing, roles, and labels ---
 VISUAL_DURATION = FADE_IN_DUR + PEAK_HOLD_DUR + FADE_OUT_DUR
@@ -56,14 +69,15 @@ BLOCK_LABELS = {'animate': 'ANIMALS', 'inanimate': 'OBJECTS'}
 # Preflight pins the OS output sink to this level before every session, so the
 # participant hears the same level on every device. Keep the in-code playback
 # gain at 1.0 so the system level is not attenuated twice.
-SYSTEM_VOLUME_PERCENT = 75
+SYSTEM_VOLUME_PERCENT = 50
 AUDIO_VOLUME = 1.0
 AUDIO_BACKEND = 'ptb'
 AUDIO_LATENCY_MODE = 2
 AUDIO_DEVICE = 'default'
 AUDIO_SPEAKER = 'default'
-SOUND_DUR = 1.0
+SOUND_DUR = 0.5
 MIN_AUDIO_GAP = 0.2
+MIN_SAME_SOUND_GAP = 2.0  # 11.4 was 0.75 trying 2.0 to spread PD/PT apart end of a sound to next onset of the same item
 SOUND_POOL_SIZE = 2          # Sound objects per stimulus, used round-robin
 SOUND_POOL_RESTART_MARGIN = 0.05  # play() must land this long after the previous play on a pooled object ended
 SOUND_REQUEST_MIN_LEAD = 0.01     # seconds of future margin when a play request is already late
@@ -85,13 +99,33 @@ BG_UPDATE_RATE = 0.2
 BG_SEED = 0xA1D0B04A
 
 # --- Images ---
-IMAGE_SIZE = (150, 150) #was at 200, 200
+IMAGE_SIZE = (125, 125) #was at 200, 200
 MAX_OPACITY = 1.0
 
-# --- Fixation ---
-FIXATION_SIZE = 30
-FIXATION_LINE_WIDTH = 3
-FIXATION_COLOR = 'white'
+# --- Fixation / centre mark ---
+# What sits at the centre of the screen, or around its edge. 'cross' is the
+# classic fixation cross, 'circle' an unfilled ring, 'border' a frame around the
+# whole window with no centre icon. Whichever is chosen flashes
+# FIXATION_HIT_COLOR on a hit, so the hit feedback is the same mark in every
+# configuration (trial_runner and practice only set its lineColor).
+#
+# Presentation only: it changes how the screen looks, never what a timeline
+# contains, so it is kept out of the participant-plan config snapshot
+# (session_io.PRESENTATION_ONLY) and changing it cannot refuse a plan that was
+# already generated. Each session records the mark it ran with in its metadata.
+# The participant-facing name of each option lives with the wording it appears
+# in, in screens.MARK_NAMES.
+FIXATION_SHAPE = 'circle'   # options: 'cross', 'circle', 'border'
+FIXATION_SIZE = 30          # pixels: cross arm length, or ring diameter
+FIXATION_LINE_WIDTH = 3     # stroke width for 'cross' and 'circle'
+# A 3 px stroke is a hairline along a 1920 px window edge, so the frame has its
+# own width rather than sharing FIXATION_LINE_WIDTH.
+FIXATION_BORDER_WIDTH = 16
+# Grey, not white: the same value the practice shapes use (practice.SHAPE_COLOR),
+# so the centre mark belongs to the stimulus palette instead of being the
+# brightest thing on screen. Hex, not the colour name 'gray': PsychoPy reads
+# that as rgb 0.0039, essentially black.
+FIXATION_COLOR = '#B4B4B4'   # = practice.SHAPE_COLOR
 FIXATION_HIT_COLOR = 'green'
 FIXATION_FLASH_DUR = 0.2
 

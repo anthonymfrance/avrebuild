@@ -1,6 +1,22 @@
 __pycache__/
 *.py[cod]
 data/
-__pycache__/
 .pytest_cache/
+build/
 .Rhistory
+.freebuff-backup/
+.venv/
+.tools/
+.pyenv/
+
+# Per-computer values (machine name, headphones); see ENVIRONMENT.md.
+preflight_local.sh
+
+# Credentials for the lab share must never be committed.
+.smbcredentials
+.env
+.env.*
+!.env.example
+
+# audition output from tools/trim_stimuli.py --out
+20_stimuli/_trim_candidates/

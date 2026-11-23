@@ -130,6 +130,52 @@ def test_json_default_numpy_scalars_and_rejects_unknown():
         session_io.json_default(object())
 
 
+def test_save_session_writes_one_row_per_trial(tmp_path):
+    metadata = {'timeline_order': ['inanimate', 'animate']}
+    trials = [
+        {'block': 'animate', 'trial': 2, 'trial_complete': True, 'frame_count': 1200,
+         'long_frame_count': 1, 'max_frame_interval': 0.02, 'miss_count': 3, 'late_count': 1,
+         'trial_start_session_time': 24.0, 'trial_end_session_time': 48.0},
+        {'block': 'animate', 'trial': 1, 'trial_complete': True, 'frame_count': 1190,
+         'long_frame_count': 0, 'max_frame_interval': 0.009, 'miss_count': 0, 'late_count': 0},
+        {'block': 'inanimate', 'trial': 1, 'trial_complete': False},
+    ]
+    session_io.save_session(tmp_path, [], [], trials, metadata)
+    rows = list(csv.DictReader((tmp_path / 'trial_log.csv').open()))
+    assert [(row['block_number'], row['trial']) for row in rows] == [('1', '1'), ('2', '1'), ('2', '2')]
+    animated = {row['trial']: row for row in rows if row['block'] == 'animate'}
+    assert animated['2']['long_frame_count'] == '1' and animated['2']['miss_count'] == '3'
+    assert animated['1']['late_count'] == '0'
+    incomplete = rows[0]
+    assert incomplete['trial_complete'] == 'False' and incomplete['frame_count'] == ''
+
+
+def test_write_practice_log_keeps_skipped_practice(tmp_path):
+    rows = [{'phase': 'intro', 'classification': 'skipped', 'outcome': 'practice_not_run'}]
+    session_io.write_practice_log(tmp_path / 'practice_log.csv', rows)
+    stored = list(csv.DictReader((tmp_path / 'practice_log.csv').open()))
+    assert stored[0]['classification'] == 'skipped'
+    assert stored[0]['outcome'] == 'practice_not_run'
+    assert set(stored[0]) == set(session_io.PRACTICE_LOG_FIELDS)
+
+
+def test_practice_log_records_which_round_a_row_came_from(tmp_path):
+    rows = [
+        {'phase': 'paced', 'tier': 'easy', 'event_id': 'easy-0', 'classification': 'hit'},
+        {'phase': 'paced', 'tier': 'hard', 'event_id': 'hard-0', 'classification': 'miss'},
+    ]
+    session_io.write_practice_log(tmp_path / 'practice_log.csv', rows)
+    stored = list(csv.DictReader((tmp_path / 'practice_log.csv').open()))
+    assert session_io.PRACTICE_LOG_FIELDS.index('tier') == 1
+    assert [row['tier'] for row in stored] == ['easy', 'hard']
+    assert [row['event_id'] for row in stored] == ['easy-0', 'hard-0']
+    # A log written before the column existed still parses: the field is blank.
+    legacy = [{'phase': 'paced', 'event_id': 'practice-0', 'classification': 'hit'}]
+    session_io.write_practice_log(tmp_path / 'legacy.csv', legacy)
+    old = list(csv.DictReader((tmp_path / 'legacy.csv').open()))
+    assert old[0]['tier'] == '' and old[0]['classification'] == 'hit'
+
+
 def test_save_session_writes_numpy_metadata_as_json(tmp_path):
     np = pytest.importorskip('numpy')
     metadata = {
@@ -177,3 +223,13 @@ def test_participant_metadata_write_accepts_numpy(tmp_path, monkeypatch):
     assert stored['config']['n'] == 2
     assert stored['config']['hz'] == 60.5
     assert stored['config']['size'] == [1920, 1080]
+
+
+def test_first_screen_elapsed_seconds():
+    from datetime import datetime, timedelta, timezone
+
+    assert session_io.first_screen_elapsed_seconds(None) is None
+    start = datetime(2026, 10, 27, 12, 0, 0, tzinfo=timezone.utc)
+    assert session_io.first_screen_elapsed_seconds(start, start) == 0.0
+    later = start + timedelta(seconds=90.5)
+    assert session_io.first_screen_elapsed_seconds(start, later) == 90.5

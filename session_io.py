@@ -62,10 +62,23 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+# Config that only changes how the screen is drawn, never what a timeline
+# contains. These are left out of the config snapshot entirely -- neither stored
+# with a plan nor compared against one -- so changing the centre mark (or
+# adding it, for plans generated before it existed) cannot refuse a participant
+# plan that was already generated. Each session records the value it ran with in
+# its metadata. Keep this list to presentation-only values.
+PRESENTATION_ONLY = frozenset({'FIXATION_SHAPE', 'FIXATION_BORDER_WIDTH'})
+
+
 def config_snapshot():
-    """JSON-normalized uppercase config values (tuples become lists, sets sorted lists)."""
+    """JSON-normalized uppercase config values (tuples become lists, sets sorted lists).
+
+    PRESENTATION_ONLY values are omitted; see the note on that set.
+    """
     values = {name: value for name, value in vars(config).items()
-              if name.isupper() and not name.startswith('_')}
+              if name.isupper() and not name.startswith('_')
+              and name not in PRESENTATION_ONLY}
     return json.loads(json.dumps(values, default=sorted))
 
 
@@ -83,7 +96,9 @@ def stimulus_paths(root, block, role, stimulus):
         raise ValueError(f'{stimulus!r} is not in the {category} stimulus pool.') from exc
     root = Path(root)
     image = root / '20_stimuli' / category / 'objects_numbered' / '_normalized' / f'obj_{number}_bw.png'
-    sound = root / '20_stimuli' / category / 'obj_snds' / '_cleaned' / f'snd_{number}.wav'
+    # _cleaned holds the 1 s recordings; _cleaned_0.5 is the 0.5 s re-cut the
+    # timeline schedules (tools/trim_stimuli.py writes it).
+    sound = root / '20_stimuli' / category / 'obj_snds' / '_cleaned_0.5' / f'snd_{number}.wav'
     return image, sound
 
 
@@ -262,6 +277,24 @@ def copy_participant_tree(local_dir: Path, destination: Path) -> dict:
         }
 
 
+TRIAL_LOG_FIELDS = [
+    'block', 'block_number', 'trial', 'trial_complete',
+    'trial_start_session_time', 'trial_end_session_time',
+    'frame_count', 'long_frame_count', 'mean_frame_interval', 'median_frame_interval',
+    'max_frame_interval', 'miss_count', 'late_count', 'audio_requested_only_count',
+]
+
+PRACTICE_LOG_FIELDS = [
+    'phase', 'tier', 'step', 'event_id', 'time_seconds', 'key', 'corner',
+    'expected_corner', 'classification', 'rt_seconds', 'outcome',
+]
+
+
+def write_practice_log(path, rows):
+    """Write practice rows, including the single row for a skipped practice."""
+    _atomic_csv(path, PRACTICE_LOG_FIELDS, rows or [])
+
+
 def _atomic_csv(path, fieldnames, rows):
     path = Path(path)
     fd, temp_name = tempfile.mkstemp(prefix=f'.{path.name}.', dir=path.parent)
@@ -335,6 +368,17 @@ def save_session(session_dir, events, keys, trials, metadata):
         0 if row.get('event_type') != 'keypress' else 1,
     ))
     _atomic_csv(session_dir / 'event_log.csv', event_fields, log_rows)
+    # Per-trial stats are computed in trial_runner and were previously reduced
+    # to session totals; keep the rows so a session can be audited per trial.
+    trial_log_rows = [
+        dict(row, block_number=block_numbers.get(row.get('block'), ''))
+        for row in trials
+    ]
+    trial_log_rows.sort(key=lambda row: (
+        row['block_number'] if row['block_number'] != '' else math.inf,
+        float(row['trial']) if str(row.get('trial', '')).isdigit() else math.inf,
+    ))
+    _atomic_csv(session_dir / 'trial_log.csv', TRIAL_LOG_FIELDS, trial_log_rows)
     metadata['trial_summary'] = trial_summary(trials)
     metadata['last_saved_utc'] = datetime.now(timezone.utc).isoformat()
     temp_path = session_dir / '.session_metadata.json.tmp'
@@ -343,6 +387,20 @@ def save_session(session_dir, events, keys, trials, metadata):
         encoding='utf-8',
     )
     os.replace(temp_path, session_dir / 'session_metadata.json')
+
+
+def first_screen_elapsed_seconds(first_screen_utc, now_utc=None):
+    """Wall seconds from the first participant screen to now, or None before it.
+
+    ``first_screen_utc`` is stamped just before the first screen a participant sees,
+    so the elapsed time spans the whole participant-facing session. Reporting it this
+    way also covers exits that never reach a saved session, such as ESC on the
+    hand-placement screen.
+    """
+    if first_screen_utc is None:
+        return None
+    now = now_utc or datetime.now(timezone.utc)
+    return round((now - first_screen_utc).total_seconds(), 3)
 
 
 def server_data_directory():

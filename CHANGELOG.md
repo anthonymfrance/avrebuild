@@ -3,6 +3,77 @@
 Timing is PTB software-reported only; there is no microphone, photodiode, or loopback measurement
 (the metadata note "PTB software-reported timing, no physical measurement" is kept).
 
+## 0.5 s stimulus audio
+
+- **Runtime assets are 0.5 s.** `20_stimuli/*/obj_snds/_cleaned_0.5/snd_*.wav` are 48 kHz,
+  stereo, 16-bit and exactly 24 000 frames, cut from the curated 1.0 s excerpts in `_cleaned/`,
+  which are kept for A/B listening (`tools/ab_audio.sh` plays each pair). `stimulus_paths` resolves
+  sounds to that folder, so the plan's `SOUND_DUR = 0.5` and the files agree.
+  `tests/test_load_timeline.py` passes again; the 1.0 s duration mismatch was the last known
+  failing test.
+- **Which half-second.** `tools/trim_stimuli.py --policy hybrid --install`: start each clip on its
+  own attack, and for a slow swell put the envelope peak 0.40 s into the clip. 5 ms fade in, 40 ms
+  fade out, so a cut through the waveform cannot click. The tool measures the `onset`, `peak` and
+  `loudest` windows beside the shipped `hybrid` one; `--report` re-runs the comparison.
+- **Level.** Matched on the loudest 200 ms K-weighted level (BS.1770) to -17.5 LUFS under a
+  -1 dBFS sample-peak ceiling, which brings a 9.4 dB spread in the 1 s set down to 2.38 dB
+  measured on the delivered files (integrated spread 4.20 dB). No `config.py` value changed, so
+  existing plans still load.
+- **Four slow-swell cues were re-cut.** `animate/5`, `animate/8`, `animate/9` and
+  `inanimate/2` open on a swell, so the `peak` anchor started the clip inside that swell: the cue
+  needed 121-301 ms to reach half level and its audible onset sat late against the visual peak the
+  study times. `EDGE_OVERRIDES` starts those four at the earliest point where the clip reaches half
+  its own peak within `RISE_SECONDS` (60 ms), with the same level target, fades and 0.5 s length.
+  Measured after the re-cut: 5-67 ms to half level, loudest-200 ms spread still 2.38 dB, and no cue
+  ends above -25 dB of its own peak except `inanimate/2` at -25.0. Slow attacks fall from 7 of 20
+  to the 3 that are slow in the recording itself (`animate/10`, `inanimate/1`, `inanimate/5`).
+- **A second 0.5 s cut was removed.** `_cleaned_0p5` started each clip at the last quiet-to-loud
+  boundary and matched K-weighted level over the whole window. Measured on its own files that
+  matching did not hold: 8 of 20 cues sat within 0.02 dB of the -19.85 target, integrated spread
+  4.39 dB and loudest-200 ms spread 6.17 dB, and 14 of 20 clips ended within 25 dB of their own
+  peak, so the decay was cut short. The two sets share the same half-second on 15 of 20 cues. Its
+  one advantage survives as a follow-up: on `animate/5`, `animate/8`, `animate/9` and `inanimate/2`
+  a boundary start gives a real attack where the hybrid peak anchor begins inside a swell.
+
+## Corner rule and fixed leads (`477978f`)
+
+- **One fixed lead per sound item.** PT already kept one SOA per stimulus; PD now does too.
+  `build_timeline` freezes `pd_soa_by_identity` beside `pt_soa_by_identity` before any event
+  exists, so no placement retry can change a lead, and both `validate_timeline` and
+  `plan_validator` reject an item whose lead moves. The operator screen lists each PT's and PD's
+  lead per block instead of a PD range. Verified: four PTs and four PDs, one value each.
+- **Four-way favoured corners.** `stimulus_split.draw_favored_corners` shuffles the four corners
+  across each block's two PTs and two PDs; the plan is written to `corner_plan.csv` and listed in
+  the participant metadata artifacts. A privileged item is a PT in one block and absent from the
+  other, or a PD in one block and absent from the other, so it has exactly one favoured corner and
+  each corner serves one PT and one PD. Privileged items aim for `TARGET_SPATIAL_BIAS` /
+  `DISTRACTOR_SPATIAL_BIAS` (0.80); NPT and NPD split evenly.
+- **The slotting key plans the privileged pairing only.** PT and PD rows carry `item`,
+  `total_appearances`, `corner` and `favored_corner`. One PT and one PD are active per trial, each
+  on `TRIALS_PER_PT` trials, and the two sequences are shuffled independently, so a trial's PT–PD
+  pairing is random. NPT and NPD stay sampled per trial; `even_pile` gives them their corners,
+  because `corner_pile` with a zero bias would always leave one corner empty.
+- **Operator screen and overlay.** `screens.plan_summary` lists each PT's and PD's lead and
+  favoured corner, and the per-frame debug overlay shows the same pair, so session day can check
+  the rule without opening the CSVs. The timeline CSV gained a `favored_corner` column (blank for
+  the non-privileged roles), and `plan_validator` checks it against the slotting key.
+- **Counts.** `TRIAL_PT_RANGE` and `TRIAL_PD_RANGE` are both `(4, 6)`, which gives 8–12
+  appearances per PT and per PD per block.
+- **Measured.** 20/20 seeds place at 8 trials and 4/4 at 100 trials. PT and PD land 75–83% in
+  their own corner (mean 80%); NPT and NPD split within one. A 100-trial plan generates in
+  10.1–11.4 s (mean 10.9 s) with 13.8k–15.3k placement orders and 45–53 trials using the repair
+  pass.
+- **Existing plans are refused**: the config snapshot loses `FAVORED_CORNER` and gains
+  `DISTRACTOR_SPATIAL_BIAS`. Each participant folder still records the commit and config it ran
+  under.
+- **Tests.** `plan_100` uses seed 2 because the stream moved; new tests cover the corner
+  permutation, one active PD per trial, the PD bias and the even splits. The retry test now asserts
+  that every trial is attempted once, only failures are retried and placed trials are never
+  redone.
+- **Not run.** The PsychoPy runtime. `tests/test_load_timeline.py` still fails on this branch
+  because the plan schedules 0.5 s sounds while the stimulus WAVs are 1.0 s; that predates this
+  change.
+
 ## Items
 
 1. **PT SOAs hidden from participants** (`79a066e`). Verified: SOAs appear only on the operator
@@ -144,3 +215,260 @@ Baseline across 9 pilot sessions (1604 visuals): visual `onset_deviation` mean +
 
 ## Known issues (not fixed, need a decision)
 - None.
+
+## 2026-10-20 pilot-prep changes
+
+- **Non-response keys are no longer false alarms** (`scoring.classify_press`). A key with no
+  response corner (SPACE, letters, modifiers) returns classification `ignored_key`, is logged, and
+  is never counted as a false alarm. New classification value: `ignored_key`. Pressing SPACE during
+  a trial used to score a false alarm, while practice ignored the same key.
+- **Participants are told the rules they are scored by** (`screens.scoring_rules`). A new screen
+  between the instructions and practice defines hit, late, miss and false alarm, with the window
+  numbers read from `config`. This closes the gap where the between-trial screen reported a "late"
+  count for a category nobody had defined. `INSTRUCTIONS_BOTTOM` now says "gain a miss or a late
+  response; the next screen explains the difference", and its last line is "Press SPACE to
+  continue." One extra screen: instructions → scoring rules → practice.
+- **Practice is saved, including when it is skipped or aborted** (`practice.run` now returns
+  `{'status', 'rows', 'summary'}`). Rows are written to `practice_log.csv`: `session_NN/practice_log.csv`
+  when a session starts, and `data/<pid>/practice_log.csv` if the run aborts during practice, where
+  no session folder exists yet. A skipped practice leaves one row with classification `skipped`.
+  `session_metadata.json` `practice` is now a dict of counts instead of a status string.
+- **The break counts down and its real duration is recorded** (`screens.rest_break`, new
+  `config.BREAK_OFFER_SECONDS = 30`). The screen continues on its own at zero, SPACE ends it early,
+  ESCAPE aborts. `session_metadata.json` now has `breaks: [{break_number, after_block,
+  offer_seconds, elapsed_seconds, ended_early, outcome}]`. `break_skip_info` is gone; its
+  `break_was_skipped` could never be true and `break_offer_seconds: 30` was recorded for a screen
+  that was not timed.
+- **Per-trial stats are persisted** as `session_NN/trial_log.csv` (`session_io.TRIAL_LOG_FIELDS`):
+  frame count, long-frame count, mean/median/max frame interval, miss and late counts, trial start
+  and end, `trial_complete`, `audio_requested_only_count`. These were computed by `run_trial` but
+  only ever reduced to session totals in `metadata['trial_summary']`, so per-trial frame health and
+  error clustering could not be audited after a session.
+- **Existing plans are refused after this change**, because `config.BREAK_OFFER_SECONDS` is part of
+  the config snapshot compared by `load_timeline`. `data/participant_01` can no longer be replayed;
+  new participants generate new plans.
+- Test that re-validated `data/participant_01/timeline_key.csv` against a hard-coded earlier seed
+  replaced with a violating timeline the test builds itself, so it no longer depends on whichever
+  plan happens to be in `data/`.
+
+### Verify in pilot
+- SPACE pressed inside a trial appears in `event_log.csv` as `ignored_key` and adds nothing to the
+  false-alarm count on the between-trial or completion screen.
+- The scoring-rules screen fits on the display without clipping and reads clearly at 24 px.
+- The break countdown reaches 0 and continues without a keypress; `breaks[0].elapsed_seconds`
+  matches wall-clock time, and `ended_early` is true when a participant presses SPACE early.
+- `practice_log.csv` exists in the session folder, and a skipped practice leaves the single
+  `skipped` row.
+- `trial_log.csv` has one row per completed or aborted trial and its `miss_count`/`late_count` sum
+  to the same totals as `trial_summary`.
+
+## 2026-10-27 participant wording changes
+
+- **The pre-task text is paged, one idea per SPACE press.** `screens.INSTRUCTION_PAGES` replaces
+  `INSTRUCTIONS_TOP`/`INSTRUCTIONS_BOTTOM` (the two blocks were shown together on one page: 165
+  words, 24 lines) and `screens.SCORING_PAGES` replaces `SCORING_RULES` (98 words). The new
+  `screens._pages` helper draws each page and waits for SPACE; ESCAPE still aborts on any page. The
+  pages are 44/47/69 and 45/57 words, so no page carries a wall of text. The `IE if your target is
+  animals…` sentence is reworded, and the scoring page indentation is gone.
+- **The hand-placement screen shows the real hand position** (`screens.HAND_PHOTO_NAME`,
+  `Example Hand Placement Photo.jpg`). The photo sits in the left column under the caption and the
+  finger diagram stays on the right as the labelled key reference. Dropped from the text to make
+  room: "Reach up for the top number or down for the bottom number in each pair", the "so you can
+  respond quickly" clause, and the `IE …` sentence.
+- **The block intro names the target group** (`screens.BLOCK_TARGET_PHRASE`, derived from
+  `config.BLOCK_LABELS`): "when you see any animal" / "any object" replaces "when you see one".
+  It is deliberately not a config constant, because a new config value would change the config
+  snapshot and refuse every existing participant plan (`session_io.load_timeline`). Verified:
+  `data/participant_08/timeline_key.csv` still loads.
+- **The between-trial recap and the practice summary share one wording**
+  (`scoring.trial_recap_lines`), reporting what the participant did in their own words instead of a
+  bare counter table: hits out of the trial's targets, too slow, missed the window, wrong time or
+  corner. Counts pluralize and zero counts still show. The practice summary keeps the "real task is
+  the same…" paragraph.
+- **The block intro and the trial recap are built by `screens.block_intro_message` and
+  `screens.trial_recap_message`** instead of inline in `experiment.py`, so the two pages that used
+  to be assembled in the runner are now pinned by tests like every other screen.
+- **No data-format or timing change.** No CSV column, metadata field, scoring rule or window was
+  touched; only participant-facing text and the screen flow for reading it.
+- New dev tools: `tools/participant_text_inventory.py` (word counts per screen string) and
+  `tools/render_screen_mock.py` (draws the static screens to HTML with fake PsychoPy objects, no
+  display or PsychoPy needed). `PARTICIPANT_TEXT_AUDIT.md` maps every screen, the wording, and the
+  before/after word counts.
+
+### Verify in pilot
+- Every instruction and scoring page is fully readable at 26 px with no clipping, and each waits for
+  SPACE before advancing; ESCAPE aborts from any page.
+- The hand-placement screen shows the photo, the caption and the diagram with no overlap, and the
+  participant's hand is on the number pad with a finger free for the space bar.
+- The block intro reads "any animal" in the animals block and "any object" in the objects block.
+- The recap after a trial lists all four counts with the trial's own numbers, and the practice
+  summary shows the same four lines for the practice round.
+
+## 2026-10-27 practice difficulty tiers
+
+- **Practice runs three paced rounds after the coached steps: easy → medium → hard**, each behind
+  its own hold screen, then a summary that breaks the counts down per round. Easy is the previous
+  single round, unchanged (`PACED` → `EASY`).
+- **Difficulty is density and overlap, never the response window.** `RESPONSE_WINDOW` (0.9 s) is the
+  same in all three rounds and the same as the real task. Only *targets* are forbidden from sharing
+  a decision window: target onsets stay at least `RESPONSE_WINDOW` apart, exactly as
+  `timeline_key` enforces, while distractor onsets are free down to
+  `MIN_VISUAL_ONSET_GAP` (0.15 s), so squares crowd circles and each other. One measurement script
+  over the delivered scripts and all 11 published plans (88 real trials), span = first onset to the
+  last shape disappearing:
+
+  | round | items | targets | span | items/s | most on screen | gaps < 0.6 s | other onsets inside a target window | items per corner |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | easy | 5 | 3 | 7.00 s | 0.71 | 1 | 0% | 0.00 | 1/1/1/2 |
+  | medium | 12 | 4 | 8.30 s | 1.45 | 2 | 27% | 0.75 | 3/3/3/3 |
+  | hard | 20 | 4 | 12.36 s | 1.62 | 3 | 42% | 1.25 | 5/5/5/5 |
+  | *real trials (median)* | *36* (30–42) | *8* (5–11) | *18.5 s* | *1.98* | *3, up to 4* | *58%* | *1.16* | *even* |
+
+  The pile-up, not the rate, was what was missing: the previous hard round never put more than two
+  shapes on screen, while every real trial reaches three and some reach four. The hard round now
+  sits at 1.62 items/s against the real median 1.98, and matches the real count of other onsets
+  inside a target's window (1.25 against 1.16).
+- **The hard round is a real trial's own picture stream, cut to its first 12 s.** The onsets are a
+  generated schedule, chosen as the densest-sharing 12 s slice on the server (20 items, 8 "crowded"
+  gaps, 1.25 other onsets per target window). It is frozen as constants, so it is identical for
+  every participant and carries no runtime dependency on the plan it came from. Only the corners are
+  repacked: **real trials put 79.3% of targets in `FAVORED_CORNER`** (`TARGET_SPATIAL_BIAS = 0.80`;
+  distractors are spread evenly), which would leave keys 1, 2 and 4 barely trained, so the targets
+  sit one to a corner and the distractors spread 5/5/5/5. Worth confirming that bias is intended.
+- **Practice draws the real background noise.** `practice.run` now takes the `backgrounds` list
+  `experiment.py` already builds, and draws it on every frame of the coached steps and the rounds,
+  rotated at `BG_UPDATE_RATE` exactly as `run_trial` does. Practice previously drew white shapes on
+  black, which is a large part of why it looked and read easier than the task.
+- **Shapes are grey (`SHAPE_COLOR = '#B4B4B4'`), not white.** A solid white square reads far heavier
+  than a grayscale stimulus photo, and it is 27% more area than a circle of the same box. The value
+  must not be the colour name `'gray'`: PsychoPy resolves that to rgb 0.0039, essentially black.
+  Sizes are unchanged (`config.IMAGE_SIZE`), and each shape still sits at a fixed per-event offset
+  inside its quadrant, distinct within each corner.
+- **`practice_log.csv` has a `tier` column** (`session_io.PRACTICE_LOG_FIELDS`, after `phase`), and
+  paced `event_id`s are prefixed per round (`easy-0` … `hard-19`) so ids stay unique. Logs written
+  before this change still parse; the new column comes out blank.
+- **`session_metadata.json` `practice`** keeps its totals (`paced_hits`, `paced_late`,
+  `paced_misses`, `paced_false_alarms`, summed over the three rounds) and gains `tiers` (one entry
+  per round: counts, event count, duration, outcome) and `skipped_at_tier`.
+- **The operator's `s` ends practice at any round change**, not only on the intro screen: rows
+  collected so far are kept, status is `skipped`, and `skipped_at_tier` names the round that did not
+  run. `s` is still not advertised to participants.
+- **No new `config.py` constant**, so the config snapshot is unchanged and existing participant
+  plans still load. Practice is not part of the timeline.
+- Practice is longer: 34.6 s end to end with a scripted participant, against 28.9 s for the
+  committed version (same harness, so the two are comparable). The 27.7 s of visual stream is
+  carried by 5 + 12 + 20 = 37 items against 5 + 9 + 18 = 32 before, plus three participant-paced
+  hold screens.
+- Practice is still silent. The real trials carry 46–55 sounds per plan; adding them to practice is
+  a separate change.
+
+### Verify in pilot
+- All three rounds run in order after the coached steps, each starting on SPACE, over the blob
+  background: one shape at a time, then two, then the three-deep pile-up.
+- The grey shapes are clearly visible against the noise field but no longer glare white; confirm on
+  the rig and adjust `practice.SHAPE_COLOR` if they are too dim or too bright.
+- `practice_log.csv` has one `tier` per round with unique `event_id`s, and its per-round counts
+  match `session_metadata.json practice.tiers` and the per-round lines on the final screen.
+- Pressing `s` on a round hold ends practice with `status: skipped`, `skipped_at_tier` set to the
+  round that did not run, and the coached rows still saved.
+- Whether hard is now hard enough: compare the participant's hard-round misses against their first
+  real trial, which is the closest thing to a like-for-like comparison.
+- PsychoPy is not installed on the machine used for this change, so the rounds were verified through
+  the fake-clock tests in `tests/test_practice.py` (including that the background is drawn every
+  frame), not at the console.
+
+## 2026-10-27 session-length and task-difficulty planning (analysis only, no runtime change)
+
+No participant-facing behavior changed: `config.py`, `experiment.py`, `trial_runner.py`,
+`screens.py`, `scoring.py` and `timeline_key.py` are untouched. The plan and its numbers are in
+`TASK_DIFFICULTY_PLAN.md`.
+
+- **`session_timing.py`** models participant-facing session length from the config constants plus
+  the pilot medians for the participant-paced screens (65 s pre-task, 29 s practice, 2.0 s per
+  feedback screen), solves trials per block for a target duration, and prints the
+  targets-per-trial x target-cadence decision table. `--calibrate DIR` recomputes those medians
+  from `preflight_report.txt`, `session_metadata.json` and `trial_log.csv`. Validated against the
+  three completed pilot sessions: within 10% for participants who read the screens, over-predicts
+  for a participant who pressed SPACE immediately.
+- **Findings**: the current session is 5.9 min; 45 min needs 96-100 trials at the present 24 s
+  trial, or 64-68 trials once the content window is 30 s. Trials per block is a multiple of
+  `PT_COUNT_PER_BLOCK`, so session length is quantized in 104 s steps at a 24 s trial.
+- **`capacity_sweep.py`** runs the real generation path over scenarios that each state the full
+  config they test, in a separate interpreter because `timeline_key` binds config values at import
+  time. It reports success rate, first-attempt rate, the 5-seed retry budget that
+  `create_participant_plan` actually has, placement orders per plan, and target prevalence.
+- **Findings**: with the 20 s content window, 11-13 targets per trial place 96% first try and
+  14-16 fail almost always (`placement_failure_within_capacity`, `RESPONSE_WINDOW` plus the 1.4 s
+  same-corner hold and `TARGET_SPATIAL_BIAS`). With a 30 s content window, 12-14 through 18-20
+  targets all place 100% first try, including the full 68-trial 45-minute plan with
+  prevalence-matched distractors. Raising the target count without raising the distractor count
+  also raises target prevalence from 22% to 32%, which on its own reduces misses.
+- **`tests/test_session_timing.py`** covers the model arithmetic, the solver and its quantization,
+  the cadence table, prevalence, scenario completeness, and pilot calibration on a synthetic
+  session folder.
+
+## 2026-11-03 half-second stimulus sounds
+
+- **The 1 s sounds are re-cut to the 0.5 s the timeline schedules.** `config.SOUND_DUR`
+  has been 0.5 since `c629e0d`, `timeline_key` writes 0.5 into every sound row, and
+  `session_io.load_timeline` rejects a WAV that differs by more than 2 ms — so the branch
+  could not load any plan (`tests/test_load_timeline.py` failed with *"WAV for toilet lasts
+  1.0000s but the plan schedules 0.5000s"*). The new set lives in
+  `20_stimuli/*/obj_snds/_cleaned_0.5` (20 files, 24 000 frames, 48 kHz stereo);
+  `_cleaned` keeps the 1 s recordings untouched and `session_io.stimulus_paths` reads the
+  new folder.
+- **Where the cut goes** (`tools/trim_stimuli.py`, `--report` prints the full table). Every
+  `_cleaned` file is a 1 s excerpt of the longer recording beside it, and 17 of 20 carry
+  energy past 0.5 s, so every policy loses something. Chosen `hybrid`: start at the natural
+  attack, but for slow-attack swells move the window so the envelope peak sits 0.40 s in
+  (a 10-90 % rise time above 0.25 s marks a swell). Two dense textures (ani 7, ina 9) are
+  pinned to the onset cut in `OVERRIDES`, because their loudest 10 ms frame is a
+  fluctuation rather than a swell, and the peak anchor would start them mid-texture.
+  The six swells (ani 4, ani 10, ina 8, ina 10, and the more compact ina 2, ina 4) keep
+  69-84 % of their energy instead of the 12-26 % the plain onset cut would keep.
+- **Every clip has a 5 ms fade-in and a 40 ms fade-out baked in**, so a cut through a
+  sounding waveform cannot click; PsychoPy plays the file as-is and has no envelope stage.
+- **Loudness is matched on the loudest 200 ms K-weighted level** (BS.1770 pre-filter) to
+  -17.5 dB, not on RMS: the 1 s set was already at -20 dBFS RMS but still spanned 9.4 dB of
+  momentary loudness, because a 100 ms click and a sustained texture of equal RMS do not
+  sound equally loud. The re-cut set spans 2.4 dB. ina 5 (-19.9) and ina 7 (-18.3) are held
+  1.7-2.4 dB under target by the -1 dBFS peak ceiling — both are already at full scale in
+  the source, and limiting them would distort rather than raise them.
+- **No config constant was added**; the folder name lives in `session_io.stimulus_paths`
+  and `tools/trim_stimuli.py`, next to the existing `_normalized` image path.
+- Audition scratch output (`--out`, the HTML page with all three cut policies) is written
+  to `20_stimuli/_trim_candidates/`, which is git-ignored.
+
+### Verify in pilot
+- The eight swells (ani 4, ani 10, ina 2, ina 4, ina 8, ina 10 and the two pinned textures)
+  still read as their object over headphones and do not sound like a cut-off ramp.
+- ina 5 and ina 7 are audibly a little quieter than the rest but not weak next to the
+  background noise; if they are, the ceiling has to move rather than the target.
+- Sound onsets still line up with `realized_soa_seconds` near 0, now that every clip starts
+  at its attack instead of carrying pre-onset recording noise.
+
+## 2026-11-09 preflight browser gates
+
+- **Consent, participant log, and browser closing happen before the experiment window opens.**
+  They run in `preflight.sh` after the debug/participant choice and before the report is written,
+  because the browser cannot be used from inside the fullscreen PsychoPy window while the reserved
+  PID is already known there. Preflight shows the PID in its own dialog, opens
+  `PREFLIGHT_CONSENT_URL`, waits for `Consent completed`, opens `PREFLIGHT_PARTICIPANT_LOG_URL`,
+  waits for `Added to the log`, then carries the reminder to close the browser, which must be
+  confirmed so the fullscreen window is not opened behind it. The two URLs live in
+  `preflight_config.sh` beside the lab-server settings.
+- **The report records every answer.** `consent_form=`, `participant_log=`, `browser_close=`
+  (`completed`/`confirmed`, `declined`, `skipped`, `not_requested` or `not_configured`) and
+  `browser_urls_opened=` are written to the preflight report and reach the session metadata, so a
+  session can be audited without asking the RA what was done.
+- **Debug runs can skip the block.** Each gate carries a `Skip (debug)` button (zenity cannot bind
+  a bare letter key) that ends the remaining browser steps for that run. Participant runs have only
+  `No, stop`, which exits before any participant folder exists, so the reserved ID is not consumed.
+- `xdg-open` is now a hard dependency (`xdg-utils`, added to the apt list in ENVIRONMENT.md).
+- **No `config.py` value changed**, so existing plans still load.
+
+### Verify in pilot
+- Both URLs open in the default browser, in that order, on the lab machine and on a fresh device
+  that has only the apt list in ENVIRONMENT.md installed.
+- The PID in the first dialog matches the folder created for the session.
+- A debug run can skip every gate; a participant run is offered no skip button.

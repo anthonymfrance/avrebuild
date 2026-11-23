@@ -15,9 +15,10 @@ from pathlib import Path
 from types import MappingProxyType
 
 import config
+from plan_validator import validate_plan
 from session_io import config_snapshot, json_default, server_data_directory, sha256_file
 from slotting_key import build_slotting_key, write_slotting_key
-from stimulus_split import split_pool
+from stimulus_split import draw_favored_corners, split_pool
 from timeline_key import (
     PlacementFailure,
     build_timeline,
@@ -28,10 +29,17 @@ from timeline_key import (
 
 
 PARTICIPANT_PATTERN = re.compile(r"^(?:participant_)?(\d+)$")
+# Not in config, whose values are snapshotted into every plan. About a third of
+# 100-trial seeds draw a trial no schedule can hold; those fail in under a second.
+PLAN_SEED_ATTEMPTS = 20
 
 
 class PlanGenerationError(RuntimeError):
     """Raised when all secret-seed plan placement attempts fail."""
+
+
+class PlanValidationError(RuntimeError):
+    """A generated plan broke a rule: a generator bug, never retried with a new seed."""
 
 
 def derive_rng(seed: int, label: str) -> random.Random:
@@ -51,15 +59,19 @@ def build_plan(seed, block_order, count_ranges=None, diagnostics=None):
     split = split_pool(slotting_rng)
     assignment = MappingProxyType({block: split[block] for block in block_order})
     ranges = dict(count_ranges or {})
+    corner_plan = draw_favored_corners(assignment, slotting_rng)
     slotting_rows = prepare_slotting_rows(build_slotting_key(
-        slotting_rng, assignment,
+        slotting_rng, assignment, corner_plan,
         pt_count_range=ranges.get('PT', config.TRIAL_PT_RANGE),
-        npt_count_range=ranges.get('NPT', config.TRIAL_NPT_RANGE),
+        pd_count_range=ranges.get('PD', config.TRIAL_PD_RANGE),
     ))
     timeline, required, stats = build_timeline(
         slotting_rows, derive_rng(seed, 'timeline'), assignment, config.WINDOW_SIZE,
         diagnostics=diagnostics, count_ranges=count_ranges,
     )
+    errors = validate_plan(assignment, slotting_rows, timeline, count_ranges=count_ranges)
+    if errors:
+        raise PlanValidationError(f'Seed {seed}: plan failed independent validation: ' + '; '.join(errors[:10]))
     return assignment, slotting_rows, timeline, required, stats
 
 
@@ -282,6 +294,26 @@ def participant_number(participant_id: str) -> int:
     return int(match.group(1))
 
 
+def git_state():
+    """HEAD commit and whether tracked files differ from it; (None, None) outside a repo.
+
+    The commit alone does not identify the code that built a plan: a dirty tree
+    can run constants HEAD has not committed yet, so the flag is stored beside it.
+    """
+    root = Path(__file__).resolve().parent
+    try:
+        commit = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=root, text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+        dirty = bool(subprocess.check_output(
+            ['git', 'status', '--porcelain', '--untracked-files=no'],
+            cwd=root, text=True, stderr=subprocess.DEVNULL,
+        ).strip())
+    except (OSError, subprocess.CalledProcessError):
+        return None, None
+    return commit, dirty
+
+
 def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> tuple[Path, dict]:
     """Reserve the participant folder and create all immutable session plans."""
     data_dir = Path(data_dir).resolve()
@@ -323,8 +355,9 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
                 except ValueError:
                     pass
     failed_seeds = []
+    failed_reasons = []
     try:
-        for attempt in range(1, 6):
+        for attempt in range(1, PLAN_SEED_ATTEMPTS + 1):
             seed = secrets.randbits(64)
             while seed in used_seeds:
                 seed = secrets.randbits(64)
@@ -333,23 +366,19 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
                 assignment, slotting_rows, timeline, required, stats = build_plan(seed, block_order)
             except PlacementFailure as exc:
                 failed_seeds.append(seed)
-                if attempt == 5:
+                failed_reasons.append(str(exc)[:400])
+                if attempt == PLAN_SEED_ATTEMPTS:
                     failed = ', '.join(map(str, failed_seeds))
                     raise PlanGenerationError(
-                        f'Timeline placement failed after 5 attempts; failed seeds: {failed}.'
+                        f'Timeline placement failed after {PLAN_SEED_ATTEMPTS} attempts; '
+                        f'failed seeds: {failed}; last reason: {failed_reasons[-1]}'
                     ) from exc
                 continue
             write_slotting_key(participant_id, seed, slotting_rows, assignment, data_dir=temp_dir)
             validation_report(slotting_rows, required, timeline, stats)
             write_timeline(temp_dir / 'timeline_key.csv', timeline)
             break
-        try:
-            git_commit = subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'], cwd=Path(__file__).resolve().parent,
-            text=True, stderr=subprocess.DEVNULL,
-            ).strip()
-        except (OSError, subprocess.CalledProcessError):
-            git_commit = None
+        git_commit, git_dirty = git_state()
         snapshot = {
             'participant_id': participant_id,
             'participant_number': number,
@@ -361,12 +390,19 @@ def create_participant_plan(data_dir: Path, participant_id: str, claim=None) -> 
             'completed_session_count_at_allocation': completed_count,
             'plan_attempts': len(failed_seeds) + 1,
             'failed_plan_seeds': failed_seeds,
+            'failed_plan_reasons': failed_reasons,
+            'placement': {
+                'placement_orders': stats['placement_attempts'],
+                'repaired_trials': stats['repaired_trials'],
+            },
             'timeline_sha256': sha256_file(temp_dir / 'timeline_key.csv'),
             'generated_utc': datetime.now(timezone.utc).isoformat(),
             'git_commit': git_commit,
+            'git_dirty': git_dirty,
             'config': config_snapshot(),
             'artifacts': {
                 'stimulus_assignment': 'stimulus_assignment.csv',
+                'corner_plan': 'corner_plan.csv',
                 'slotting_key': 'slotting_key.csv',
                 'timeline': 'timeline_key.csv',
                 'seed': 'seed.txt',

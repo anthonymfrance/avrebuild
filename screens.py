@@ -2,30 +2,34 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import config
 from config import BLOCK_LABELS
-from scoring import inter_trial_row
+from scoring import inter_trial_row, trial_recap_lines
 
 # Resolve the study root from this file's location, matching experiment.py's ROOT.
 _ROOT = Path(__file__).resolve().parent
 NUMPAD_IMAGE_NAME = '4-Corner Numpad Screen Visual.png'
+FINGERS_IMAGE_NAME = 'Finger Placement Screen Visual.png'
+HAND_PHOTO_NAME = 'Example Hand Placement Photo.jpg'
 
 
-def _numpad_image_path():
+def _image_path(name):
     """Study root first, then the directory holding the configured background image."""
     candidates = (
-        _ROOT / NUMPAD_IMAGE_NAME,
-        (_ROOT / config.BG_SOURCE_FILE).parent / NUMPAD_IMAGE_NAME,
+        _ROOT / name,
+        (_ROOT / config.BG_SOURCE_FILE).parent / name,
     )
     for path in candidates:
         if path.is_file():
             return path
     raise FileNotFoundError(
-        'Numpad screen visual not found; looked in: '
+        f'Instruction visual {name!r} not found; looked in: '
         + ', '.join(str(path) for path in candidates)
     )
+
 
 RESPONSE_KEYS = {
     'top_left': ('num_4', 'KP_Left'),
@@ -37,22 +41,121 @@ KEY_TO_CORNER = {
     key: corner for corner, keys in RESPONSE_KEYS.items() for key in keys
 }
 ALL_KEYS = list(KEY_TO_CORNER) + ['space', 'escape']
-INSTRUCTIONS_TOP = (
-    'Focus your eyes on the cross in the middle of the screen.\n\n'
-    'The experiment has two parts: an animals part and an objects part. You will be told which will come first for you.\n\n'
-    'During the animals task, all animals will be your targets.\n'
-    'During the objects task, all objects will be your targets.\n\n'
-    'When a target appears, press the number key corresponding to the corner where it appeared.\n'
-    'Do not press for distracting, non-target pictures. IE if your target is animals aim to not react to objects with the numpad.\n'
-    f'Respond within {config.RESPONSE_WINDOW:g} seconds.'
+# Operator-facing corner wording, so the setup screen and the debug overlay
+# name a corner the same way.
+CORNER_LABELS = {
+    'top_left': 'top left', 'top_right': 'top right',
+    'bottom_left': 'bottom left', 'bottom_right': 'bottom right',
+}
+# "any animal" / "any object": the singular of the block label, so the block
+# intro cannot drift from the block name. It lives here rather than in config
+# because every config value is part of the snapshot that existing participant
+# plans are validated against, and this is wording, not a study parameter.
+BLOCK_TARGET_PHRASE = {
+    block: f'any {label.lower().rstrip("s")}' for block, label in BLOCK_LABELS.items()
+}
+# What the centre mark is called in participant-facing text, keyed by the config
+# value that decides which mark is drawn, so the wording cannot drift from the
+# screen. Each name is a single word on purpose: the instructions page that
+# mentions the flash sits at its word budget (tests/test_screens.py,
+# PAGE_WORD_BUDGET). Only the wording lives here; the word 'ring' rather than
+# 'circle' keeps the mark distinct from the practice targets, which are filled
+# grey circles.
+MARK_NAMES = {
+    'cross': 'cross',
+    'circle': 'ring',
+    'border': 'frame',
+}
+
+
+def mark_shape():
+    """config.FIXATION_SHAPE, checked against the marks this module can draw."""
+    shape = config.FIXATION_SHAPE
+    if shape not in MARK_NAMES:
+        raise ValueError(
+            f'config.FIXATION_SHAPE must be one of {sorted(MARK_NAMES)}, got {shape!r}.'
+        )
+    return shape
+
+
+# The centre ring rests in the same grey as the practice shapes
+# (practice.SHAPE_COLOR): a solid white stroke over the dark noise
+# background reads much heavier than a grayscale photo, and the two greys
+# are the same surface so they should not drift apart.
+MARK_GREY = '#B4B4B4'
+
+
+def mark_rest_color():
+    """The mark's lineColor between hit flashes: grey ring, else FIXATION_COLOR."""
+    return MARK_GREY if mark_shape() == 'circle' else config.FIXATION_COLOR
+
+
+def mark_flash_phrase():
+    """How the screens name the hit flash, for the configured mark."""
+    return f'the {MARK_NAMES[mark_shape()]} flashes green'
+
+
+def mark_location_phrase():
+    """Where the mark sits, in words that fit the configured shape."""
+    if mark_shape() == 'border':
+        return 'the frame around the edge of the screen'
+    return f'the {MARK_NAMES[mark_shape()]} in the middle of the screen'
+
+
+# The instructions and the scoring rules are shown one page at a time: each page
+# is short enough to read in one look and waits for SPACE, so the participant
+# never faces a full wall of text. Every page carries its own advance line.
+INSTRUCTION_PAGES = (
+    'The experiment has two parts: an animals part and an objects part.\n'
+    'You will be told which part comes first for you.\n\n'
+    'During the animals part, all animals are your targets.\n'
+    'During the objects part, all objects are your targets.\n\n'
+    'Press SPACE to continue.',
+
+    'When a target appears, press the number key for the corner where it appeared.\n\n'
+    'Do not press for pictures that are not your targets. In the animals part, for\n'
+    'example, do not react to pictures of objects.\n\n'
+    f'You will have {config.RESPONSE_WINDOW:g} seconds to get points for reacting\n'
+    'after the target first appears.\n\n'
+    'Press SPACE to continue.',
+
+    f'React correctly and {mark_flash_phrase()}: that is a hit. Aim to get as many\n'
+    'hits as you can.\n\n'
+    'If you do not react in time you gain a miss or a late response; the next screen\n'
+    'explains the difference.\n\n'
+    'If you react to the wrong corner or to the wrong type of picture you gain a\n'
+    'false alarm. Aim to keep these low.\n\n'
+    'Press SPACE to continue.',
+
+    # Eyes may wander: the mark is feedback, not a fixation task. This comes
+    # after the hit page so the flash has already been described.
+    f'You do not need to watch {mark_location_phrase()}. Your eyes may wander over\n'
+    'the picture while you watch it. That mark only flashes when a response is\n'
+    'correct: it is feedback, not something to concentrate on.\n\n'
+    'Press SPACE to continue.',
 )
-INSTRUCTIONS_BOTTOM = (
-    'Every time you correctly react to your target, the cross will flash green and you will gain a point or a correct hit. Aim to maximize these.\n'
-    'Every time you fail to react in time, you will gain a miss. Aim to minimize these.\n'
-    'If you react to the wrong corner or the wrong object type (reacting to objects in the animals block) you will gain a false alarm. Aim to minimize these.\n\n'
-    'Press SPACE to begin.'
+
+# The four outcomes the scorer actually produces, in the participant's words.
+# Keep the numbers derived from config so the screen cannot drift from scoring.
+SCORING_PAGES = (
+    'How your responses are scored\n\n'
+    f'Hit: the right number key within {config.RESPONSE_WINDOW:g} seconds of the target\n'
+    f'appearing, and {mark_flash_phrase()}.\n\n'
+    f'Late: the right number key, but after {config.RESPONSE_WINDOW:g} seconds and within\n'
+    f'{config.TARGET_CORNER_HOLD:g} seconds. A late response is not a miss.\n\n'
+    'Press SPACE to continue.',
+
+    f'Miss: no key in the target\'s corner within {config.TARGET_CORNER_HOLD:g} seconds.\n\n'
+    'False alarm: a key in the wrong corner, a key for a picture that is not your\n'
+    'target, or a key when no target is on screen.\n\n'
+    'Press SPACE to continue.',
+
+    'Only 1, 2, 4 and 5 count as responses. Any other key is ignored.\n\n'
+    # "3 short rounds" mirrors practice.TIERS: screens.py cannot import practice
+    # (practice imports screens), and a config value would be frozen into the
+    # participant-plan snapshot.
+    'Press SPACE to start the practice. There are 3 short rounds.',
 )
-INSTRUCTIONS = INSTRUCTIONS_TOP + '\n\n' + INSTRUCTIONS_BOTTOM
 
 
 def _text(window, visual, height=22, **kwargs):
@@ -62,6 +165,93 @@ def _text(window, visual, height=22, **kwargs):
     )
 
 
+def _fit_image(window, visual, path, max_fraction_w, max_fraction_h):
+    """Build an ImageStim scaled to fit the given fractions of the window."""
+    image = visual.ImageStim(window, image=str(path), units='pix', autoLog=False)
+    img_w, img_h = image.size
+    scale = min(
+        (window.size[0] * max_fraction_w) / img_w,
+        (window.size[1] * max_fraction_h) / img_h,
+        1.0,
+    )
+    image.size = (img_w * scale, img_h * scale)
+    return image
+
+
+def center_mark(window, visual):
+    """The configured centre mark: the stim whose lineColor is the hit flash.
+
+    Every option is an outline, so trial_runner and practice flash all of them
+    the same way (mark_rest_color() -> FIXATION_HIT_COLOR) without knowing
+    which one is drawn. The ring rests in the practice grey; the cross and
+    the frame rest in config.FIXATION_COLOR.
+    """
+    shape = mark_shape()
+    if shape == 'border':
+        # A Rect strokes centred on its path, so the frame is inset by the
+        # stroke width: its visible outer edge lands on the window edge instead
+        # of half the stroke being cropped, and FIXATION_BORDER_WIDTH is the
+        # width the participant actually sees.
+        width = config.FIXATION_BORDER_WIDTH
+        return visual.Rect(
+            window,
+            # size, not width/height: the latter are deprecated in PsychoPy.
+            size=(window.size[0] - width, window.size[1] - width),
+            pos=(0, 0), fillColor=None, lineColor=config.FIXATION_COLOR,
+            lineWidth=width, units='pix', autoLog=False,
+        )
+    if shape == 'circle':
+        return visual.Circle(
+            window, radius=config.FIXATION_SIZE / 2,
+            fillColor=None, lineColor=mark_rest_color(),
+            lineWidth=config.FIXATION_LINE_WIDTH, pos=(0, 0),
+            units='pix', autoLog=False,
+        )
+    fix_half = config.FIXATION_SIZE / 2
+    return visual.ShapeStim(
+        window,
+        vertices=((0, -fix_half), (0, fix_half), (0, 0), (-fix_half, 0), (fix_half, 0)),
+        closeShape=False, lineColor=config.FIXATION_COLOR,
+        lineWidth=config.FIXATION_LINE_WIDTH, pos=(0, 0), autoLog=False,
+    )
+
+
+def finger_placement(window, kb, visual):
+    """Show where to rest the fingers before the key check; False if ESCAPE."""
+    win_w, win_h = window.size
+    text = _text(
+        window, visual, height=26,
+        pos=(-win_w * 0.26, win_h * 0.38), anchorVert='top',
+    )
+    text.text = (
+        'Hand Placement\n\n'
+        'Here is an example hand position: one finger on the\n'
+        'space bar and two on the number pad. Please use your\n'
+        'dominant hand on the number pad.\n\n'
+        'Rest your index finger between 4 and 1, and your\n'
+        'middle finger between 5 and 2.\n'
+        'Keep your fingers on the number pad between responses.\n\n'
+        'Press SPACE when your hand is in place.'
+    )
+    text.wrapWidth = win_w * 0.46
+    # The photo shows a real hand; the taller diagram stays beside it as the
+    # labelled reference for which key each finger rests on.
+    photo = _fit_image(window, visual, _image_path(HAND_PHOTO_NAME), 0.46, 0.38)
+    photo.pos = (-win_w * 0.26, -win_h * 0.22)
+    diagram = _fit_image(window, visual, _image_path(FINGERS_IMAGE_NAME), 0.30, 0.74)
+    diagram.pos = (win_w * 0.30, 0)
+    while True:
+        text.draw()
+        photo.draw()
+        diagram.draw()
+        window.flip()
+        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+        if any(key.name == 'escape' for key in presses):
+            return False
+        if any(key.name == 'space' for key in presses):
+            return True
+
+
 def numpad_check(window, kb, visual):
     """Require each response key once; False if ESCAPE."""
     keys = ('num_4', 'num_5', 'num_1', 'num_2')
@@ -69,17 +259,22 @@ def numpad_check(window, kb, visual):
         'num_4': 'top-left (4)', 'num_5': 'top-right (5)',
         'num_1': 'bottom-left (1)', 'num_2': 'bottom-right (2)',
     }
-    text = _text(window, visual)
+    win_w, win_h = window.size
+    text = _text(window, visual, height=26, pos=(-win_w * 0.25, 0))
+    text.wrapWidth = win_w * 0.44
+    numpad = _fit_image(window, visual, _image_path(NUMPAD_IMAGE_NAME), 0.48, 0.62)
+    numpad.pos = (win_w * 0.25, 0)
     seen = set()
     while len(seen) < len(keys):
         missing = [names[key] for key in keys if key not in seen]
         text.text = (
             'Number Key Check\n\n'
-            'Press each of the four number keys shown below once.\n\n'
+            'Press each of the four number keys shown here once.\n\n'
             f'Still to check: {", ".join(missing)}\n\n'
             'If a key does not work, turn Num Lock on and try again.'
         )
         text.draw()
+        numpad.draw()
         window.flip()
         presses = kb.getKeys(keyList=list(keys) + ['escape'], waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
@@ -96,7 +291,13 @@ def sound_check(window, kb, visual, test_tone):
         'Listen for a short sound.\n\n'
         'Press R to hear it again.\n'
         'Press SPACE if you heard it.\n'
-        'Press N if you did not hear it.'
+        'Press N if you did not hear it.\n\n'
+        # The plan is generated the moment SPACE confirms the sound check, and
+        # the last frame stays on screen while it runs, so this is the screen
+        # that has to ask for patience.
+        'After you press SPACE, the study needs about\n'
+        '30 seconds to prepare. Please be patient;\n'
+        'the screen will not change while it does.'
     )
     test_tone.play()
     while True:
@@ -115,19 +316,28 @@ def sound_check(window, kb, visual, test_tone):
 
 
 def plan_summary(participant_id, rows, block_order, trials_by_block):
-    """Operator debug-screen lines and the PT SOA per block (operator-only)."""
-    pt_soa_by_block = {}
+    """Operator debug-screen lines and each PT's and PD's lead and favoured corner."""
+    pt_soa, pd_soa, favored = {}, {}, {}
     for block in block_order:
-        pt_soa_by_block[block] = {}
+        pt_soa[block], pd_soa[block], favored[block] = {}, {}, {}
         for row in rows:
-            if row['block'] == block and row['event_type'] == 'sound' and row['role'] == 'PT':
-                pt_soa_by_block[block][row['stimulus']] = float(row['soa'])
+            if row['block'] != block or row['role'] not in ('PT', 'PD'):
+                continue
+            if row.get('favored_corner'):
+                favored[block][row['stimulus']] = row['favored_corner']
+            if row['event_type'] != 'sound':
+                continue
+            if row['role'] == 'PT':
+                pt_soa[block][row['stimulus']] = float(row['soa'])
+            else:
+                pd_soa[block][row['stimulus']] = float(row['soa'])
     lines = [
         'STUDY SETUP — STIMULUS ASSIGNMENTS',
         f"Participant: {participant_id}    Block order: {' → '.join(BLOCK_LABELS[b] for b in block_order)}",
         f'Target response window: {config.RESPONSE_WINDOW:.1f} seconds',
-        'PT SOA is fixed for each PT in this participant plan:',
-        f'PD sound lead: {config.PD_SOA_MIN:.2f}–{config.PD_SOA_MAX:.2f} seconds',
+        'Each PT and PD keeps one lead and one favoured corner in this plan:',
+        f'SOA range: PT {config.PT_SOA_MIN:.2f}–{config.PT_SOA_MAX:.2f} s, '
+        f'PD {config.PD_SOA_MIN:.2f}–{config.PD_SOA_MAX:.2f} s',
         '',
     ]
     for block in block_order:
@@ -136,11 +346,12 @@ def plan_summary(participant_id, rows, block_order, trials_by_block):
         pd_counts = sum(row['event_type'] == 'visual' and row['role'] == 'PD' for row in block_rows)
         npd_counts = sum(row['event_type'] == 'visual' and row['role'] == 'NPD' for row in block_rows)
         lines.append(f"{BLOCK_LABELS[block]} BLOCK — target group: {BLOCK_LABELS[block]}")
-        lines.append(
-            '  PT SOA by target: ' + ', '.join(
-                f'{name} = {soa:.1f}s' for name, soa in sorted(pt_soa_by_block[block].items())
+        for role, table in (('PT', pt_soa), ('PD', pd_soa)):
+            entries = ', '.join(
+                f'{name} {soa:.2f}s @ {CORNER_LABELS.get(favored[block].get(name), "?")}'
+                for name, soa in sorted(table[block].items())
             )
-        )
+            lines.append(f'  {role}: {entries if entries else "none"}')
         lines.append(f'  Events per block — PT: {pt_counts}, PD: {pd_counts}, NPD: {npd_counts}')
         for role, description in (
             ('PT', 'Targets with sound (PT)'),
@@ -157,7 +368,14 @@ def plan_summary(participant_id, rows, block_order, trials_by_block):
         )
         lines.append('')
     lines.append('Operator review: press SPACE to continue to the instructions.')
-    return lines, pt_soa_by_block
+    details = {
+        block: {
+            name: f'{soa:.2f}s @ {CORNER_LABELS.get(favored[block].get(name), "?")}'
+            for name, soa in {**pt_soa[block], **pd_soa[block]}.items()
+        }
+        for block in block_order
+    }
+    return lines, details
 
 
 def operator_screen(window, kb, visual, lines):
@@ -176,36 +394,184 @@ def operator_screen(window, kb, visual, lines):
             return True
 
 
-def instructions(window, kb, visual):
-    """Show the task instructions; False if ESCAPE."""
+def stimulus_inventory(window, kb, visual, clock, groups, gap_seconds=1.0):
+    """Operator-only grid of every stimulus at study size. False if ESCAPE.
+
+    groups is ((label, ((name, image, sound), ...)), ...), in display order.
+    Each group is five columns wide, so the two ten-item groups make two rows of
+    five. Every image is forced to config.IMAGE_SIZE, the size it is drawn at
+    during the study, so the operator sees the real on-screen size. P plays
+    every sound once, in display order, with gap_seconds of silence after each;
+    SPACE continues.
+    """
     win_w, win_h = window.size
-
-    top_text = _text(window, visual, height=22, pos=(0, win_h * 0.18))
-    top_text.text = INSTRUCTIONS_TOP
-
-    image_path = _numpad_image_path()
-    numpad = visual.ImageStim(
-        window, image=str(image_path), units='pix', autoLog=False,
+    img_w, img_h = config.IMAGE_SIZE
+    title = visual.TextStim(
+        window, text='', color='white', height=26, anchorVert='top',
+        units='pix', autoLog=False,
     )
-    max_w, max_h = win_w * 0.45, win_h * 0.28
-    img_w, img_h = numpad.size
-    scale = min(max_w / img_w, max_h / img_h, 1.0)
-    numpad.size = (img_w * scale, img_h * scale)
-    numpad.pos = (0, -win_h * 0.12)
-
-    bottom_text = _text(window, visual, height=22, pos=(0, -win_h * 0.38))
-    bottom_text.text = INSTRUCTIONS_BOTTOM
-
+    name_text = visual.TextStim(
+        window, text='', color='white', height=16, anchorVert='top',
+        units='pix', autoLog=False,
+    )
+    footer = visual.TextStim(
+        window,
+        text='P plays every sound, one second apart. Press SPACE to continue.',
+        color='white', height=22, anchorVert='bottom', units='pix',
+        autoLog=False, pos=(0, -win_h * 0.47),
+    )
+    column_step = win_w * 0.175
+    row_step = img_h + 52
+    titles = []
+    placed = []
+    for group_index, (label, items) in enumerate(groups):
+        rows = max(1, math.ceil(len(items) / 5))
+        centre = win_h * (0.5 - (group_index + 0.5) / len(groups))
+        titles.append((label, centre + (rows - 1) * row_step / 2 + img_h / 2 + 34))
+        for position, (name, image, cue) in enumerate(items):
+            row, column = divmod(position, 5)
+            image.size = (img_w, img_h)
+            placed.append((
+                (column - 2) * column_step,
+                centre + (rows - 1) * row_step / 2 - row * row_step,
+                name, image, cue,
+            ))
+    pending = []
+    next_play_at = 0.0
     while True:
-        top_text.draw()
-        numpad.draw()
-        bottom_text.draw()
+        for label, y in titles:
+            title.text = label
+            title.pos = (0, y)
+            title.draw()
+        for x, y, name, image, cue in placed:
+            image.pos = (x, y)
+            image.draw()
+            name_text.text = name
+            name_text.pos = (x, y - img_h / 2 - 8)
+            name_text.draw()
+        footer.draw()
         window.flip()
-        presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+        if pending and clock.getTime() >= next_play_at:
+            pending.pop(0).play()
+            next_play_at = clock.getTime() + config.SOUND_DUR + gap_seconds
+        presses = kb.getKeys(
+            keyList=['space', 'p', 'escape'], waitRelease=False, clear=True,
+        )
+        if any(key.name == 'escape' for key in presses):
+            for cue in pending:
+                cue.stop()
+            return False
+        if any(key.name == 'p' for key in presses):
+            pending = [
+                cue for _label, items in groups for _name, _image, cue in items
+                if cue is not None
+            ]
+            next_play_at = clock.getTime()
+        if any(key.name == 'space' for key in presses):
+            for cue in pending:
+                cue.stop()
+            return True
+
+
+STACK_OPACITY = 0.35  # low enough that all 20 silhouettes stay visible
+
+
+def stimulus_stack(window, kb, visual, items, opacity=STACK_OPACITY):
+    """Every stimulus drawn at the same centre, one over another. False if ESCAPE.
+
+    items is ((name, image), ...). Each image is drawn at its study size in the
+    window centre; the PNGs have transparent backgrounds, so lower layers stay
+    visible and an object drawn much larger than the rest shows up as the widest
+    silhouette. SPACE continues, ESCAPE aborts.
+    """
+    win_w, win_h = window.size
+    title = visual.TextStim(
+        window, text='ALL STIMULI STACKED AT THE CENTRE', color='white',
+        height=26, anchorVert='top', units='pix', autoLog=False,
+        pos=(0, win_h * 0.44),
+    )
+    footer = visual.TextStim(
+        window,
+        text=f'All {len(items)} pictures at study size, {opacity:.0%} opacity.\n'
+             'Press SPACE to continue.',
+        color='white', height=22, anchorVert='bottom', units='pix',
+        autoLog=False, pos=(0, -win_h * 0.47),
+    )
+    for _name, image in items:
+        image.size = config.IMAGE_SIZE
+        image.pos = (0, 0)
+        image.opacity = opacity
+    while True:
+        for _name, image in items:
+            image.draw()
+        title.draw()
+        footer.draw()
+        window.flip()
+        presses = kb.getKeys(
+            keyList=['space', 'escape'], waitRelease=False, clear=True,
+        )
         if any(key.name == 'escape' for key in presses):
             return False
         if any(key.name == 'space' for key in presses):
             return True
+
+
+def block_intro_message(block_index, block_count, block):
+    """The page shown before each block. Targets are named as a group."""
+    return (
+        f'Block {block_index + 1} of {block_count}: {BLOCK_LABELS[block]}\n'
+        f'Your target group is {BLOCK_LABELS[block].lower()}. Press the matching '
+        f'numpad key when you see {BLOCK_TARGET_PHRASE[block]}.'
+    )
+
+
+def recap_pages(headline, hits, total_targets, late, misses, false_alarms):
+    """The recap split over two pages, so neither page is a wall of text.
+
+    The practice summary uses this too, so the two recaps cannot drift apart.
+    The caller supplies the headline and adds its own SPACE line to each page.
+    """
+    lines = trial_recap_lines(hits, total_targets, late, misses, false_alarms)
+    return (
+        f'{headline}\n\n'
+        + '\n'.join(lines[:2]),
+        '\n'.join(lines[2:])
+        + '\n\nRemember to respond to all targets quickly and accurately!',
+    )
+
+
+def trial_recap_messages(block, trial, hits, total_targets, late, misses, false_alarms):
+    """The two pages shown after every trial, in the participant's words."""
+    return recap_pages(
+        f'{BLOCK_LABELS[block]} — Trial {trial} complete.',
+        hits, total_targets, late, misses, false_alarms,
+    )
+
+
+def _pages(window, kb, visual, pages, height=24):
+    """Show each page in turn, waiting for SPACE after every one; False if ESCAPE."""
+    text = _text(window, visual, height=height)
+    for page in pages:
+        text.text = page
+        while True:
+            text.draw()
+            window.flip()
+            presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
+            if any(key.name == 'escape' for key in presses):
+                return False
+            if any(key.name == 'space' for key in presses):
+                break
+    return True
+
+
+def instructions(window, kb, visual):
+    """Show the task instructions, one page per SPACE; False if ESCAPE."""
+    return _pages(window, kb, visual, INSTRUCTION_PAGES, height=26)
+
+
+def scoring_rules(window, kb, visual):
+    """Explain the four scored outcomes before practice; False if ESCAPE."""
+    return _pages(window, kb, visual, SCORING_PAGES, height=26)
 
 
 def continuation(window, kb, text, message, key_rows, block, trial):
@@ -234,18 +600,28 @@ def continuation(window, kb, text, message, key_rows, block, trial):
             return True
 
 
-def rest_break(window, kb, visual):
-    """Offer an untimed break; SPACE continues and ESCAPE aborts."""
+def rest_break(window, kb, visual, clock, duration=config.BREAK_OFFER_SECONDS):
+    """Count down a break; returns ('completed'|'aborted', seconds actually taken).
+
+    The break ends at zero, so a participant who does not press anything still
+    continues on their own. SPACE ends it early and ESCAPE aborts.
+    """
     text = _text(window, visual, height=30)
-    text.text = (
-        "You can take a 30 second break here or continue if you'd like.\n\n"
-        'Press SPACE to continue when you are ready.'
-    )
+    start = float(clock.getTime())
     while True:
+        elapsed = float(clock.getTime()) - start
+        remaining = max(0.0, duration - elapsed)
+        text.text = (
+            f'Break — the study continues on its own in {math.ceil(remaining)} seconds.\n\n'
+            'Rest your eyes and hands, then carry on when you are ready.\n\n'
+            'Press SPACE to continue now.'
+        )
         text.draw()
         window.flip()
         presses = kb.getKeys(keyList=['space', 'escape'], waitRelease=False, clear=True)
         if any(key.name == 'escape' for key in presses):
-            return 'aborted'
+            return 'aborted', elapsed
         if any(key.name == 'space' for key in presses):
-            return 'completed'
+            return 'completed', elapsed
+        if remaining <= 0:
+            return 'completed', float(clock.getTime()) - start

@@ -104,7 +104,9 @@ for row in visuals:
     assert x_min <= abs(row['x']) <= x_max
     assert y_min <= abs(row['y']) <= y_max
 '''],
-        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30,
+        # Building a plan at the configured session length is not instant:
+        # 100 trials take roughly half a minute, so the timeout has to cover it.
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -126,17 +128,76 @@ def test_target_corner_stays_empty_through_late_window():
                 assert not 0 <= other['global_onset'] - target['global_onset'] < TARGET_CORNER_HOLD
 
 
-def test_five_failed_seeds_leave_no_folder_and_do_not_consume_id(tmp_path, monkeypatch):
-    seeds = iter(range(100, 105))
+def test_pt_sound_never_starts_before_previous_pt_response_window_ends():
+    from config import RESPONSE_WINDOW, WINDOW_SIZE
+    from timeline_key import validate_timeline
+    # Include seed 11356349656583725014, where a later PT's sound used to start
+    # during the earlier PT's visual/response window.
+    for seed in (7, 11, 11356349656583725014):
+        assignment, slotting_rows, timeline, required, _ = participant_setup.build_plan(
+            seed, ['animate', 'inanimate'],
+        )
+        sounds_by_source = {
+            row['source_event_id']: row for row in timeline if row['event_type'] == 'sound'
+        }
+        for block in ('animate', 'inanimate'):
+            pts = sorted(
+                (row for row in timeline
+                 if row['block'] == block and row['event_type'] == 'visual' and row['role'] == 'PT'),
+                key=lambda row: row['global_onset'],
+            )
+            for earlier, later in zip(pts, pts[1:]):
+                later_sound = sounds_by_source[later['event_id']]
+                assert later_sound['global_onset'] >= earlier['global_onset'] + RESPONSE_WINDOW - 1e-9
+
+    # Also verify validate_timeline rejects a timeline where a PT's sound starts
+    # before the previous PT's response window ends. The violating timeline is
+    # built here rather than read from a saved participant folder, which changes
+    # with every session and would make this check depend on leftover data.
+    from config import FADE_IN_DUR
+    assignment, slotting_rows, timeline, required, _ = participant_setup.build_plan(
+        7, ['animate', 'inanimate'],
+    )
+    sounds_by_source = {
+        row['source_event_id']: row for row in timeline if row['event_type'] == 'sound'
+    }
+    pts_by_trial = {}
+    for row in timeline:
+        if row['event_type'] == 'visual' and row['role'] == 'PT':
+            pts_by_trial.setdefault((row['block'], row['trial']), []).append(row)
+    same_trial_pairs = [
+        pair
+        for pts in pts_by_trial.values()
+        for pair in zip(sorted(pts, key=lambda r: r['global_onset']),
+                        sorted(pts, key=lambda r: r['global_onset'])[1:])
+    ]
+    assert same_trial_pairs, 'seed 7 should place two PTs in at least one trial'
+    for earlier, later in same_trial_pairs:
+        sound = sounds_by_source[later['event_id']]
+        trial_start = sound['global_onset'] - sound['trial_onset']
+        moved = dict(sound)
+        moved['global_onset'] = earlier['global_onset'] + RESPONSE_WINDOW - 0.001
+        moved['trial_onset'] = moved['global_onset'] - trial_start
+        moved['soa'] = (later['global_onset'] + FADE_IN_DUR) - moved['global_onset']
+        mutated = [row for row in timeline if row['event_id'] != moved['event_id']] + [moved]
+        mutated.sort(key=lambda row: row['global_onset'])
+        with pytest.raises(ValueError, match='PT sound starts before previous PT response window ends'):
+            validate_timeline(slotting_rows, required, mutated, assignment, WINDOW_SIZE)
+
+
+def test_exhausted_seeds_leave_no_folder_and_do_not_consume_id(tmp_path, monkeypatch):
+    attempts = participant_setup.PLAN_SEED_ATTEMPTS
+    seeds = iter(range(100, 100 + attempts))
     monkeypatch.setattr(participant_setup.secrets, 'randbits', lambda _: next(seeds))
 
     def fail(*args, **kwargs):
         raise PlacementFailure('simulated failure')
 
     monkeypatch.setattr(participant_setup, 'build_timeline', fail)
-    with pytest.raises(PlanGenerationError, match='failed after 5 attempts') as error:
+    with pytest.raises(PlanGenerationError, match=f'failed after {attempts} attempts') as error:
         participant_setup.create_participant_plan(tmp_path, 'participant_01')
-    assert all(str(seed) in str(error.value) for seed in range(100, 105))
+    assert all(str(seed) in str(error.value) for seed in range(100, 100 + attempts))
+    assert 'simulated failure' in str(error.value)
     assert not (tmp_path / 'participant_01').exists()
     assert not (tmp_path / '.participant_01.tmp').exists()
     assert next_participant_id(tmp_path) == 'participant_01'
@@ -247,7 +308,7 @@ def test_failure_retries_with_new_seed_and_records_failed_seed(tmp_path, monkeyp
     assert metadata['failed_plan_seeds'] == [100]
     assert int((participant_dir / 'seed.txt').read_text()) == 200
     assert {path.name for path in participant_dir.iterdir()} == {
-        'seed.txt', 'slotting_key.csv', 'stimulus_assignment.csv',
+        'seed.txt', 'slotting_key.csv', 'stimulus_assignment.csv', 'corner_plan.csv',
         'timeline_key.csv', 'participant_metadata.json',
     }
     stored = json.loads((participant_dir / 'participant_metadata.json').read_text())

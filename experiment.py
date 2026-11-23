@@ -9,16 +9,20 @@ import math
 import os
 import platform
 import shutil
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import config
 from config import BLOCK_LABELS, TARGET_ROLES
-from participant_setup import create_participant_plan, derive_rng, verify_participant_claim
+from stimulus_split import ANIMATE, INANIMATE
+from participant_setup import create_participant_plan, derive_rng, git_state, verify_participant_claim
+import practice
 import screens
-from session_io import load_timeline, operator_warn, save_session, sha256_file, sync_participant
+from session_io import (
+    first_screen_elapsed_seconds, load_timeline, operator_warn, save_session, sha256_file,
+    stimulus_paths, sync_participant, write_practice_log,
+)
 from audio_ptb import (
     AUDIO_START_SOURCE, assign_sound_slots, backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio,
 )
@@ -143,6 +147,7 @@ def run(args):
     key_rows = []
     trial_rows = []
     current_trial_events = None
+    first_screen_utc = None
     metadata = {
         'participant_id': args.pid,
         'started_utc': None,
@@ -169,6 +174,21 @@ def run(args):
             'first_frame_opacity': 0.02,
             'note': 'opacity is deterministic from time since recorded onset; see trial_runner.planned_image_alpha',
         },
+        # Presentation only, so it is deliberately absent from the participant-plan
+        # config snapshot; this is the record of which mark the session ran with.
+        'center_mark': {
+            'shape': config.FIXATION_SHAPE,
+            'size_pixels': config.FIXATION_SIZE,
+            'line_width_pixels': (
+                config.FIXATION_BORDER_WIDTH if config.FIXATION_SHAPE == 'border'
+                else config.FIXATION_LINE_WIDTH
+            ),
+            'color': screens.mark_rest_color(),
+            'hit_color': config.FIXATION_HIT_COLOR,
+            'flash_seconds': config.FIXATION_FLASH_DUR,
+            'participant_wording': screens.mark_flash_phrase(),
+        },
+        'mouse_cursor_hidden': True,
         'audio_start_source': None,
         'audio_clock_conversion': 'session_time = PTB time - session_clock.getLastResetTime()',
         'audio_clock_offset_check_seconds': clock_offset,
@@ -188,6 +208,10 @@ def run(args):
             size=config.WINDOW_SIZE, fullscr=True, screen=0,
             units='pix', color=[0, 0, 0], checkTiming=True, waitBlanking=True,
         )
+        # The pointer is never an input device here, and one drifting over the
+        # stimuli is a visible distraction, so hide the OS cursor for the whole
+        # session and put it back when the window closes.
+        window.setMouseVisible(False)
         window_size = tuple(int(value) for value in window.size)
         if window_size != tuple(config.WINDOW_SIZE):
             raise RuntimeError(
@@ -201,6 +225,9 @@ def run(args):
             raise RuntimeError('Could not measure a stable display refresh rate with getActualFrameRate().')
         measured_refresh_hz = float(measured_refresh_hz)
         frame_period = 1.0 / measured_refresh_hz
+        # Re-assert after the timing probe's flips, the point where the backend
+        # has finished settling the window.
+        window.setMouseVisible(False)
         metadata.update({
             'window_size': list(window_size),
             'display_refresh_hz': measured_refresh_hz,
@@ -238,15 +265,17 @@ def run(args):
         except Exception:
             metadata['psychtoolbox_version'] = None
 
-        fix_half = config.FIXATION_SIZE / 2
-        fixation = visual.ShapeStim(
-            window,
-            vertices=((0, -fix_half), (0, fix_half), (0, 0), (-fix_half, 0), (fix_half, 0)),
-            closeShape=False, lineColor=config.FIXATION_COLOR,
-            lineWidth=config.FIXATION_LINE_WIDTH, pos=(0, 0), autoLog=False,
-        )
+        fixation = screens.center_mark(window, visual)
         kb = keyboard.Keyboard(clock=session_clock)
         kb.clearEvents()
+
+        # Wall clock for the whole participant-facing session. Stamped on the first
+        # screen they see, so it covers every exit path, including ESC.
+        first_screen_utc = datetime.now(timezone.utc)
+        metadata['first_screen_utc'] = first_screen_utc.isoformat()
+
+        if not screens.finger_placement(window, kb, visual):
+            return
 
         if not screens.numpad_check(window, kb, visual):
             return
@@ -321,7 +350,8 @@ def run(args):
         for row in sound_rows:
             row['sound_slot'] = slots[row['event_id']]
 
-        debug_lines, pt_soa_by_block = screens.plan_summary(args.pid, rows, block_order, trials_by_block)
+        debug_lines, item_details_by_block = screens.plan_summary(
+            args.pid, rows, block_order, trials_by_block)
         debug_overlay_enabled = os.environ.get('AV_STUDY_DEBUG_OVERLAY', 'false').lower() == 'true'
         metadata['debug_overlay_enabled'] = debug_overlay_enabled
         metadata['debug_overlay_note'] = (
@@ -332,7 +362,50 @@ def run(args):
         )
         if debug_overlay_enabled and not screens.operator_screen(window, kb, visual, debug_lines):
             return
+        if debug_overlay_enabled:
+            # Every stimulus at the size it is drawn during the task, so the
+            # operator can check the pool and its cues before the session.
+            inventory_groups = []
+            for block in ('animate', 'inanimate'):
+                items = []
+                for name in (ANIMATE if block == 'animate' else INANIMATE):
+                    image_path, sound_path = stimulus_paths(ROOT, block, 'PT', name)
+                    items.append((
+                        name,
+                        visual.ImageStim(
+                            window, image=str(image_path), size=config.IMAGE_SIZE,
+                            units='pix', autoLog=False,
+                        ),
+                        sound.Sound(
+                            str(sound_path), speaker=shared_speaker, stereo=True,
+                            preBuffer=-1, volume=config.AUDIO_VOLUME, autoLog=False,
+                        ),
+                    ))
+                inventory_groups.append((BLOCK_LABELS[block], items))
+            inventory_images = [
+                (name, image) for _label, items in inventory_groups
+                for name, image, _cue in items
+            ]
+            if not screens.stimulus_inventory(
+                window, kb, visual, session_clock, inventory_groups,
+            ):
+                return
+            # The same pictures overlaid at the centre, so an object drawn
+            # much larger than the rest is obvious before the session.
+            if not screens.stimulus_stack(window, kb, visual, inventory_images):
+                return
         if not screens.instructions(window, kb, visual):
+            return
+        if not screens.scoring_rules(window, kb, visual):
+            return
+        practice_result = practice.run(
+            window, kb, visual, fixation, session_clock, backgrounds,
+        )
+        metadata['practice'] = practice_result['summary']
+        if practice_result['status'] == 'abort':
+            # No session folder exists yet, but the participant folder does, so
+            # an abort during practice still leaves the practice rows behind.
+            write_practice_log(pid_dir / 'practice_log.csv', practice_result['rows'])
             return
 
         session_clock.reset()
@@ -344,14 +417,9 @@ def run(args):
         session_name = f'session_{session_number:02d}'
         session_dir = pid_dir / session_name
         session_dir.mkdir(parents=True, exist_ok=False)
-        try:
-            metadata['git_commit'] = subprocess.check_output(
-                ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True,
-                stderr=subprocess.DEVNULL,
-            ).strip()
-        except (OSError, subprocess.CalledProcessError):
-            metadata['git_commit'] = None
+        metadata['git_commit'], metadata['git_dirty'] = git_state()
         metadata['session_dir'] = str(session_dir)
+        write_practice_log(session_dir / 'practice_log.csv', practice_result['rows'])
 
         window_text = visual.TextStim(
             window, text='', color='white', height=28,
@@ -372,9 +440,7 @@ def run(args):
         aborted = False
         for block_index, block in enumerate(block_order):
             if not continuation(
-                f"Block {block_index + 1} of {len(block_order)}: {BLOCK_LABELS[block]}\n"
-                f'Your target group is {BLOCK_LABELS[block].lower()}. Press the matching '
-                'numpad key when you see one.'
+                screens.block_intro_message(block_index, len(block_order), block)
             ):
                 aborted = True
                 break
@@ -392,7 +458,7 @@ def run(args):
                     fixation=fixation, frame_period=frame_period, metadata=metadata,
                     overlay=(debug_overlay, (
                         f'{args.pid} | {BLOCK_LABELS[block]} | trial {trial}\n'
-                        f'PT SOA: {pt_soa_by_block[block]}'
+                        f'PT/PD: {item_details_by_block[block]}'
                     )) if debug_overlay_enabled else None,
                 )
                 trial_complete = trial_row['trial_complete']
@@ -411,32 +477,42 @@ def run(args):
                 last_block, last_trial = block, trial
                 save_session(session_dir, all_events, key_rows, trial_rows, metadata)
                 trial_hits, trial_false_alarms = trial_feedback(trial_targets, trial_keys)
-                if aborted or not continuation(
-                    f'{BLOCK_LABELS[block]} — Trial {trial} complete.\n'
-                    f'Correct hits: {trial_hits}\n'
-                    f'Late responses: {trial_row["late_count"]}\n'
-                    f'Misses: {trial_row["miss_count"]}\n'
-                    f'False alarms: {trial_false_alarms} (please minimize these).'
+                if aborted:
+                    break
+                # The recap is two pages: the correct/late counts, then the
+                # miss/false-alarm counts and the reminder.
+                for recap_page in screens.trial_recap_messages(
+                    block, trial, trial_hits, len(trial_targets),
+                    trial_row['late_count'], trial_row['miss_count'], trial_false_alarms,
                 ):
-                    aborted = True
+                    if not continuation(recap_page):
+                        aborted = True
+                        break
+                if aborted:
                     break
             if not aborted and block_index < len(block_order) - 1:
-                rest_start_time = session_clock.getTime()
-                break_outcome = screens.rest_break(window, kb, visual)
-                break_duration = session_clock.getTime() - rest_start_time
-                metadata['break_skip_info'] = {
+                break_outcome, break_duration = screens.rest_break(
+                    window, kb, visual, session_clock,
+                )
+                # Countdown breaks always end on their own, so the outcome is only
+                # ever 'completed' or 'aborted'; the elapsed time is the real data.
+                metadata.setdefault('breaks', []).append({
                     'break_number': block_index + 1,
-                    'break_duration_seconds': break_duration,
-                    'break_was_skipped': break_outcome == 'skipped',
-                    'break_outcome': break_outcome,
-                    'break_offer_seconds': 30,
-                }
+                    'after_block': block,
+                    'offer_seconds': config.BREAK_OFFER_SECONDS,
+                    'elapsed_seconds': break_duration,
+                    'ended_early': break_duration < config.BREAK_OFFER_SECONDS,
+                    'outcome': break_outcome,
+                })
                 aborted = break_outcome == 'aborted'
             if aborted:
                 break
 
         metadata['completion_status'] = 'aborted' if aborted else 'completed'
         metadata['ended_utc'] = datetime.now(timezone.utc).isoformat()
+        metadata['elapsed_seconds_from_first_screen'] = first_screen_elapsed_seconds(
+            first_screen_utc
+        )
         if session_dir is not None:
             metadata['server_sync'] = {'status': 'pending'}
             save_session(session_dir, all_events, key_rows, trial_rows, metadata)
@@ -474,6 +550,14 @@ def run(args):
                 lambda: save_session(session_dir, all_events, key_rows, trial_rows, metadata),
             )
     finally:
+        # Printed even when no session was saved (for example ESC on the first
+        # screen), so a drill's wall-clock length is always visible in the runner log.
+        elapsed_from_first_screen = first_screen_elapsed_seconds(first_screen_utc)
+        if elapsed_from_first_screen is not None:
+            print(
+                f'Wall clock from first screen to exit: {elapsed_from_first_screen:.1f} s',
+                file=sys.stderr,
+            )
         if session_dir is not None and current_trial_events is not None:
             # An error interrupted a trial: keep its rows marked trial_complete=False
             # (pending targets become 'incomplete') so they never count as misses.
@@ -495,9 +579,16 @@ def run(args):
             current_trial_events = None
             metadata.setdefault('completion_status', 'aborted_or_error')
             metadata['ended_utc'] = datetime.now(timezone.utc).isoformat()
+            metadata['elapsed_seconds_from_first_screen'] = first_screen_elapsed_seconds(
+                first_screen_utc
+            )
             save_session(session_dir, all_events, key_rows, trial_rows, metadata)
         Path(report_source).unlink(missing_ok=True)
         if window is not None:
+            try:
+                window.setMouseVisible(True)
+            except Exception:
+                pass
             window.close()
         sounds_to_close = [
             sound_obj for pool in locals().get('sound_pool', {}).values() for sound_obj in pool

@@ -214,16 +214,23 @@ def test_pooled_replay_is_requested_as_soon_as_object_is_free():
 
 
 def test_late_replay_is_requested_with_minimum_lead_and_flag():
+    # The pooled object is still busy when the second play is due: it only frees
+    # at 2.0 + SOUND_DUR + SOUND_POOL_RESTART_MARGIN. Planning the next play just
+    # after that leaves less than SOUND_REQUEST_MIN_LEAD of lead, so the request
+    # has to move to now + SOUND_REQUEST_MIN_LEAD and raise the late flag. Both
+    # numbers are derived from config, so a different sound length still lands
+    # this test in the late branch instead of quietly becoming an on-time play.
+    free_at = 2.0 + config.SOUND_DUR + config.SOUND_POOL_RESTART_MARGIN
     out = run([
         sound_event('s1', 2.0, slot=0),
-        sound_event('s2', 3.02, slot=0),
+        sound_event('s2', free_at + 0.01, slot=0),
     ])
     plays = out.pool['snd'][0].plays
     assert len(plays) == 2
     call_time, requested_ptb = plays[1]
     assert requested_ptb == pytest.approx(
         call_time + config.SOUND_REQUEST_MIN_LEAD + RESET, abs=1e-9)
-    assert requested_ptb > 3.02 + RESET
+    assert requested_ptb > free_at + 0.01 + RESET
     assert 'audio_schedule_late' in out.events[1]['timing_flags']
 
 
