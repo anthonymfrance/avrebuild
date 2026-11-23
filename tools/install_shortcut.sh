@@ -12,19 +12,26 @@ apps_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 desktop_dir="$(xdg-user-dir DESKTOP 2>/dev/null || true)"
 [[ -n "$desktop_dir" ]] || desktop_dir="$HOME/Desktop"
 
+# Exec values cannot represent a double quote, even escaped, in a usable way.
+case "$study_dir" in
+  *'"'*) echo "Refusing: the checkout path contains a double quote." >&2; exit 1 ;;
+esac
+
 mkdir -p "$apps_dir" "$desktop_dir"
 entry="$apps_dir/av-preflight.desktop"
+# The path is quoted because it usually contains a space; a bare space would split
+# the argument and launch the wrong program. Desktop-file-validate runs on it below.
 cat > "$entry" <<EOF
 [Desktop Entry]
 Type=Application
 Version=1.0
 Name=AV Study Preflight
 Comment=Set the study display mode, check audio and the lab server, then run a session
-Exec=bash -c 'cd "$study_dir" && exec ./preflight.sh'
+Exec="$study_dir/preflight.sh"
 Path=$study_dir
 Terminal=false
 Icon=applications-science
-Categories=Science;Education;
+Categories=Science;
 StartupNotify=true
 EOF
 
@@ -36,6 +43,10 @@ chmod 755 "$desktop_dir/av-preflight.desktop"
 gio set "$desktop_dir/av-preflight.desktop" metadata::trusted true 2>/dev/null || true
 update-desktop-database "$apps_dir" >/dev/null 2>&1 || true
 
+if command -v desktop-file-validate >/dev/null 2>&1; then
+  desktop-file-validate "$entry" || { echo "Launcher failed validation." >&2; exit 1; }
+fi
+
 echo "App grid:  $entry"
 echo "Desktop:   $desktop_dir/av-preflight.desktop"
-echo "Launches:  bash -c 'cd \"$study_dir\" && exec ./preflight.sh'"
+echo "Launches:  $study_dir/preflight.sh"
