@@ -7,11 +7,12 @@ match.
 ## 0. Quick start on a new computer
 
 1. Install the system packages in section 1 (needs `sudo`, once per machine).
-2. Clone and build the runtime:
+2. Clone the study and build the runtime:
 
    ```bash
-   git clone --branch feat/soa-corner-redesign https://github.com/anthonymfrance/avrebuild.git
+   git clone https://github.com/anthonymfrance/avrebuild.git
    cd avrebuild
+   git checkout pilot-2026-11.6                      # pinned pilot code; main tracks ongoing work
    curl -LsSf https://astral.sh/uv/install.sh | sh   # once per machine, no sudo
    uv venv --python 3.10 .venv
    uv pip install --python .venv/bin/python -r requirements-lock.txt
