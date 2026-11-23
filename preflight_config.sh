@@ -15,6 +15,9 @@ PREFLIGHT_SERVER_DATA_PATH='Experiments/Anthony/data'
 # DAC, never the headphones, so this is the one part of the audio chain that has
 # to be written down per computer. It is recorded in every session's metadata and
 # reported by tools/device_report.py; leave it empty and preflight warns.
+# Set these two per computer in an untracked preflight_local.sh (see
+# ENVIRONMENT.md), so a clone does not inherit another machine's name.
+PREFLIGHT_MACHINE_NAME=''
 PREFLIGHT_AUDIO_HEADPHONES=''
 
 # Browser steps before the experiment starts. Preflight opens the consent form,

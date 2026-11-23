@@ -9,6 +9,9 @@ build/
 .tools/
 .pyenv/
 
+# Per-computer values (machine name, headphones); see ENVIRONMENT.md.
+preflight_local.sh
+
 # Credentials for the lab share must never be committed.
 .smbcredentials
 .env

@@ -3,6 +3,11 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/preflight_config.sh"
+# Machine-local values (name, headphones) live in an untracked file, so a clone
+# on another computer does not inherit this one's identity.
+if [[ -f "$script_dir/preflight_local.sh" ]]; then
+  source "$script_dir/preflight_local.sh"
+fi
 study_dir="${AV_STUDY_DIR:-$script_dir}"
 python_bin="${AV_STUDY_PYTHON:-}"
 
@@ -51,6 +56,13 @@ study_dir="$(cd -- "$study_dir" && pwd)"
 cd -- "$study_dir"
 export AV_STUDY_DIR="$study_dir"
 
+# A project-local venv built from requirements-lock.txt is the standard runtime;
+# the PsychoPy app's own runtime is only a fallback, and only if it still imports
+# what the study needs.
+if [[ -z "$python_bin" && -x "$study_dir/.venv/bin/python" ]] \
+  && "$study_dir/.venv/bin/python" -c 'import psychopy' >/dev/null 2>&1; then
+  python_bin="$study_dir/.venv/bin/python"
+fi
 if [[ -z "$python_bin" ]]; then
   psychopy_python_root="${XDG_CONFIG_HOME:-${HOME:-}/.config}/psychopy4/.python"
   shopt -s nullglob
@@ -155,10 +167,32 @@ if command -v git >/dev/null 2>&1 && git -C "$study_dir" rev-parse --git-dir >/d
     fi
   fi
 fi
+# Identity for the multi-device pilot: a human name from the untracked local
+# config, plus values the machine supplies itself, so a changed hostname or a
+# swapped disk cannot silently merge two computers into one row of the data.
+machine_name="${PREFLIGHT_MACHINE_NAME:-}"
+[[ -n "$machine_name" ]] || machine_name="$(uname -n 2>/dev/null || true)"
+machine_uuid="$(cat /etc/machine-id 2>/dev/null || true)"
+machine_model="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"
+machine_product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
+if [[ -n "$machine_product" && -n "$machine_model" ]]; then
+  machine_model+=" $machine_product"
+elif [[ -z "$machine_model" ]]; then
+  machine_model="$machine_product"
+fi
+# A wired NIC is stable across reboots; enx* devices are USB adapters that move.
+machine_mac=''
+for nic in /sys/class/net/*; do
+  nic_name="$(basename "$nic")"
+  case "$nic_name" in lo|docker*|veth*|br-*|virbr*|enx*) continue ;; esac
+  machine_mac="$(cat "$nic/address" 2>/dev/null || true)"
+  [[ -z "$machine_mac" ]] || break
+done
 rows=()
 add_row() { rows+=("$1" "$2" "$3"); }
 fatal=0
 add_row '✅' 'Experiment runtime' "$python_bin"
+add_row 'ℹ️' 'Machine' "$machine_name${machine_uuid:+ | uuid ${machine_uuid:0:8}}${machine_mac:+ | ${machine_mac}}"
 if (( ! pipewire_jack_ready )); then
   add_row '❌' 'PTB audio route' "PipeWire JACK could not expose ${default_sink_desc:-the configured default output (description unavailable)}; check the pipewire-jack package and the selected output"
   fatal=1
@@ -681,6 +715,8 @@ print(f"pillow_version={PIL.__version__}")
   printf 'git_branch=%s\ngit_commit=%s\ngit_dirty=%s\ngit_behind=%s\ngit_upstream=%s\n' "${git_branch:-}" "${git_commit:-}" "${git_dirty:-}" "${git_behind:-}" "${git_upstream:-}"
   # Machine identity belongs in the saved report only; the checklist does not show
   # it. glxinfo comes from mesa-utils and is absent on some machines.
+  printf 'machine_name=%s\nmachine_uuid=%s\nmachine_model=%s\nmachine_mac=%s\nmachine_host=%s\n' \
+    "$machine_name" "$machine_uuid" "$machine_model" "$machine_mac" "$(uname -n 2>/dev/null || true)"
   printf 'hardware_host=%s\nhardware_cpu=%s\nhardware_cores=%s\nhardware_memory=%s\nhardware_kernel=%s\nhardware_gpu=%s\n' \
     "$(uname -n 2>/dev/null || true)" \
     "$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)" \

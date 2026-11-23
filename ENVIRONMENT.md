@@ -78,6 +78,17 @@ uv venv --python 3.10 .venv
 uv pip install --python .venv/bin/python -r requirements-lock.txt
 ```
 
+Without `uv`, the standard library equivalent needs nothing extra:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements-lock.txt
+```
+
+`preflight.sh` uses `./.venv/bin/python` automatically once it imports PsychoPy,
+and falls back to the PsychoPy app runtime only when it does not.
+
 - **[`requirements-lock.txt`](requirements-lock.txt) is the source of truth:**
   92 pinned packages, verified to install into a clean Python 3.10 environment.
   Launching the PsychoPy app is no longer needed to provision the experiments.
@@ -89,6 +100,24 @@ uv pip install --python .venv/bin/python -r requirements-lock.txt
   (`python_version`, `psychopy_version`, `psychtoolbox_version`, `numpy_version`,
   `pillow_version`). Compare machines with `python3 tools/device_report.py`.
 - `pytest` is part of the lock, so `tests/` runs on any machine that uses it.
+
+### Name this computer
+
+Each computer keeps its identity in an untracked `preflight_local.sh` (gitignored),
+so a clone never inherits another machine's name:
+
+```bash
+cat > preflight_local.sh <<'EOF'
+PREFLIGHT_MACHINE_NAME='right-purple-405'
+PREFLIGHT_AUDIO_HEADPHONES=''
+EOF
+```
+
+The name, plus `/etc/machine-id`, the DMI model and the wired NIC's MAC, is written
+into every session as `machine_name`, `machine_uuid`, `machine_model` and
+`machine_mac`, and is the first column of `tools/device_report.py`. A changed
+hostname or a moved disk therefore cannot merge two computers in the data. The DMI
+product UUID and serial are root-only, which is why the machine-id is used instead.
 
 ## 4. Display + session
 

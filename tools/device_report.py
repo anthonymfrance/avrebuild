@@ -24,7 +24,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Field name in the preflight report -> column heading.
 FIELDS = OrderedDict([
-    ('hardware_host', 'machine'),
+    ('machine_name', 'machine'),
+    ('machine_uuid', 'uuid'),
+    ('machine_model', 'model'),
+    ('machine_mac', 'mac'),
+    ('hardware_host', 'host'),
     ('hardware_cpu', 'cpu'),
     ('hardware_gpu', 'gpu'),
     ('hardware_kernel', 'kernel'),
@@ -46,7 +50,7 @@ FIELDS = OrderedDict([
 
 # Columns that are expected to differ (a device name or id) and are never
 # reported as a parity problem.
-EXPECTED_DIFFERENCES = {'machine', 'commit', 'dirty'}
+EXPECTED_DIFFERENCES = {'machine', 'uuid', 'model', 'mac', 'host', 'commit', 'dirty'}
 
 
 def default_roots():
@@ -99,7 +103,9 @@ def collect(roots):
             values = {name: str(preflight.get(name, '')) for name in FIELDS}
             if not values['hardware_host']:
                 values['hardware_host'] = str(metadata.get('participant_claim', {}).get('host', 'unknown'))
-            device = values['hardware_host'] or 'unknown'
+            # The first eight characters identify an install without filling the table.
+            values['machine_uuid'] = values['machine_uuid'][:8]
+            device = values['machine_name'] or values['hardware_host'] or 'unknown'
             record = devices.setdefault(device, {'sessions': [], 'values': values})
             record['sessions'].append({
                 'participant': participant_id,
@@ -161,7 +167,9 @@ def main(argv=None):
         print('\nNo sessions with metadata found. Run preflight and a session first, or pass --data.')
         return 0
 
-    columns = ['machine', 'sessions', 'participants'] + [name for name in FIELDS if name != 'hardware_host']
+    columns = ['machine', 'sessions', 'participants'] + [
+        name for name in FIELDS if name not in ('machine_name', 'hardware_host')
+    ]
     widths = {column: len(column) for column in columns}
     table = []
     for device, record in devices.items():
@@ -173,9 +181,7 @@ def main(argv=None):
                 participant.replace('participant_', '') for participant in participants
             ),
         }
-        for name in FIELDS:
-            if name == 'hardware_host':
-                continue
+        for name in columns[3:]:
             cells[name] = record['values'].get(name, '') or '—'
         table.append(cells)
         for column in columns:
