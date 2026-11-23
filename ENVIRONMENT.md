@@ -12,7 +12,7 @@ match.
    ```bash
    git clone https://github.com/anthonymfrance/avrebuild.git
    cd avrebuild
-   git checkout pilot-2026-11.6                      # pinned pilot code; main tracks ongoing work
+   git checkout pilot-2026-11.7                      # pinned pilot code; main tracks ongoing work
    curl -LsSf https://astral.sh/uv/install.sh | sh   # once per machine, no sudo
    uv venv --python 3.10 .venv
    uv pip install --python .venv/bin/python -r requirements-lock.txt
