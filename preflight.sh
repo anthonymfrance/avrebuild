@@ -154,7 +154,9 @@ if command -v git >/dev/null 2>&1 && git -C "$study_dir" rev-parse --git-dir >/d
   git_state='checked_out'
   git_commit="$(git -C "$study_dir" rev-parse --short HEAD 2>/dev/null || true)"
   git_branch="$(git -C "$study_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  if [[ -n "$(git -C "$study_dir" status --porcelain 2>/dev/null)" ]]; then
+  # Untracked files do not change the code that runs. participant_setup.git_state()
+  # ignores them for the same reason, so the two records agree.
+  if [[ -n "$(git -C "$study_dir" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
     git_dirty=1
   fi
   git_upstream="$(git -C "$study_dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
