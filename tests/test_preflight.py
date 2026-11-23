@@ -24,11 +24,15 @@ def executable(path, content):
     path.chmod(0o755)
 
 
-def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip_gates=False):
+def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip_gates=False,
+                 digital=False, server_uri=None, gio_succeeds=True):
     """Run preflight.sh in an isolated study directory with fake system commands.
 
     ``debug=False`` makes the fake zenity choose the participant run, and
     ``skip_gates=True`` makes it press the skip button whenever one is offered.
+    ``digital=True`` makes the fake default sink an S/PDIF output. ``server_uri``
+    configures the share to auto-mount; ``gio_succeeds`` says whether the fake
+    ``gio`` claims the mount worked (it never actually creates a mount point).
     """
     study = tmp_path / 'study'
     study.mkdir()
@@ -64,11 +68,20 @@ if {skip_gates!r} and '--extra-button=Skip (debug)' in args:
     print('Skip (debug)')
     sys.exit(1)
 ''')
+    sink_name = 'alsa_output.test_sink'
+    sink_desc = 'Digital Stereo (IEC958)' if digital else 'Test Headphones Analog Stereo'
     executable(commands / 'pactl', f'''#!{sys.executable}
 import json, sys
+args = sys.argv[1:]
 with open({str(pactl_log)!r}, 'a') as output:
-    output.write(json.dumps(sys.argv[1:]) + chr(10))
-if sys.argv[1:2] == ['get-sink-volume']:
+    output.write(json.dumps(args) + chr(10))
+if args[:1] == ['get-default-sink']:
+    print({sink_name!r})
+elif args[:2] == ['list', 'sinks']:
+    print('Sink #0')
+    print('\tName: ' + {sink_name!r})
+    print('\tDescription: ' + {sink_desc!r})
+elif args[:1] == ['get-sink-volume']:
     print('Volume: front-left: 49152 /  {expected_volume} / -7.50 dB,   front-right: 49152 /  {expected_volume} / -7.50 dB')
     print('        balance 0.00')
 else:
@@ -86,9 +99,13 @@ with open({str(browser_log)!r}, 'a') as output:
         f'PREFLIGHT_SERVER_MOUNT_GLOB={mount_glob!r}\n'
         "PREFLIGHT_SERVER_DATA_PATH='study_data'\n"
         f'PREFLIGHT_CONSENT_URL={CONSENT_URL!r}\n'
-        f'PREFLIGHT_PARTICIPANT_LOG_URL={PARTICIPANT_LOG_URL!r}\n', encoding='utf-8',
+        f'PREFLIGHT_PARTICIPANT_LOG_URL={PARTICIPANT_LOG_URL!r}\n'
+        + (f'PREFLIGHT_SERVER_URI={server_uri!r}\n' if server_uri else ''),
+        encoding='utf-8',
     )
     executable(commands / 'pw-jack', '#!/bin/sh\nexec "$@"\n')
+    if server_uri:
+        executable(commands / 'gio', f'#!/bin/sh\nexit {0 if gio_succeeds else 1}\n')
     python = commands / 'python'
     executable(python, f'''#!{sys.executable}
 import json, os, pathlib, sys
@@ -126,7 +143,7 @@ os.execv({sys.executable!r}, [{sys.executable!r}] + args)
         time.sleep(0.02)
     return SimpleNamespace(
         result=result,
-        recorded=json.loads(capture.read_text()),
+        recorded=json.loads(capture.read_text()) if capture.is_file() else None,
         messages=[json.loads(line) for line in dialogs.read_text().splitlines()],
         browsers=[json.loads(line) for line in browser_log.read_text().splitlines()]
         if browser_log.is_file() else [],
@@ -159,7 +176,9 @@ def test_launcher_uses_final_storage_roots_and_preserves_failure_log(tmp_path, m
         reported_root = next(line.split('=', 1)[1] for line in recorded['report'].splitlines()
                              if line.startswith('server_root='))
         assert Path(reported_root).resolve() == run.server
-    assert ['set-sink-volume', '@DEFAULT_SINK@', f'{config.SYSTEM_VOLUME_PERCENT}%'] in run.pactl
+    # Volume is pinned on the sink the route check validated, not on whatever
+    # happens to be the default a moment later.
+    assert ['set-sink-volume', 'alsa_output.test_sink', f'{config.SYSTEM_VOLUME_PERCENT}%'] in run.pactl
     assert f'system_volume_percent={config.SYSTEM_VOLUME_PERCENT}\n' in recorded['report']
     assert 'system_volume_status=pinned\n' in recorded['report']
     debug_dialog = next(args for args in run.messages if '--ok-label=Debug run' in args)
@@ -213,3 +232,37 @@ def test_browser_gates_offer_skip_only_on_debug_runs(tmp_path, debug):
         assert 'consent_form=completed\n' in run.recorded['report']
         assert 'participant_log=confirmed\n' in run.recorded['report']
         assert 'browser_close=confirmed\n' in run.recorded['report']
+
+
+def test_digital_default_sink_blocks_preflight(tmp_path):
+    """An S/PDIF or HDMI default output is never the study's headphone route."""
+    run = run_launcher(tmp_path, digital=True)
+    assert run.result.returncode == 1, run.result.stdout + run.result.stderr
+    rows = next(args for args in run.messages if '--list' in args)
+    assert any('Default output is digital' in arg for arg in rows)
+    # A failed preflight must not consume a participant number: no folder is
+    # created, and the reserved claim is released on exit.
+    assert {path.name for path in run.server_data.iterdir()} == {'participant_02'}
+    assert sorted(path.name for path in (run.study / 'data').iterdir()) == ['participant_01']
+    error = next(args for args in run.messages if '--error' in args)
+    assert any('required preflight checks failed' in arg for arg in error)
+
+
+@pytest.mark.parametrize(
+    'gio_succeeds,expected', [(False, 'mount_failed'), (True, 'mount_not_visible')],
+)
+def test_unmounted_server_attempts_mount_and_reports_status(tmp_path, gio_succeeds, expected):
+    """An unmounted share is mounted once, and its real outcome is reported."""
+    run = run_launcher(
+        tmp_path, mounted=False, server_uri='smb://example.test/share',
+        gio_succeeds=gio_succeeds,
+    )
+    assert run.result.returncode == 1, run.result.stdout + run.result.stderr
+    rows = next(args for args in run.messages if '--list' in args)
+    # gio can exit 0 without the share appearing under the configured glob; that
+    # must never be reported as a successful mount.
+    assert any(f'Not mounted ({expected})' in arg for arg in rows)
+    assert f'server_mount_status={expected}\n' in run.recorded['report']
+    assert 'server_mounted=false\n' in run.recorded['report']
+    # The session may still continue, but only after local-only storage is chosen.
+    assert any('local-only storage' in ' '.join(args) for args in run.messages)

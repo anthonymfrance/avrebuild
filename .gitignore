@@ -5,6 +5,15 @@ data/
 build/
 .Rhistory
 .freebuff-backup/
+.venv/
+.tools/
+.pyenv/
+
+# Credentials for the lab share must never be committed.
+.smbcredentials
+.env
+.env.*
+!.env.example
 
 # audition output from tools/trim_stimuli.py --out
 20_stimuli/_trim_candidates/

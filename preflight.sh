@@ -81,7 +81,25 @@ Set AV_STUDY_PYTHON to the PsychoPy environment's bin/python3 path."
 fi
 
 # PsychoPy's PTB wheel bundles PortAudio and its own JACK client library. Route
-# that client through PipeWire's JACK shim, then require the built-in analog sink.
+# that client through PipeWire's JACK shim, then require PTB to see the output the
+# system is actually configured to play through. The sink is resolved at run time
+# because hardware names differ between machines (codec, chassis, USB headset).
+default_sink_desc=''
+default_sink="$(pactl get-default-sink 2>/dev/null || true)"
+if [[ -n "$default_sink" ]]; then
+  default_sink_desc="$(pactl list sinks 2>/dev/null | awk -v want="$default_sink" '
+    /^[^ \t]/ { if ($0 ~ /^Sink #/) { name = ""; desc = "" } }
+    /^[[:space:]]+Name: / { line = $0; sub(/^[[:space:]]+Name: /, "", line); name = line }
+    /^[[:space:]]+Description: / { line = $0; sub(/^[[:space:]]+Description: /, "", line); desc = line }
+    name == want && desc != "" { print desc; exit }
+  ' || true)"
+fi
+# A digital output (S/PDIF, HDMI) is not the study's headphone route, even when
+# PTB can open it.
+default_sink_is_digital=0
+if [[ "$default_sink_desc" =~ [Dd]igital|[Ii][Ee][Cc]958|[Hh][Dd][Mm][Ii] ]]; then
+  default_sink_is_digital=1
+fi
 pipewire_jack_lib=''
 shopt -s nullglob
 pipewire_jack_candidates=( /usr/lib/*/pipewire-0.3/jack/libjack.so )
@@ -91,31 +109,69 @@ if (( ${#pipewire_jack_candidates[@]} > 0 )); then
 fi
 pipewire_jack_ready=0
 if [[ -n "$pipewire_jack_lib" ]] && command -v pw-jack >/dev/null 2>&1; then
-  if pw-jack env LD_PRELOAD="$pipewire_jack_lib" "$python_bin" -c '
+  if AV_EXPECTED_SINK_DESC="$default_sink_desc" pw-jack env LD_PRELOAD="$pipewire_jack_lib" "$python_bin" -c '
+import os
 import sys
 import psychtoolbox.audio as audio
-profiles = audio.get_devices()
-sys.exit(0 if any(
-    "jack" in str(p.get("HostAudioAPIName", "")).lower()
-    and "built-in audio analog stereo" in str(p.get("DeviceName", "")).lower()
-    and int(p.get("NrOutputChannels", 0)) >= 2
-    for p in profiles
-) else 1)
+expected = os.environ.get("AV_EXPECTED_SINK_DESC", "").strip().lower()
+names = [
+    str(profile.get("DeviceName", "")).lower()
+    for profile in audio.get_devices()
+    if "jack" in str(profile.get("HostAudioAPIName", "")).lower()
+    and int(profile.get("NrOutputChannels", 0)) >= 2
+]
+# Match the configured output when its name is known; otherwise keep the
+# historical analog-stereo requirement so an unknown sink never passes silently.
+needle = expected if expected else "analog stereo"
+sys.exit(0 if any(needle in name for name in names) else 1)
 ' >/dev/null 2>&1; then
     pipewire_jack_ready=1
+  fi
+fi
+
+# Record which code revision is running and warn when the checkout is behind its
+# upstream. This fetches but never merges or checks out: an update has to be a
+# deliberate act, because a changed config.py invalidates existing plans.
+git_state='unavailable'
+git_commit=''
+git_branch=''
+git_upstream=''
+git_behind=''
+git_dirty=''
+if command -v git >/dev/null 2>&1 && git -C "$study_dir" rev-parse --git-dir >/dev/null 2>&1; then
+  git_state='checked_out'
+  git_commit="$(git -C "$study_dir" rev-parse --short HEAD 2>/dev/null || true)"
+  git_branch="$(git -C "$study_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [[ -n "$(git -C "$study_dir" status --porcelain 2>/dev/null)" ]]; then
+    git_dirty=1
+  fi
+  git_upstream="$(git -C "$study_dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+  if [[ -n "$git_upstream" ]]; then
+    # Bounded so an offline machine does not stall at launch; a LAN fetch is ~1 s.
+    if timeout 5 git -C "$study_dir" fetch --quiet --prune 2>/dev/null; then
+      git_behind="$(git -C "$study_dir" rev-list --count "HEAD..$git_upstream" 2>/dev/null || true)"
+    else
+      git_state='fetch_failed'
+    fi
   fi
 fi
 rows=()
 add_row() { rows+=("$1" "$2" "$3"); }
 fatal=0
 add_row '✅' 'Experiment runtime' "$python_bin"
-if (( pipewire_jack_ready )); then
-  add_row '✅' 'PTB audio route' 'PipeWire JACK exposes the built-in headphone output'
-else
-  add_row '❌' 'PTB audio route' 'PipeWire JACK could not expose Built-in Audio Analog Stereo; check package and output settings'
+if (( ! pipewire_jack_ready )); then
+  add_row '❌' 'PTB audio route' "PipeWire JACK could not expose ${default_sink_desc:-the configured default output (description unavailable)}; check the pipewire-jack package and the selected output"
   fatal=1
+elif (( default_sink_is_digital )); then
+  add_row '❌' 'PTB audio route' "Default output is digital ($default_sink_desc); select the wired headphone output as the default sink"
+  fatal=1
+else
+  add_row '✅' 'PTB audio route' "PipeWire JACK exposes $default_sink_desc"
 fi
 
+# Pin the level on the sink the route check just validated, so the route check
+# and the volume cannot disagree if the system default changes between them.
+volume_target="${default_sink:-@DEFAULT_SINK@}"
 # Pin the output level so every session and every device runs at the level in
 # config.py. The experiment keeps its own playback gain at 1.0 to avoid
 # attenuating the signal twice.
@@ -133,8 +189,8 @@ if ! command -v pactl >/dev/null 2>&1; then
 elif [[ -z "$system_volume" ]]; then
   add_row '❌' 'System output volume' 'Could not read SYSTEM_VOLUME_PERCENT from config.py'
   fatal=1
-elif pactl set-sink-volume @DEFAULT_SINK@ "${system_volume}%" >/dev/null 2>&1; then
-  system_volume_info="$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null || true)"
+elif pactl set-sink-volume "$volume_target" "${system_volume}%" >/dev/null 2>&1; then
+  system_volume_info="$(pactl get-sink-volume "$volume_target" 2>/dev/null || true)"
   system_volume_actual="$(grep -o '[0-9]\+%' <<< "$system_volume_info" | head -n 1 | tr -d '%')"
   if [[ -n "$system_volume_actual" && "$system_volume_actual" == "$system_volume" ]]; then
     system_volume_status='pinned'
@@ -155,7 +211,7 @@ fi
 audio_balance=''
 audio_balance_status='unverified'
 if command -v pactl >/dev/null 2>&1; then
-  audio_volume_info="$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null || true)"
+  audio_volume_info="$(pactl get-sink-volume "$volume_target" 2>/dev/null || true)"
   audio_balance="$(awk '/balance/ { print $2; exit }' <<< "$audio_volume_info")"
   if [[ "$audio_balance" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
     if awk -v balance="$audio_balance" 'BEGIN { exit (balance >= -0.01 && balance <= 0.01) ? 0 : 1 }'; then
@@ -242,24 +298,93 @@ else
 fi
 
 gvfs_dir="/run/user/$(id -u)/gvfs"
-shopt -s nullglob
-server_matches=( "$gvfs_dir"/$PREFLIGHT_SERVER_MOUNT_GLOB )
-shopt -u nullglob
-server_root=''
-for candidate in "${server_matches[@]}"; do
-  if [[ -d "$candidate" ]]; then server_root="$candidate"; break; fi
-done
-if [[ -n "$server_root" && -w "$server_root" ]]; then
+find_server_mount() {
+  local matches candidate
+  shopt -s nullglob
+  matches=( "$gvfs_dir"/$PREFLIGHT_SERVER_MOUNT_GLOB )
+  shopt -u nullglob
+  server_root=''
+  for candidate in "${matches[@]}"; do
+    if [[ -d "$candidate" ]]; then server_root="$candidate"; break; fi
+  done
+}
+server_mount_status='already_mounted'
+find_server_mount
+if [[ -z "$server_root" ]]; then
+  # Try to mount the share so the operator does not have to open a file manager
+  # first. Credentials come from the login keyring; gvfs may also show its own
+  # authentication dialog, which is why this waits instead of failing instantly.
+  if [[ -n "${PREFLIGHT_SERVER_URI:-}" ]] && command -v gio >/dev/null 2>&1; then
+    # stdin is closed so a credential prompt fails immediately instead of
+    # blocking on input nobody will type (gvfs otherwise prints
+    # "User [name]:" and waits). The timeout only bounds a slow server.
+    if timeout 10 gio mount "$PREFLIGHT_SERVER_URI" </dev/null >/dev/null 2>&1; then
+      server_mount_status='mounted'
+    else
+      server_mount_status='mount_failed'
+    fi
+    find_server_mount
+    # gvfs can report success while the share still does not appear under the
+    # configured glob; never report that as a plain 'mounted'.
+    if [[ -z "$server_root" && "$server_mount_status" == 'mounted' ]]; then
+      server_mount_status='mount_not_visible'
+    fi
+  else
+    server_mount_status='not_attempted'
+  fi
+fi
+# A freshly mounted share can appear under the gvfs directory, and even pass a
+# writability test, while gvfsd-smb is still connecting; the first read then
+# fails with an I/O error. Probe the data path with a short retry rather than
+# trusting -w on the mount root alone.
+server_data_readable=0
+if [[ -n "$server_root" ]]; then
+  for _attempt in 1 2 3 4 5; do
+    if [[ -d "$server_root/$PREFLIGHT_SERVER_DATA_PATH" ]] \
+      && ls -- "$server_root/$PREFLIGHT_SERVER_DATA_PATH" >/dev/null 2>&1; then
+      server_data_readable=1
+      break
+    fi
+    sleep 0.4
+  done
+fi
+if [[ -n "$server_root" && -w "$server_root" ]] && (( server_data_readable )); then
   add_row '✅' 'Lab server' "Mounted and writable: $server_root"
   export AV_STUDY_SERVER_ROOT="$server_root"
   export AV_STUDY_SERVER_DATA_PATH="$PREFLIGHT_SERVER_DATA_PATH"
 else
   if [[ -n "$server_root" ]]; then
-    add_row '⚠️' 'Lab server' 'Mounted but not writable; mount the writable share to continue'
+    add_row '⚠️' 'Lab server' "Mounted but $PREFLIGHT_SERVER_DATA_PATH is not readable/writable; check the share and re-run"
   else
-    add_row '⚠️' 'Lab server' 'Not mounted; mount the lab server to continue'
+    if [[ -n "${PREFLIGHT_SERVER_URI:-}" ]]; then
+      add_row '⚠️' 'Lab server' "Not mounted ($server_mount_status); run 'gio mount $PREFLIGHT_SERVER_URI' once to store the credential, then re-run preflight"
+    else
+      add_row '⚠️' 'Lab server' "Not mounted ($server_mount_status); mount the lab server to continue"
+    fi
   fi
   unset AV_STUDY_SERVER_ROOT AV_STUDY_SERVER_DATA_PATH || true
+fi
+
+# Code revision is reported at the end of the environment section: it informs the
+# operator, and never blocks a session here.
+if [[ "$git_state" == 'unavailable' ]]; then
+  add_row '⚠️' 'Study code revision' 'Not a git checkout; session metadata will record no commit hash'
+else
+  git_label="${git_branch:-detached}@${git_commit:-unknown}"
+  if [[ -n "$git_dirty" ]]; then
+    add_row '⚠️' 'Study code revision' "$git_label has local modifications; commit them before collecting data"
+  else
+    add_row '✅' 'Study code revision' "$git_label"
+  fi
+  if [[ "$git_state" == 'fetch_failed' ]]; then
+    add_row '⚠️' 'Study code updates' "Could not reach $git_upstream; update check skipped"
+  elif [[ "$git_behind" =~ ^[0-9]+$ ]]; then
+    if (( git_behind > 0 )); then
+      add_row '⚠️' 'Study code updates' "$git_behind commit(s) behind $git_upstream; update deliberately, then re-run preflight"
+    else
+      add_row '✅' 'Study code updates' "Up to date with $git_upstream"
+    fi
+  fi
 fi
 
 # Reserve the ID on the shared server with an atomic claim. This is what stops
@@ -430,6 +555,18 @@ fi
   printf 'study_dir=%s\nparticipant_id=%s\n' "$study_dir" "$participant_id"
   printf 'session_type=%s\ndisplay_output=%s\nactive_mode=%s\ndisplay_refresh_hz=%s\n' "$session_type" "$display_output" "$active_mode" "$display_refresh_hz"
   printf 'audio_route=%s\npipewire_jack_library=%s\n' 'PTB via PipeWire JACK' "$pipewire_jack_lib"
+  printf 'audio_route_device=%s\naudio_route_sink=%s\n' "${default_sink_desc:-}" "${default_sink:-}"
+  printf 'git_branch=%s\ngit_commit=%s\ngit_dirty=%s\ngit_behind=%s\ngit_upstream=%s\n' "${git_branch:-}" "${git_commit:-}" "${git_dirty:-}" "${git_behind:-}" "${git_upstream:-}"
+  # Machine identity belongs in the saved report only; the checklist does not show
+  # it. glxinfo comes from mesa-utils and is absent on some machines.
+  printf 'hardware_host=%s\nhardware_cpu=%s\nhardware_cores=%s\nhardware_memory=%s\nhardware_kernel=%s\nhardware_gpu=%s\n' \
+    "$(uname -n 2>/dev/null || true)" \
+    "$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)" \
+    "$(nproc 2>/dev/null || true)" \
+    "$(awk '/^MemTotal:/{printf "%.1f GB", $2/1048576}' /proc/meminfo 2>/dev/null || true)" \
+    "$(uname -r 2>/dev/null || true)" \
+    "$(glxinfo -B 2>/dev/null | sed -n 's/^OpenGL renderer string: //p' | head -n 1 || true)"
+  printf 'server_mount_status=%s\n' "${server_mount_status:-not_attempted}"
   printf 'system_volume_percent=%s\nsystem_volume_actual=%s\nsystem_volume_status=%s\n' "$system_volume" "$system_volume_actual" "$system_volume_status"
   printf 'audio_balance=%s\naudio_balance_status=%s\n' "${audio_balance:-unknown}" "$audio_balance_status"
   printf 'debug_overlay=%s\n' "$debug_overlay"
