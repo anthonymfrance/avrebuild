@@ -25,7 +25,7 @@ def executable(path, content):
 
 
 def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip_gates=False,
-                 digital=False, server_uri=None, gio_succeeds=True):
+                 digital=False, server_uri=None, gio_succeeds=True, initial_mode=None):
     """Run preflight.sh in an isolated study directory with fake system commands.
 
     ``debug=False`` makes the fake zenity choose the participant run, and
@@ -87,7 +87,30 @@ elif args[:1] == ['get-sink-volume']:
 else:
     print('balance 0.00')
 ''')
-    executable(commands / 'xrandr', "#!/bin/sh\nprintf 'HDMI-1 connected primary\\n   1920x1080 120.00*+\\n'\n")
+    xrandr_log = tmp_path / 'xrandr.jsonl'
+    if initial_mode is None:
+        executable(commands / 'xrandr', "#!/bin/sh\nprintf 'HDMI-1 connected primary\\n   1920x1080 120.00*+\\n'\n")
+    else:
+        # Stateful panel: reflects the mode it is asked to switch to, so the
+        # launcher's switch and its restore-on-exit can both be observed.
+        mode_file = tmp_path / 'xrandr_mode'
+        mode_file.write_text(initial_mode, encoding='utf-8')
+        executable(commands / 'xrandr', f'''#!{sys.executable}
+import json, sys
+args = sys.argv[1:]
+with open({str(xrandr_log)!r}, 'a') as output:
+    output.write(json.dumps(args) + chr(10))
+current = open({str(mode_file)!r}).read().strip()
+if '--output' in args:
+    current = args[args.index('--mode') + 1]
+    open({str(mode_file)!r}, 'w').write(current)
+    sys.exit(0)
+modes = [('1280x720', ['60.00']), ('1920x1080', ['120.00', '60.00']), ('2560x1440', ['240.00', '120.00'])]
+print('HDMI-1 connected primary ' + current + '+0+0')
+for mode, rates in modes:
+    cells = [rate + ('*' if mode == current and index == 0 else '') for index, rate in enumerate(rates)]
+    print('   ' + mode + '   ' + '  '.join(cells))
+''')
     executable(commands / 'xdg-open', f'''#!{sys.executable}
 import json, sys
 with open({str(browser_log)!r}, 'a') as output:
@@ -148,6 +171,8 @@ os.execv({sys.executable!r}, [{sys.executable!r}] + args)
         browsers=[json.loads(line) for line in browser_log.read_text().splitlines()]
         if browser_log.is_file() else [],
         pactl=[json.loads(line) for line in pactl_log.read_text().splitlines()],
+        xrandr=[json.loads(line) for line in xrandr_log.read_text().splitlines()]
+        if xrandr_log.is_file() else [],
         study=study,
         server=server,
         server_data=server_data,
@@ -266,3 +291,18 @@ def test_unmounted_server_attempts_mount_and_reports_status(tmp_path, gio_succee
     assert 'server_mounted=false\n' in run.recorded['report']
     # The session may still continue, but only after local-only storage is chosen.
     assert any('local-only storage' in ' '.join(args) for args in run.messages)
+
+
+def test_preflight_sets_required_mode_and_restores_best_mode(tmp_path):
+    """The study mode is applied at launch and the best mode comes back on exit."""
+    run = run_launcher(tmp_path, initial_mode='1280x720')
+    assert run.result.returncode == 1, run.result.stdout + run.result.stderr
+    study_mode = ['--output', 'HDMI-1', '--mode', '1920x1080', '--rate', '120.00']
+    assert study_mode in run.xrandr
+    assert 'display_mode_action=set\n' in run.recorded['report']
+    assert 'display_mode_set=1920x1080@120.00\n' in run.recorded['report']
+    assert 'active_mode=1920x1080\n' in run.recorded['report']
+    rows = next(args for args in run.messages if '--list' in args)
+    assert any('set by preflight' in arg for arg in rows)
+    # The runner failed, and the exit trap still restored the best mode.
+    assert run.xrandr[-1] == ['--output', 'HDMI-1', '--mode', '2560x1440', '--rate', '240.00']

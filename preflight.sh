@@ -231,34 +231,122 @@ fi
 
 session_type="${XDG_SESSION_TYPE:-unknown}"
 
-display_info=''
-if command -v xrandr >/dev/null 2>&1; then
-  display_info="$(xrandr --current 2>&1 || true)"
-fi
 # The experiment screen is the connected primary output, else the first connected
-# output with an active (*) mode. Prints output=, mode=, rate=, then connected= lines.
-display_summary="$(awk '
-  /^[^ \t]/ {
-    output = ""
-    if ($2 == "connected") { output = $1; connected[++n] = $0; is_primary[output] = ($3 == "primary") }
-    next
-  }
-  output != "" && /\*/ && !(output in mode) {
-    mode[output] = $1
-    for (i = 2; i <= NF; i++) if ($i ~ /\*/) { value = $i; gsub(/[^0-9.]/, "", value); rate[output] = value }
-    active[++m] = output
-  }
-  END {
-    chosen = ""
-    for (i = 1; i <= m; i++) if (is_primary[active[i]]) { chosen = active[i]; break }
-    if (chosen == "" && m > 0) chosen = active[1]
-    printf "output=%s\nmode=%s\nrate=%s\n", chosen, mode[chosen], rate[chosen]
-    for (i = 1; i <= n; i++) print "connected=" connected[i]
-  }' <<< "$display_info")"
-display_output="$(sed -n 's/^output=//p' <<< "$display_summary")"
-active_mode="$(sed -n 's/^mode=//p' <<< "$display_summary")"
-display_refresh_hz="$(sed -n 's/^rate=//p' <<< "$display_summary")"
-[[ "$display_refresh_hz" =~ ^[0-9]+([.][0-9]+)?$ ]] || display_refresh_hz=''
+# output with an active (*) mode. Reads the whole display state, and is called a
+# second time after a mode switch so the checklist reports what the panel did.
+read_display_state() {
+  display_info=''
+  if command -v xrandr >/dev/null 2>&1; then
+    display_info="$(xrandr --current 2>&1 || true)"
+  fi
+  # Prints output=, mode=, rate=, then connected= lines.
+  display_summary="$(awk '
+    /^[^ \t]/ {
+      output = ""
+      if ($2 == "connected") { output = $1; connected[++n] = $0; is_primary[output] = ($3 == "primary") }
+      next
+    }
+    output != "" && /\*/ && !(output in mode) {
+      mode[output] = $1
+      for (i = 2; i <= NF; i++) if ($i ~ /\*/) { value = $i; gsub(/[^0-9.]/, "", value); rate[output] = value }
+      active[++m] = output
+    }
+    END {
+      chosen = ""
+      for (i = 1; i <= m; i++) if (is_primary[active[i]]) { chosen = active[i]; break }
+      if (chosen == "" && m > 0) chosen = active[1]
+      printf "output=%s\nmode=%s\nrate=%s\n", chosen, mode[chosen], rate[chosen]
+      for (i = 1; i <= n; i++) print "connected=" connected[i]
+    }' <<< "$display_info")"
+  display_output="$(sed -n 's/^output=//p' <<< "$display_summary")"
+  active_mode="$(sed -n 's/^mode=//p' <<< "$display_summary")"
+  display_refresh_hz="$(sed -n 's/^rate=//p' <<< "$display_summary")"
+  [[ "$display_refresh_hz" =~ ^[0-9]+([.][0-9]+)?$ ]] || display_refresh_hz=''
+}
+read_display_state
+expected_mode="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print("%dx%d" % tuple(config.WINDOW_SIZE))')" || expected_mode=''
+expected_refresh="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print(config.REQUIRED_REFRESH_HZ)')" || expected_refresh=''
+refresh_tol="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print(config.REFRESH_TOLERANCE_HZ)')" || refresh_tol=''
+
+# Put the panel in the mode config.py requires before the session starts, and put
+# the best mode the panel offers back on exit -- finished, ESC, crash, or a failed
+# check -- so the next person finds a usable desktop rather than a 120 Hz
+# experiment screen. X11 only: xrandr cannot change modes on Wayland.
+display_mode_action='unchanged'
+display_mode_set=''
+display_mode_changed=0
+available_rates_for_mode() {  # <output> <mode>: one available rate per line
+  xrandr --query 2>/dev/null | awk -v want="$1" -v mode="$2" '
+    $0 ~ "^" want " connected" { inside = 1; next }
+    /^[^ \t]/ { inside = 0 }
+    inside && $1 == mode {
+      for (i = 2; i <= NF; i++) {
+        rate = $i
+        gsub(/[*+]/, "", rate)
+        if (rate ~ /^[0-9]+([.][0-9]+)?$/) print rate
+      }
+    }'
+}
+best_mode_for() {  # <output>: "<largest mode> <highest rate at that mode>"
+  xrandr --query 2>/dev/null | awk -v want="$1" '
+    $0 ~ "^" want " connected" { inside = 1; next }
+    /^[^ \t]/ { inside = 0 }
+    inside && $1 ~ /^[0-9]+x[0-9]+$/ {
+      split($1, size, "x")
+      pixels = size[1] * size[2]
+      for (i = 2; i <= NF; i++) {
+        rate = $i
+        gsub(/[*+]/, "", rate)
+        if (rate !~ /^[0-9]+([.][0-9]+)?$/) continue
+        if (best_mode == "" || pixels > best_pixels ||
+            (pixels == best_pixels && rate + 0 > best_rate + 0)) {
+          best_mode = $1
+          best_rate = rate
+          best_pixels = pixels
+        }
+      }
+    }
+    END { if (best_mode != "") print best_mode, best_rate }'
+}
+restore_best_display_mode() {
+  (( display_mode_changed )) || return 0
+  local best
+  best="$(best_mode_for "$display_output" 2>/dev/null || true)"
+  [[ -n "$best" ]] || return 0
+  xrandr --output "$display_output" --mode "${best%% *}" --rate "${best##* }" >/dev/null 2>&1 || true
+}
+# One EXIT trap owns both jobs that must happen however the launcher ends.
+on_exit() {
+  if [[ "${claim_active:-0}" == 1 ]] && declare -F release_claim >/dev/null; then
+    release_claim
+  fi
+  restore_best_display_mode
+}
+trap on_exit EXIT
+if [[ -n "$display_output" && -n "$expected_mode" && -n "$expected_refresh" && -n "$refresh_tol" ]]; then
+  if [[ "$active_mode" == "$expected_mode" && -n "$display_refresh_hz" ]] \
+    && awk -v hz="$display_refresh_hz" -v expected="$expected_refresh" -v tolerance="$refresh_tol" \
+      'BEGIN { exit (hz >= expected - tolerance && hz <= expected + tolerance) ? 0 : 1 }'; then
+    display_mode_action='already'
+  else
+    # The rate closest to the required one; an exact match wins by offset 0.
+    chosen_rate="$(available_rates_for_mode "$display_output" "$expected_mode" \
+      | awk -v target="$expected_refresh" '
+        { offset = $1 - target; if (offset < 0) offset = -offset
+          if (best == "" || offset < best_offset) { best = $1; best_offset = offset } }
+        END { if (best != "") print best }')"
+    if [[ -z "$chosen_rate" ]]; then
+      display_mode_action='unsupported'
+    elif xrandr --output "$display_output" --mode "$expected_mode" --rate "$chosen_rate" >/dev/null 2>&1; then
+      display_mode_action='set'
+      display_mode_set="$expected_mode@$chosen_rate"
+      display_mode_changed=1
+      read_display_state
+    else
+      display_mode_action='set_failed'
+    fi
+  fi
+fi
 while IFS= read -r connected_line; do
   [[ -n "$connected_line" ]] || continue
   # The full xrandr line is much wider than the checklist column, so keep just
@@ -267,9 +355,12 @@ while IFS= read -r connected_line; do
   [[ "$connected_line" != *" primary "* ]] || connected_label+=" (primary)"
   add_row 'ℹ️' 'Connected output' "$connected_label"
 done < <(sed -n 's/^connected=//p' <<< "$display_summary")
-expected_mode="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print("%dx%d" % tuple(config.WINDOW_SIZE))')" || expected_mode=''
-expected_refresh="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print(config.REQUIRED_REFRESH_HZ)')" || expected_refresh=''
-refresh_tol="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config; print(config.REFRESH_TOLERANCE_HZ)')" || refresh_tol=''
+mode_detail=''
+case "$display_mode_action" in
+  set) mode_detail='; set by preflight' ;;
+  unsupported) mode_detail='; this output does not offer that mode' ;;
+  set_failed) mode_detail='; xrandr could not switch to it' ;;
+esac
 if [[ -z "$active_mode" ]]; then
   add_row '❌' 'Experiment display mode' 'Could not read the active mode of a connected output with xrandr'
   fatal=1
@@ -277,10 +368,10 @@ elif [[ -z "$expected_mode" ]]; then
   add_row '❌' 'Experiment display mode' 'Could not read WINDOW_SIZE from config.py'
   fatal=1
 elif [[ "$active_mode" != "$expected_mode" ]]; then
-  add_row '❌' 'Experiment display mode' "$display_output is $active_mode; config.WINDOW_SIZE requires $expected_mode"
+  add_row '❌' 'Experiment display mode' "$display_output is $active_mode; config.WINDOW_SIZE requires $expected_mode$mode_detail"
   fatal=1
 else
-  add_row '✅' 'Experiment display mode' "$display_output at $active_mode (matches config.WINDOW_SIZE)"
+  add_row '✅' 'Experiment display mode' "$display_output at $active_mode (matches config.WINDOW_SIZE$mode_detail)"
 fi
 
 if [[ -n "$display_refresh_hz" && -n "$expected_refresh" && -n "$refresh_tol" ]]; then
@@ -417,7 +508,7 @@ from participant_setup import release_participant_claim_if_unused
 release_participant_claim_if_unused(Path("data"), Path(sys.argv[1]), sys.argv[2], sys.argv[3])
 ' "$claim_path" "$claim_token" "$participant_id" >/dev/null 2>&1 || true
 }
-trap 'if [[ "${claim_active:-0}" == 1 ]]; then release_claim; fi' EXIT
+# The EXIT trap installed with the display switch releases this claim too.
 add_row '✅' 'Participant ID' "$participant_id (reserved on the lab server)"
 
 # Created before the checklist so its early exits can remove it, and filled in
@@ -554,6 +645,7 @@ fi
   printf 'measured_at=%s\n' "$(date --iso-8601=seconds)"
   printf 'study_dir=%s\nparticipant_id=%s\n' "$study_dir" "$participant_id"
   printf 'session_type=%s\ndisplay_output=%s\nactive_mode=%s\ndisplay_refresh_hz=%s\n' "$session_type" "$display_output" "$active_mode" "$display_refresh_hz"
+  printf 'display_mode_action=%s\ndisplay_mode_set=%s\n' "$display_mode_action" "${display_mode_set:-}"
   printf 'audio_route=%s\npipewire_jack_library=%s\n' 'PTB via PipeWire JACK' "$pipewire_jack_lib"
   printf 'audio_route_device=%s\naudio_route_sink=%s\n' "${default_sink_desc:-}" "${default_sink:-}"
   printf 'git_branch=%s\ngit_commit=%s\ngit_dirty=%s\ngit_behind=%s\ngit_upstream=%s\n' "${git_branch:-}" "${git_commit:-}" "${git_dirty:-}" "${git_behind:-}" "${git_upstream:-}"
