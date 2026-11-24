@@ -178,6 +178,10 @@ fi
 # swapped disk cannot silently merge two computers into one row of the data.
 machine_name="${PREFLIGHT_MACHINE_NAME:-}"
 [[ -n "$machine_name" ]] || machine_name="$(uname -n 2>/dev/null || true)"
+# Room is one-time operator setup, written by hand into preflight_local.sh when the
+# computer is installed. It is never asked of a participant and never inferred from
+# the machine name, which is a label people reword freely.
+machine_room="${PREFLIGHT_MACHINE_ROOM:-}"
 # The DMI product UUID and serial are root-only, so preflight cannot read them at
 # launch. Values read once with sudo into preflight_local.sh are used when present;
 # /etc/machine-id is the readable fallback (unique per install, not per machine).
@@ -207,7 +211,7 @@ rows=()
 add_row() { rows+=("$1" "$2" "$3"); }
 fatal=0
 add_row '✅' 'Experiment runtime' "$python_bin"
-add_row 'ℹ️' 'Machine' "$machine_name${machine_uuid:+ | uuid ${machine_uuid:0:8}}${machine_mac:+ | ${machine_mac}}"
+add_row 'ℹ️' 'Machine' "$machine_name${machine_room:+ | room $machine_room}${machine_uuid:+ | uuid ${machine_uuid:0:8}}${machine_mac:+ | ${machine_mac}}"
 if (( ! pipewire_jack_ready )); then
   add_row '❌' 'PTB audio route' "PipeWire JACK could not expose ${default_sink_desc:-the configured default output (description unavailable)}; check the pipewire-jack package and the selected output"
   fatal=1
@@ -845,8 +849,8 @@ fi
   printf 'git_branch=%s\ngit_commit=%s\ngit_dirty=%s\ngit_behind=%s\ngit_upstream=%s\n' "${git_branch:-}" "${git_commit:-}" "${git_dirty:-}" "${git_behind:-}" "${git_upstream:-}"
   # Machine identity belongs in the saved report only; the checklist does not show
   # it. glxinfo comes from mesa-utils and is absent on some machines.
-  printf 'machine_name=%s\nmachine_uuid=%s\nmachine_model=%s\nmachine_serial=%s\nmachine_mac=%s\nmachine_host=%s\n' \
-    "$machine_name" "$machine_uuid" "$machine_model" "$machine_serial" "$machine_mac" "$(uname -n 2>/dev/null || true)"
+  printf 'machine_name=%s\nmachine_room=%s\nmachine_uuid=%s\nmachine_model=%s\nmachine_serial=%s\nmachine_mac=%s\nmachine_host=%s\n' \
+    "$machine_name" "$machine_room" "$machine_uuid" "$machine_model" "$machine_serial" "$machine_mac" "$(uname -n 2>/dev/null || true)"
   printf 'os_release=%s\nmonitor_pnp_id=%s\nmonitor_product_code=%s\nmonitor_model=%s\nmonitor_serial=%s\n' \
     "$os_release" "$monitor_pnp_id" "$monitor_product_code" "$monitor_model" "$monitor_serial"
   printf 'usb_devices=%s\n' "$usb_devices"

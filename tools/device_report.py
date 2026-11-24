@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Field name in the preflight report -> column heading.
 FIELDS = OrderedDict([
     ('machine_name', 'machine'),
+    ('machine_room', 'room'),
     ('machine_uuid', 'uuid'),
     ('machine_model', 'model'),
     ('machine_serial', 'serial'),
@@ -52,7 +53,7 @@ FIELDS = OrderedDict([
 # Columns that are expected to differ (a device name or id) and are never
 # reported as a parity problem.
 EXPECTED_DIFFERENCES = {
-    'machine', 'uuid', 'model', 'serial', 'mac', 'host', 'commit', 'dirty',
+    'machine', 'room', 'uuid', 'model', 'serial', 'mac', 'host', 'commit', 'dirty',
 }
 
 

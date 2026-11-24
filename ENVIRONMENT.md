@@ -210,15 +210,21 @@ so a clone never inherits another machine's name:
 ```bash
 cat > preflight_local.sh <<'EOF'
 PREFLIGHT_MACHINE_NAME='right-purple-405'
+PREFLIGHT_MACHINE_ROOM='405'
 PREFLIGHT_AUDIO_HEADPHONES=''
 EOF
 ```
 
-The name, plus the machine's UUID, DMI model, serial and wired NIC MAC, is written
-into every session as `machine_name`, `machine_uuid`, `machine_model`,
-`machine_serial` and `machine_mac`, and is the first column of
-`tools/device_report.py`. A changed hostname, a moved disk or a swapped NIC
-cannot merge two computers in the data.
+The name, the room and the machine's UUID, DMI model, serial and wired NIC MAC are
+written into every session as `machine_name`, `machine_room`, `machine_uuid`,
+`machine_model`, `machine_serial` and `machine_mac`, and are the first columns of
+`tools/device_report.py`. A changed hostname, a moved disk or a swapped NIC cannot
+merge two computers in the data.
+
+`PREFLIGHT_MACHINE_ROOM` is **one-time operator setup**, written by hand when the
+computer is installed: it is never asked of a participant, never shown to one, and
+never parsed out of the machine name (names get reworded, rooms do not). Leave it
+empty and sessions simply record no room.
 
 `/sys/class/dmi/id/product_uuid` and `product_serial` are root-only, and preflight
 runs as the normal user, so read them **once** with `sudo` and keep the values in
@@ -317,6 +323,7 @@ machine, and preflight reports each one:
 | Requirement | Where it lives | Preflight row |
 | --- | --- | --- |
 | `PREFLIGHT_MACHINE_NAME` | `preflight_local.sh` | Machine |
+| `PREFLIGHT_MACHINE_ROOM` (one-time operator setup) | `preflight_local.sh` | Machine |
 | `PREFLIGHT_MACHINE_UUID`, `PREFLIGHT_MACHINE_SERIAL` | `preflight_local.sh`, read once with sudo from `/sys/class/dmi/id` | Machine, session metadata |
 | `PREFLIGHT_AUDIO_HEADPHONES` | `preflight_local.sh` | Audio chain |
 | `PREFLIGHT_AUDIO_DEVICE` (exact PTB device name; see section 2 for how to read it) | `preflight_local.sh` | Expected audio device |

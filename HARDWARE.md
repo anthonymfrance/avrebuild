@@ -27,7 +27,7 @@ keep this file in sync with it.
 | Field | Value |
 | --- | --- |
 | Study machine name | `leftmost-435-dark-blue` (`PREFLIGHT_MACHINE_NAME`) |
-| Room | 435 |
+| Room | 435 (`PREFLIGHT_MACHINE_ROOM`, one-time operator setup) |
 | DMI product UUID | `4c4c4544-0057-5210-8030-cac04f584b32` (`PREFLIGHT_MACHINE_UUID`) |
 | DMI product serial | `JWR0XK2` (`PREFLIGHT_MACHINE_SERIAL`) |
 | Hostname | `malibu-creek-Aurora-R6` |

@@ -194,6 +194,8 @@ def test_launcher_uses_final_storage_roots_and_preserves_failure_log(tmp_path, m
     pid = 'participant_03' if mounted else 'participant_02'
     assert recorded['pid'] == pid
     assert f'participant_id={pid}\n' in recorded['report']
+    # Room is one-time operator setup; the key is always written, even when empty.
+    assert 'machine_room=' in recorded['report']
     # The debug-screen choice is recorded so debug sessions stay identifiable
     # after the fact (the fake zenity accepts every dialog).
     assert 'debug_overlay=true\n' in recorded['report']
