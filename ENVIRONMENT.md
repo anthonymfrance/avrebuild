@@ -104,6 +104,18 @@ S/PDIF output, so `preflight_config.sh` sets `PREFLIGHT_ALLOW_DIGITAL_SINK='1'`
 and the row reports an accepted digital route instead of a red one. Leave it at
 `0` on a machine where the route is meant to be analog.
 
+The session follows the **system default output**. `preflight.sh` exports the sink
+it validated as `AV_STUDY_AUDIO_DEVICE`, and `audio_ptb.open_ptb_speaker` opens
+exactly that PTB device; it no longer ranks device names, which used to prefer any
+device called “Built-in Audio” and could send a USB DAC's session to the
+motherboard output while the volume was pinned on the DAC.
+
+A machine records the output it expects with `PREFLIGHT_AUDIO_DEVICE` in
+`preflight_local.sh` (exact PTB device name, for example
+`'iFi USB Audio SE UAC1 Digital Stereo (IEC958)'`). Preflight then shows an
+**Expected audio device** row and fails when the OS default is something else, and
+the session opens that device.
+
 1. Install `pipewire-jack` (see above).
 2. Confirm PipeWire daemons are running: `pgrep -c pipewire` should print ≥ 3
    (`pipewire`, the `filter-chain.conf` instance, and `pipewire-pulse`).
@@ -273,3 +285,27 @@ into `/tmp/run-tests`); the study itself is unaffected.
 2. Confirm the "PTB audio route" row is ✅ (this is the check that fails when
    `pipewire-jack` is missing).
 3. If display or audio check fails, re-check sections 2 and 4 above.
+
+## 8. Machine-local requirements (not in git)
+
+A clone gets the code, never a computer's identity or its mounts. Everything a
+machine needs beyond `git clone` and the packages in section 1 lives on that
+machine, and preflight reports each one:
+
+| Requirement | Where it lives | Preflight row |
+| --- | --- | --- |
+| `PREFLIGHT_MACHINE_NAME` | `preflight_local.sh` | Machine |
+| `PREFLIGHT_MACHINE_UUID`, `PREFLIGHT_MACHINE_SERIAL` | `preflight_local.sh`, read once with sudo from `/sys/class/dmi/id` | Machine, session metadata |
+| `PREFLIGHT_AUDIO_HEADPHONES` | `preflight_local.sh` | Audio chain |
+| `PREFLIGHT_AUDIO_DEVICE` (exact PTB device name) | `preflight_local.sh` | Expected audio device |
+| Lab share mount | the machine's mount configuration (`//psyc-files.ucsc.edu/PSYC-Projects/Camp-Lab` on `/mnt/camp-lab-server`) | Lab server |
+| `.venv` from `requirements-lock.txt` | the checkout | Experiment runtime |
+| System packages | apt, section 1 | PTB audio route, Lab server |
+| A panel offering 1920×1080 @ ~120 Hz | hardware | Experiment display mode, Required refresh rate |
+| X11 session | login screen | `XDG_SESSION_TYPE=x11` gate |
+
+Record the same values in [`HARDWARE.md`](HARDWARE.md) so a session's
+`machine_uuid` can be traced to a computer and a room during analysis. Neither a
+clone nor another machine inherits any of this, which is the point: two computers
+must never share an identity. A machine is ready when `./preflight.sh` shows no
+red rows.

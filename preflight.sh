@@ -112,6 +112,10 @@ default_sink_is_digital=0
 if [[ "$default_sink_desc" =~ [Dd]igital|[Ii][Ee][Cc]958|[Hh][Dd][Mm][Ii] ]]; then
   default_sink_is_digital=1
 fi
+# The output this machine is supposed to use, from the untracked
+# preflight_local.sh. Empty means any output the route check accepts is fine; the
+# session still follows whatever the OS default is.
+expected_audio_device="${PREFLIGHT_AUDIO_DEVICE:-}"
 pipewire_jack_lib=''
 shopt -s nullglob
 pipewire_jack_candidates=( /usr/lib/*/pipewire-0.3/jack/libjack.so )
@@ -121,7 +125,7 @@ if (( ${#pipewire_jack_candidates[@]} > 0 )); then
 fi
 pipewire_jack_ready=0
 if [[ -n "$pipewire_jack_lib" ]] && command -v pw-jack >/dev/null 2>&1; then
-  if AV_EXPECTED_SINK_DESC="$default_sink_desc" pw-jack env LD_PRELOAD="$pipewire_jack_lib" "$python_bin" -c '
+  if AV_EXPECTED_SINK_DESC="${expected_audio_device:-$default_sink_desc}" pw-jack env LD_PRELOAD="$pipewire_jack_lib" "$python_bin" -c '
 import os
 import sys
 import psychtoolbox.audio as audio
@@ -220,6 +224,18 @@ elif (( default_sink_is_digital )); then
   fi
 else
   add_row '✅' 'PTB audio route' "PipeWire JACK exposes $default_sink_desc"
+fi
+
+# The session follows the OS default output, so this row is what guarantees the
+# default is the output this machine is meant to use. Only shown when the machine
+# records one, so a machine without the hardware can still run a debug session.
+if [[ -n "$expected_audio_device" ]]; then
+  if [[ "${default_sink_desc,,}" == "${expected_audio_device,,}" ]]; then
+    add_row '✅' 'Expected audio device' "$expected_audio_device"
+  else
+    add_row '❌' 'Expected audio device' "Default output is ${default_sink_desc:-unknown}, but PREFLIGHT_AUDIO_DEVICE expects $expected_audio_device"
+    fatal=1
+  fi
 fi
 
 # The machine knows the codec or DAC and nothing about the headphones plugged
@@ -825,6 +841,7 @@ fi
   printf 'audio_route=%s\npipewire_jack_library=%s\n' 'PTB via PipeWire JACK' "$pipewire_jack_lib"
   printf 'audio_route_device=%s\naudio_route_sink=%s\n' "${default_sink_desc:-}" "${default_sink:-}"
   printf 'audio_chain=%s\naudio_headphones=%s\n' "$audio_chain" "$audio_headphones"
+  printf 'audio_device_expected=%s\naudio_device_actual=%s\n' "$expected_audio_device" "${default_sink_desc:-}"
   printf 'git_branch=%s\ngit_commit=%s\ngit_dirty=%s\ngit_behind=%s\ngit_upstream=%s\n' "${git_branch:-}" "${git_commit:-}" "${git_dirty:-}" "${git_behind:-}" "${git_upstream:-}"
   # Machine identity belongs in the saved report only; the checklist does not show
   # it. glxinfo comes from mesa-utils and is absent on some machines.
@@ -861,6 +878,11 @@ Planned block order: $planned_block_order
 The participant plan will be created when the experiment starts." || { rm -f -- "$report"; gui_info 'Preflight passed. The experiment was not started.'; exit 0; }
 export AV_STUDY_PREFLIGHT_REPORT="$report"
 export AV_STUDY_DEBUG_OVERLAY="$debug_overlay"
+# The device the session must open: the machine's pinned expectation when it has
+# one, otherwise the default sink this launcher just validated and pinned the
+# volume on. audio_ptb.open_ptb_speaker opens exactly this instead of ranking
+# device names.
+export AV_STUDY_AUDIO_DEVICE="${expected_audio_device:-$default_sink_desc}"
 export AV_STUDY_PARTICIPANT_CLAIM="$claim_path"
 export AV_STUDY_PARTICIPANT_CLAIM_TOKEN="$claim_token"
 runner_log="$(mktemp "${TMPDIR:-/tmp}/av-experiment-${participant_id}.XXXXXX")"

@@ -26,7 +26,7 @@ def executable(path, content):
 
 def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip_gates=False,
                  digital=False, server_uri=None, gio_succeeds=True, initial_mode=None,
-                 server_root=None, allow_digital=False):
+                 server_root=None, allow_digital=False, expected_audio_device=None):
     """Run preflight.sh in an isolated study directory with fake system commands.
 
     ``debug=False`` makes the fake zenity choose the participant run, and
@@ -128,7 +128,8 @@ with open({str(browser_log)!r}, 'a') as output:
         f'PREFLIGHT_PARTICIPANT_LOG_URL={PARTICIPANT_LOG_URL!r}\n'
         + (f'PREFLIGHT_SERVER_URI={server_uri!r}\n' if server_uri else '')
         + (f'PREFLIGHT_SERVER_ROOT={str(server)!r}\n' if server_root is not None else '')
-        + ("PREFLIGHT_ALLOW_DIGITAL_SINK='1'\n" if allow_digital else ''),
+        + ("PREFLIGHT_ALLOW_DIGITAL_SINK='1'\n" if allow_digital else '')
+        + (f'PREFLIGHT_AUDIO_DEVICE={expected_audio_device!r}\n' if expected_audio_device else ''),
         encoding='utf-8',
     )
     executable(commands / 'pw-jack', '#!/bin/sh\nexec "$@"\n')
@@ -292,6 +293,28 @@ def test_digital_sink_is_accepted_when_the_lab_opts_in(tmp_path):
     # The audio gate passed, so the run reaches the runner instead of stopping at
     # the checklist with a fatal-check dialog.
     assert not any('required preflight checks failed' in ' '.join(args) for args in run.messages)
+
+
+def test_local_expected_audio_device_mismatch_blocks_preflight(tmp_path):
+    """The OS default must be the output this machine is meant to use."""
+    run = run_launcher(tmp_path, expected_audio_device='Some Other DAC')
+    assert run.result.returncode == 1, run.result.stdout + run.result.stderr
+    # zenity --list receives each column as its own argument, so join them.
+    rows = ' '.join(next(args for args in run.messages if '--list' in args))
+    assert 'Expected audio device' in rows
+    assert 'but PREFLIGHT_AUDIO_DEVICE expects Some Other DAC' in rows
+    error = next(args for args in run.messages if '--error' in args)
+    assert any('required preflight checks failed' in arg for arg in error)
+
+
+def test_local_expected_audio_device_matches_the_default_sink(tmp_path):
+    run = run_launcher(tmp_path, expected_audio_device='Test Headphones Analog Stereo')
+    assert run.result.returncode == 1, run.result.stdout + run.result.stderr
+    rows = ' '.join(next(args for args in run.messages if '--list' in args))
+    assert 'Expected audio device' in rows
+    assert 'Test Headphones Analog Stereo' in rows
+    assert 'but PREFLIGHT_AUDIO_DEVICE expects' not in rows
+    assert 'audio_device_expected=Test Headphones Analog Stereo\n' in run.recorded['report']
 
 
 @pytest.mark.parametrize(

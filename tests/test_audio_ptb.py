@@ -2,7 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from audio_ptb import backend_start_time, ptb_to_session, resolve_trial_audio
+import audio_ptb
+from audio_ptb import backend_start_time, open_ptb_speaker, ptb_to_session, resolve_trial_audio
 
 
 def sound_with_status(status):
@@ -65,6 +66,69 @@ def test_aborted_trial_unreported_sound_is_not_requested_only():
     assert events[1]['audio_timing_source'] == 'PTB scheduled playback'
     assert 'trial_aborted_before_audio_start_report' in events[1]['timing_flags']
     assert 'realized_soa_seconds' not in events[0]
+
+
+class FakePTB:
+    """Minimal PTB audio module; the selection patches replace get_devices/Stream."""
+
+    def __init__(self, devices):
+        self.devices = [dict(device) for device in devices]
+
+    def get_devices(self, *args, **kwargs):
+        return [dict(device) for device in self.devices]
+
+    def Stream(self, *args, **kwargs):
+        raise AssertionError('Device selection must not open a stream')
+
+
+class FakeSpeaker:
+    def __init__(self, index=None, latencyClass=None):
+        self.index = index
+        self.latency_class = latencyClass
+
+
+JACK = 'JACK Audio Connection Kit'
+DEVICES = [
+    {'DeviceName': 'Built-in Audio Analog Stereo', 'HostAudioAPIName': JACK,
+     'NrOutputChannels': 2, 'DeviceIndex': 1},
+    {'DeviceName': 'Built-in Audio Digital Stereo (IEC958)', 'HostAudioAPIName': JACK,
+     'NrOutputChannels': 2, 'DeviceIndex': 9},
+    {'DeviceName': 'iFi USB Audio SE UAC1 Digital Stereo (IEC958)', 'HostAudioAPIName': JACK,
+     'NrOutputChannels': 2, 'DeviceIndex': 7},
+]
+
+
+def test_opens_the_exported_default_device_not_the_built_in_one(monkeypatch):
+    """preflight exports the validated sink; the old ranking chose built-in audio."""
+    monkeypatch.setenv('AV_STUDY_AUDIO_DEVICE', 'iFi USB Audio SE UAC1 Digital Stereo (IEC958)')
+    speaker, chosen = open_ptb_speaker(FakePTB(DEVICES), FakeSpeaker)
+    assert chosen['DeviceName'].startswith('iFi')
+    assert chosen['DeviceIndex'] == 7
+    assert speaker.index == 7
+
+
+def test_follows_the_pipewire_default_when_preflight_did_not_export_it(monkeypatch):
+    monkeypatch.delenv('AV_STUDY_AUDIO_DEVICE', raising=False)
+    monkeypatch.setattr(
+        audio_ptb, '_default_sink_description',
+        lambda: 'iFi USB Audio SE UAC1 Digital Stereo (IEC958)',
+    )
+    _, chosen = open_ptb_speaker(FakePTB(DEVICES), FakeSpeaker)
+    assert chosen['DeviceName'].startswith('iFi')
+
+
+def test_unavailable_expected_device_is_an_error(monkeypatch):
+    monkeypatch.setenv('AV_STUDY_AUDIO_DEVICE', 'No Such DAC')
+    with pytest.raises(RuntimeError, match='not a PTB stereo device'):
+        open_ptb_speaker(FakePTB(DEVICES), FakeSpeaker)
+
+
+def test_no_resolvable_default_keeps_the_built_in_preference(monkeypatch):
+    """A bare ALSA machine with no pactl still opens a sane device."""
+    monkeypatch.delenv('AV_STUDY_AUDIO_DEVICE', raising=False)
+    monkeypatch.setattr(audio_ptb, '_default_sink_description', lambda: '')
+    _, chosen = open_ptb_speaker(FakePTB(DEVICES), FakeSpeaker)
+    assert chosen['DeviceName'] == 'Built-in Audio Analog Stereo'
 
 
 def test_unpresented_visual_or_unscheduled_sound_has_no_soa():

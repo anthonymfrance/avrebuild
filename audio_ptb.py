@@ -7,6 +7,9 @@ All audio times are PTB software-reported; nothing here is a physical measuremen
 
 from __future__ import annotations
 
+import os
+import subprocess
+
 import config
 
 # psychopy.sound.backend_ptb.SoundPTB.track is a psychtoolbox.audio.Slave whose
@@ -97,6 +100,38 @@ def resolve_trial_audio(trial_events, fade_in, complete=True):
     return requested_only
 
 
+def _default_sink_description():
+    """Description of the system default output, or '' when it cannot be read.
+
+    Only used when preflight did not export the sink it validated (a direct
+    experiment.py run), so the session still follows the OS default instead of a
+    name heuristic.
+    """
+    try:
+        sink = subprocess.run(
+            ['pactl', 'get-default-sink'], capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    if not sink:
+        return ''
+    try:
+        listing = subprocess.run(
+            ['pactl', 'list', 'sinks'], capture_output=True, text=True, timeout=5,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    current = ''
+    for line in listing.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('Name:'):
+            current = stripped[len('Name:'):].strip()
+        elif stripped.startswith('Description:'):
+            if current == sink:
+                return stripped[len('Description:'):].strip()
+    return ''
+
+
 def _patch_ptb_output_channels(ptb_audio, target_channels=2):
     """Limit virtual PortAudio device profiles to the study's stereo output."""
     original_get_devices = ptb_audio.get_devices
@@ -158,24 +193,49 @@ def open_ptb_speaker(ptb_audio, speaker_device_class):
     if requested in {'', 'default', 'None'} and config.AUDIO_DEVICE not in {'', 'default', 'None'}:
         requested = config.AUDIO_DEVICE
     if requested in {'', 'default', 'None'}:
-        def default_route_rank(profile):
-            name = str(profile.get('DeviceName', '')).lower()
-            host_api = str(profile.get('HostAudioAPIName', '')).lower()
-            if 'jack' in host_api:
-                if 'built-in audio analog stereo' in name:
-                    return 0
-                if 'built-in audio' in name:
-                    return 1
-                return 2
-            if 'pipewire' in name:
-                return 3
-            if 'pulse' in name:
-                return 4
-            if name in {'default', 'sysdefault'}:
-                return 5 if name == 'default' else 6
-            return 7
+        # Follow the OS default output rather than a name heuristic. preflight.sh
+        # validates the default sink and exports its description as
+        # AV_STUDY_AUDIO_DEVICE; a machine that pins one device does it through
+        # PREFLIGHT_AUDIO_DEVICE, which preflight passes through the same variable.
+        # Preferring any "Built-in Audio" device used to send a USB DAC's sessions
+        # to the motherboard output while the volume was pinned on the DAC.
+        expected = (
+            (os.environ.get('AV_STUDY_AUDIO_DEVICE') or '').strip()
+            or _default_sink_description()
+        )
+        if expected:
+            chosen = next(
+                (profile for profile in outputs
+                 if expected.lower() in str(profile.get('DeviceName', '')).lower()),
+                None,
+            )
+            if chosen is None:
+                available = [profile.get('DeviceName') for profile in outputs]
+                raise RuntimeError(
+                    f'The default output {expected!r} is not a PTB stereo device. '
+                    f'Stereo output devices: {available!r}. Check the OS default sink.'
+                )
+        else:
+            # No resolvable default (no PipeWire, no pactl): keep the historical
+            # preference so a bare ALSA machine still opens something sane.
+            def default_route_rank(profile):
+                name = str(profile.get('DeviceName', '')).lower()
+                host_api = str(profile.get('HostAudioAPIName', '')).lower()
+                if 'jack' in host_api:
+                    if 'built-in audio analog stereo' in name:
+                        return 0
+                    if 'built-in audio' in name:
+                        return 1
+                    return 2
+                if 'pipewire' in name:
+                    return 3
+                if 'pulse' in name:
+                    return 4
+                if name in {'default', 'sysdefault'}:
+                    return 5 if name == 'default' else 6
+                return 7
 
-        chosen = min(outputs, key=default_route_rank)
+            chosen = min(outputs, key=default_route_rank)
     else:
         chosen = next(
             (profile for profile in outputs if profile.get('DeviceName') == requested),
