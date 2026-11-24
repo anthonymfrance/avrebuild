@@ -446,18 +446,33 @@ else
 fi
 
 gvfs_dir="/run/user/$(id -u)/gvfs"
+configured_mount_used=0
 find_server_mount() {
   local matches candidate
+  server_root=''
+  # A configured absolute mount point wins over the gvfs glob. The Camp-Lab share
+  # is a CIFS entry from the machine's own mount configuration (under /mnt), so it
+  # never appears under the gvfs directory. Testing the path is what triggers a
+  # systemd automount, so no mount command is issued here and no credentials are
+  # kept in this repository. The timeout bounds an unreachable server.
+  if [[ -n "${PREFLIGHT_SERVER_ROOT:-}" ]] && timeout 5 test -d "$PREFLIGHT_SERVER_ROOT"; then
+    server_root="$PREFLIGHT_SERVER_ROOT"
+    configured_mount_used=1
+    return 0
+  fi
   shopt -s nullglob
   matches=( "$gvfs_dir"/$PREFLIGHT_SERVER_MOUNT_GLOB )
   shopt -u nullglob
-  server_root=''
   for candidate in "${matches[@]}"; do
     if [[ -d "$candidate" ]]; then server_root="$candidate"; break; fi
   done
 }
-server_mount_status='already_mounted'
 find_server_mount
+if (( configured_mount_used )); then
+  server_mount_status='configured_mount'
+else
+  server_mount_status='already_mounted'
+fi
 if [[ -z "$server_root" ]]; then
   # Try to mount the share so the operator does not have to open a file manager
   # first. Credentials come from the login keyring; gvfs may also show its own
@@ -712,6 +727,85 @@ print(f"numpy_version={numpy.__version__}")
 print(f"pillow_version={PIL.__version__}")
 ' 2>/dev/null || true)"
 
+# Identity for the saved report only: the checklist is already long, so none of
+# this becomes a row. The OS release and the panel's own EDID identity are stored
+# with the session so a run can be attributed to a specific distro and panel, not
+# just a kernel version and an output name.
+os_release=''
+if [[ -r /etc/os-release ]]; then
+  os_release="$(. /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-}")"
+fi
+# Decoded from the active output's EDID: bytes 8-9 are the PNP id, the 0xFC
+# descriptor is the model name and 0xFF the serial. Empty when the driver exposes
+# no EDID for the output, and never fatal.
+monitor_identity="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" - "$display_output" <<'PY' 2>/dev/null || true
+import subprocess
+import sys
+
+output = sys.argv[1] if len(sys.argv) > 1 else ""
+if not output:
+    raise SystemExit(0)
+try:
+    text = subprocess.run(
+        ["xrandr", "--props"], capture_output=True, text=True, timeout=5
+    ).stdout
+except Exception:
+    raise SystemExit(0)
+blocks, inside, in_edid = [], False, False
+for line in text.splitlines():
+    if line and not line[0].isspace():
+        fields = line.split()
+        inside = bool(fields) and fields[0] == output and " connected" in line
+        in_edid = False
+        continue
+    if not inside:
+        continue
+    stripped = line.strip()
+    if stripped.startswith("EDID:"):
+        in_edid = True
+        continue
+    if in_edid:
+        token = stripped.split()[0] if stripped else ""
+        if len(token) == 32 and all(c in "0123456789abcdef" for c in token):
+            blocks.append(token)
+        else:
+            in_edid = False
+data = bytes.fromhex("".join(blocks)) if blocks else b""
+if len(data) < 128:
+    raise SystemExit(0)
+manufacturer = (data[8] << 8) | data[9]
+pnp = "".join(chr(((manufacturer >> shift) & 0x1f) + 64) for shift in (10, 5, 0))
+model, serial = "", ""
+for offset in range(54, 126, 18):
+    block = data[offset:offset + 18]
+    if block[0:3] != b"\x00\x00\x00":
+        continue
+    value = block[5:].split(b"\n")[0].decode("ascii", "replace").strip()
+    if block[3] == 0xFC and not model:
+        model = value
+    elif block[3] == 0xFF and not serial:
+        serial = value
+print(f"pnp={pnp}")
+print(f"product_code=0x{data[11] << 8 | data[10]:04x}")
+print(f"model={model}")
+print(f"serial={serial}")
+PY
+)"
+monitor_pnp_id="$(sed -n 's/^pnp=//p' <<< "$monitor_identity")"
+monitor_product_code="$(sed -n 's/^product_code=//p' <<< "$monitor_identity")"
+monitor_model="$(sed -n 's/^model=//p' <<< "$monitor_identity")"
+monitor_serial="$(sed -n 's/^serial=//p' <<< "$monitor_identity")"
+# Every USB device the machine can see, on one line: the DAC/amp and the input
+# devices have no other machine-readable identity on this hardware.
+usb_devices=''
+if command -v lsusb >/dev/null 2>&1; then
+  # awk, not 'paste -sd "; "': paste cycles every character of its delimiter
+  # list, which interleaves ';' and ' ' instead of joining with both.
+  usb_devices="$(lsusb 2>/dev/null \
+    | sed -n 's/^Bus [0-9]* Device [0-9]*: ID //p' \
+    | awk 'NR > 1 { printf "; " } { printf "%s", $0 } END { printf "\n" }' || true)"
+fi
+
 # Written here rather than with the checklist above so the saved report (and the
 # session metadata parsed from it) records whether the debug overlay ran.
 {
@@ -728,6 +822,9 @@ print(f"pillow_version={PIL.__version__}")
   # it. glxinfo comes from mesa-utils and is absent on some machines.
   printf 'machine_name=%s\nmachine_uuid=%s\nmachine_model=%s\nmachine_serial=%s\nmachine_mac=%s\nmachine_host=%s\n' \
     "$machine_name" "$machine_uuid" "$machine_model" "$machine_serial" "$machine_mac" "$(uname -n 2>/dev/null || true)"
+  printf 'os_release=%s\nmonitor_pnp_id=%s\nmonitor_product_code=%s\nmonitor_model=%s\nmonitor_serial=%s\n' \
+    "$os_release" "$monitor_pnp_id" "$monitor_product_code" "$monitor_model" "$monitor_serial"
+  printf 'usb_devices=%s\n' "$usb_devices"
   printf 'hardware_host=%s\nhardware_cpu=%s\nhardware_cores=%s\nhardware_memory=%s\nhardware_kernel=%s\nhardware_gpu=%s\n' \
     "$(uname -n 2>/dev/null || true)" \
     "$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || true)" \

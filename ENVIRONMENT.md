@@ -59,7 +59,7 @@ Why each is required:
 | `pipewire-jack` | Ships `pw-jack` and the PipeWire JACK `libjack.so`; **this one is easy to miss** — it is *not* a dependency of the base PipeWire install. Without it the PTB audio-route check fails and preflight will not pass. |
 | `pulseaudio-utils` | `pactl` (reads/clears the headphone L/R balance) |
 | `x11-xserver-utils` | `xrandr` (display mode + refresh checks) |
-| `gvfs-backends` | SMB mounts of the lab file server (shows under `/run/user/<uid>/gvfs/`) |
+| `gvfs-backends` | SMB mounts made through Files (shows under `/run/user/<uid>/gvfs/`). Only the legacy fallback: the Camp-Lab share is a system-level CIFS mount, see section 5. |
 | `git` | experiment metadata records the commit hash |
 | `mesa-utils` | `glxinfo` sanity check of the GL stack when debugging display timing |
 
@@ -198,6 +198,11 @@ PREFLIGHT_MACHINE_SERIAL='...'
 Without them preflight falls back to `/etc/machine-id`, which is unique per
 install but changes if the OS is reinstalled.
 
+The name, UUID and serial for each computer are also written down with the rest
+of its hardware (CPU, GPU, monitor, audio device, keyboard, mouse) in
+[`HARDWARE.md`](HARDWARE.md), so a machine can be identified in the data without
+logging into it.
+
 ## 4. Display + session
 
 - X11 session (`XDG_SESSION_TYPE=x11`), not Wayland — verify with
@@ -209,15 +214,40 @@ install but changes if the OS is reinstalled.
   clearly if the panel cannot offer it, and restores the panel's largest, fastest
   mode when the launcher exits (including a failure or ESC).
 
-## 5. Lab server mount
+## 5. Lab server
 
-Server destination: `Experiments/Anthony/data/participant_NN/` (see `PREFLIGHT_SERVER_DATA_PATH` in `preflight_config.sh`).
+The lab share is a CIFS mount provided by the machine's own mount configuration,
+not by Files:
+
+```
+//psyc-files.ucsc.edu/PSYC-Projects/Camp-Lab  ->  /mnt/camp-lab-server
+```
+
+`preflight_config.sh` points at it with
+`PREFLIGHT_SERVER_ROOT='/mnt/camp-lab-server/Anthony'` and
+`PREFLIGHT_SERVER_DATA_PATH='data'`, so sessions land in
+`/mnt/camp-lab-server/Anthony/data/participant_NN/`. Merely testing that path
+triggers the systemd automount, so preflight never mounts the share itself, stores
+no credentials, and does not need `gio`. If the mount is unavailable (off campus,
+for example) the row turns yellow and the operator is asked to accept local-only
+storage.
+
+`PREFLIGHT_SERVER_URI` and `PREFLIGHT_SERVER_MOUNT_GLOB` remain in
+`preflight_config.sh` as a fallback for a machine that still mounts the SMB share
+through Files; they are used only when `PREFLIGHT_SERVER_ROOT` is empty or missing.
 
 Preflight reserves each participant ID with an atomic claim in
-`Experiments/Anthony/data/.claims/participant_NN.lock` before the session
-starts. The claim records the allocating PID, host, and UTC start time, so two
-lab computers cannot both run the same participant number. Abandoned claims
-expire after `config.PARTICIPANT_CLAIM_TTL_HOURS` (12 hours).
+`<data>/.claims/participant_NN.lock` before the session starts. The claim records
+the allocating PID, host, and UTC start time, so two lab computers cannot both run
+the same participant number. Abandoned claims expire after
+`config.PARTICIPANT_CLAIM_TTL_HOURS` (12 hours).
+
+`/mnt/camp-lab-server/Anthony/data/old data/` holds the five sessions collected
+before this machine moved to the Camp-Lab share (`participant_01`..`participant_05`).
+Those folders do not match `participant_NN`, so allocation in `data/` restarts at
+`participant_01` and the block-order rotation restarts at animate-first. To
+continue that numbering instead, set
+`PREFLIGHT_SERVER_DATA_PATH='data/old data'`.
 
 ## 6. Running the tests
 

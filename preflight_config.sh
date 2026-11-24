@@ -3,13 +3,25 @@
 
 # Xorg is recommended; the GUI asks whether to continue if another session is active.
 
-# The legacy study runner's GVFS SMB mount and data destination.
+# Lab data destination. PREFLIGHT_SERVER_ROOT is the absolute mount point of the
+# share and is used first; simply testing that path is what triggers the system's
+# automount. PREFLIGHT_SERVER_DATA_PATH is relative to it, so sessions land in
+# <root>/<data path>/participant_NN.
+#
+# The Camp-Lab share is mounted by the machine's own mount configuration
+# (//psyc-files.ucsc.edu/PSYC-Projects/Camp-Lab on /mnt/camp-lab-server). Its
+# credentials live there and must never be written into this file, the repo, or a
+# shell command line.
+PREFLIGHT_SERVER_ROOT='/mnt/camp-lab-server/Anthony'
+PREFLIGHT_SERVER_DATA_PATH='data'
+
+# Legacy GVFS fallback, used only when PREFLIGHT_SERVER_ROOT is empty or missing
+# (a machine that still mounts the SMB share through Files).
 # PREFLIGHT_SERVER_URI is only used to attempt the mount when it is not already
 # mounted. Credentials are supplied by the login keyring and must never be
 # written into this file, the repo, or a shell command line.
 PREFLIGHT_SERVER_URI='smb://psyc-files.ucsc.edu/jamal'
 PREFLIGHT_SERVER_MOUNT_GLOB='smb-share:server=psyc-files.ucsc.edu,share=jamal*'
-PREFLIGHT_SERVER_DATA_PATH='Experiments/Anthony/data'
 
 # Headphones plugged into the output above. The machine can only see the codec or
 # DAC, never the headphones, so this is the one part of the audio chain that has

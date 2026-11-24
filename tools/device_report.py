@@ -6,7 +6,7 @@ device. Values come from the preflight report each session stores, so a machine
 that never passed preflight shows up as unknown instead of staying silent.
 
     python3 tools/device_report.py
-    python3 tools/device_report.py --data /run/user/1000/gvfs/smb-share:.../data
+    python3 tools/device_report.py --data /mnt/camp-lab-server/Anthony/data
     python3 tools/device_report.py --json
 
 Differences between devices are listed under the table; the exit status is 0

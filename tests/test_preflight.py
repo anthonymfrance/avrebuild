@@ -25,7 +25,8 @@ def executable(path, content):
 
 
 def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip_gates=False,
-                 digital=False, server_uri=None, gio_succeeds=True, initial_mode=None):
+                 digital=False, server_uri=None, gio_succeeds=True, initial_mode=None,
+                 server_root=None):
     """Run preflight.sh in an isolated study directory with fake system commands.
 
     ``debug=False`` makes the fake zenity choose the participant run, and
@@ -33,6 +34,8 @@ def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip
     ``digital=True`` makes the fake default sink an S/PDIF output. ``server_uri``
     configures the share to auto-mount; ``gio_succeeds`` says whether the fake
     ``gio`` claims the mount worked (it never actually creates a mount point).
+    ``server_root`` gives the machine a configured absolute mount point (the
+    Camp-Lab CIFS share) instead of a gvfs mount.
     """
     study = tmp_path / 'study'
     study.mkdir()
@@ -47,7 +50,7 @@ def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip
     )
     (study / 'preflight.sh').write_text(launcher, encoding='utf-8')
     (study / 'data' / 'participant_01').mkdir(parents=True)
-    server = tmp_path / 'server'
+    server = Path(server_root) if server_root is not None else tmp_path / 'server'
     server_data = server / 'study_data'
     (server_data / 'participant_02').mkdir(parents=True)
     commands = tmp_path / 'bin'
@@ -123,7 +126,8 @@ with open({str(browser_log)!r}, 'a') as output:
         "PREFLIGHT_SERVER_DATA_PATH='study_data'\n"
         f'PREFLIGHT_CONSENT_URL={CONSENT_URL!r}\n'
         f'PREFLIGHT_PARTICIPANT_LOG_URL={PARTICIPANT_LOG_URL!r}\n'
-        + (f'PREFLIGHT_SERVER_URI={server_uri!r}\n' if server_uri else ''),
+        + (f'PREFLIGHT_SERVER_URI={server_uri!r}\n' if server_uri else '')
+        + (f'PREFLIGHT_SERVER_ROOT={str(server)!r}\n' if server_root is not None else ''),
         encoding='utf-8',
     )
     executable(commands / 'pw-jack', '#!/bin/sh\nexec "$@"\n')
@@ -306,3 +310,27 @@ def test_preflight_sets_required_mode_and_restores_best_mode(tmp_path):
     assert any('set by preflight' in arg for arg in rows)
     # The runner failed, and the exit trap still restored the best mode.
     assert run.xrandr[-1] == ['--output', 'HDMI-1', '--mode', '2560x1440', '--rate', '240.00']
+
+
+def test_configured_mount_root_is_used_without_a_gvfs_mount(tmp_path):
+    """A configured absolute mount (the Camp-Lab CIFS share) needs no gvfs mount.
+
+    The share is mounted by the system under /mnt, so it never appears under the
+    gvfs directory the launcher used to glob. Without this the launcher would
+    report the server as missing and quietly keep every session local.
+    """
+    mount = tmp_path / 'camp-lab-server' / 'Anthony'
+    run = run_launcher(tmp_path, mounted=False, server_root=mount, plan_created=True)
+    assert run.result.returncode == 1, run.result.stdout + run.result.stderr
+    recorded = run.recorded
+    assert recorded['pid'] == 'participant_03'
+    assert 'server_mounted=true\n' in recorded['report']
+    assert f'server_root={mount}\n' in recorded['report']
+    assert f'server_data_path=study_data\n' in recorded['report']
+    assert 'server_mount_status=configured_mount\n' in recorded['report']
+    rows = next(args for args in run.messages if '--list' in args)
+    assert any(f'Mounted and writable: {mount}' in arg for arg in rows)
+    # The ID is reserved on the configured mount, not locally.
+    claims = list((run.server_data / '.claims').glob('participant_03.lock'))
+    assert len(claims) == 1
+    assert json.loads(claims[0].read_text())['participant_id'] == 'participant_03'
