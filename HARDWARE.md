@@ -331,3 +331,72 @@ serials printed on this machine's individual units have not been read.
   kept as `left-blue-405` rather than reworded to the 435 position/colour
   convention, so existing local records still match; room is stored separately and
   is never parsed out of the name (ENVIRONMENT.md §3).
+
+---
+
+## right-purple-405
+
+The machine in room 405. Same Alienware Aurora R6 batch as the two towers in
+room 435 — a third unit, with its own DMI UUID, serial, wired NIC MAC and disk,
+so sessions from it cannot merge with theirs. Its camp-site hostname
+`sycamore-canyon-R6` is recorded as the hostname only.
+
+| Field | Value |
+| --- | --- |
+| Study machine name | `right-purple-405` (`PREFLIGHT_MACHINE_NAME`) |
+| Room | 405 (`PREFLIGHT_MACHINE_ROOM`) |
+| DMI product UUID | `4c4c4544-0057-5210-8032-cac04f4a4b32` (`PREFLIGHT_MACHINE_UUID`) |
+| DMI product serial | `JWR2JK2` (`PREFLIGHT_MACHINE_SERIAL`) |
+| Hostname | `sycamore-canyon-R6` |
+| Model | Alienware Aurora R6 (DMI type 3, desktop) |
+| Motherboard | Alienware `07HV66` rev `A01` |
+| BIOS | `1.0.23`, 2020-06-11 |
+| OS / kernel | Ubuntu 24.04.5 LTS, `7.0.0-43-generic` x86_64 |
+| CPU | Intel Core i7-7700 @ 3.60 GHz, 4 cores / 8 threads, 1 socket (auto) |
+| RAM | 15.4 GB (auto) |
+| GPU | NVIDIA GP104 GeForce GTX 1080, driver `580.178.04`, OpenGL renderer `NVIDIA GeForce GTX 1080/PCIe/SSE2`; the i7-7700's Intel HD Graphics 630 is present but not driving the display (auto) |
+| Storage | SK hynix `SC311 SATA 256GB` (238.5 GiB), SATA SSD (auto) |
+| Wired NIC (recorded as `machine_mac`) | `enp4s0` `14:b3:1f:1b:c0:68` (auto) |
+| Wireless NIC | `wlp3s0` `f8:34:41:8b:cf:8b`, plus an Intel `8087:0a2a` Bluetooth interface (auto, not recorded in sessions) |
+| Session type | X11 (auto) |
+| Monitor | DP-2, primary, 2560×1440 @ 240.00 Hz active, 600×340 mm; also offers 1920×1080 @ 119.98 Hz, which preflight selects (auto) |
+| Monitor make / model | ViewSonic `XG2736-2K` (EDID PNP id `VSC`, product `0x0f41`, EDID serial `XPH252400502`, built week 24/2025, 60×34 cm) — same model as the three machines above, different unit |
+| Audio device(s) | iFi `ZEN Air DAC 2` (USB DAC, card `alsa_card.usb-iFi_ZEN_Air_DAC_2_iFi_USB_Audio_SE-00`), onboard Realtek ALC3861 (`alsa_card.pci-0000_00_1f.3`), GP104 HDMI audio (`alsa_card.pci-0000_01_00.1`) (auto) |
+| AMP / DAC make / model | iFi ZEN Air DAC 2, USB `2fc6:f082` (Comtrue) — **a different DAC from the room-435 machines**, which use an iFi USB Audio SE UAC1 (auto) |
+| Expected default output (`PREFLIGHT_AUDIO_DEVICE`) | `ZEN Air DAC 2 Analog Stereo` — pinned in `preflight_local.sh`; PTB opens the same name through PipeWire JACK, so the exact-match row passes today |
+| AMP / DAC gain (PowerMatch) | **fill in** — switch position and XBass state not yet recorded on this unit |
+| Headphones | Sennheiser HD 300 PRO (`PREFLIGHT_AUDIO_HEADPHONES`) — same model as the three machines above |
+| Keyboard | SiGma Micro `AKB-670UB`, USB `1c4f:0043` — same model as the three machines above (auto) |
+| Mouse | Logitech G102/G203 LIGHTSYNC, USB `046d:c092` — same model as the three machines above (auto) |
+| Camera | Point Grey `Chameleon3 CM3-U3-13Y3M`, USB `1e10:3300` — **not present on any room-435 machine**; unused by the study, which has no camera step (auto) |
+
+### Setup state (2026-11-24)
+
+| Item | State |
+| --- | --- |
+| `pipewire-jack` | installed (`pw-jack` at `/usr/bin/pw-jack`, `libjack.so` present) |
+| Study runtime | `.venv` → Python 3.10.18, PsychoPy `2026.1.3`, psychtoolbox `3.0.19.14`, numpy 2.2.6, Pillow 11.3.0; imports `psychopy, psychtoolbox, numpy, PIL` |
+| Code revision | `b3497a8` (`main`), no tracked modifications before this section was added |
+| Lab server | `/mnt/camp-lab-server/Anthony` (CIFS, `//psyc-files.ucsc.edu/PSYC-Projects/Camp-Lab`) mounted and writable; `Anthony/data` present |
+| PTB audio route | default sink is the ZEN Air DAC 2's analog output, accepted (analog route, so the tracked `PREFLIGHT_ALLOW_DIGITAL_SINK='1'` is irrelevant here) |
+| Headphone L/R balance | centered (`balance 0.00`) |
+| Output volume | currently 44%; `preflight.sh` re-pins it to `config.SYSTEM_VOLUME_PERCENT` (50%) at every launch |
+| APT | 73 packages upgradable — update deliberately, not the night before a session |
+| Not run | `./preflight.sh` has not been run on this machine, so the GUI checklist is unverified |
+
+### Open items on this machine
+
+- **PowerMatch is unrecorded.** It is a physical fact the machine cannot read:
+  read the DAC's PowerMatch/XBass switch once, set it to the same position as the
+  room-435 machines, and replace the **fill in** row.
+- **This is a different DAC and an analog route** from the room-435 machines,
+  which run an iFi USB Audio SE UAC1 over IEC958. Level matching across rooms is
+  therefore not guaranteed by `PREFLIGHT_ALLOW_DIGITAL_SINK` or by the same
+  hardware; the 50% sink pin plus PTB gain 1.0 is what keeps runs comparable.
+- **Runtime differs slightly from the room-435 machines:** Python 3.10.18 here vs
+  3.10.22 there, and psychtoolbox `3.0.19.14` is the same version the
+  `rightmost-435-white` machine has pending in apt. Rebuilding from
+  `requirements-lock.txt` would remove the Python patch-level difference.
+- **A Chameleon3 camera is attached and unused.** It does not affect timing, but
+  it is the one piece of hardware no other lab computer has; leave it unplugged
+  during sessions if it draws enough USB bandwidth to disturb the DAC.
