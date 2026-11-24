@@ -314,6 +314,22 @@ into `/tmp/run-tests`); the study itself is unaffected.
    `pipewire-jack` is missing).
 3. If display or audio check fails, re-check sections 2 and 4 above.
 
+### Updating the code from the launcher
+
+Preflight compares the checkout with its upstream on every launch, so nobody has
+to walk between computers to `git pull`. When the machine is behind it asks
+first:
+
+- **Yes, update** runs `git pull --ff-only` (never a merge, never touching local
+  changes), then restarts preflight so every check runs on the new code.
+- **No, run this version** starts the session on the code already installed. The
+  "Study code updates" row then says the update was offered and declined.
+
+Either way `preflight_report.txt` records `git_update=`, so a session can be
+traced to the revision it actually ran on. No offer is made when the checkout has
+local modifications or the remote cannot be reached; those show as a yellow row
+instead.
+
 ## 8. Machine-local requirements (not in git)
 
 A clone gets the code, never a computer's identity or its mounts. Everything a

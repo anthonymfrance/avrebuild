@@ -3,6 +3,19 @@
 Timing is PTB software-reported only; there is no microphone, photodiode, or loopback measurement
 (the metadata note "PTB software-reported timing, no physical measurement" is kept).
 
+## Catch-up offer in the launcher
+
+- **Preflight offers the update instead of requiring a walk to each computer.** When the checkout
+  is behind its upstream it asks `Yes, update` / `No, run this version`. Yes runs
+  `git pull --ff-only` and **restarts** preflight — bash parses a script as it executes, so
+  continuing in the same process would run bytes the pull had just rewritten — and the restart is
+  guarded by `AV_PREFLIGHT_UPDATED` so a remote that still reports commits behind cannot loop.
+  No is a normal answer: the session runs on the installed code. The offer happens before any
+  participant ID is claimed, so declining or failing leaves no claim behind. Nothing is offered
+  over local modifications, and the pull is capped at 180 s. `preflight_report.txt` gained
+  `git_update=` (`declined`, `skipped_local_changes`, `update_failed`, `skipped_after_update`,
+  `not_checked`) beside `git_commit`, so each session still records the revision it ran on.
+
 ## 0.5 s stimulus audio
 
 - **Runtime assets are 0.5 s.** `20_stimuli/*/obj_snds/_cleaned_0.5/snd_*.wav` are 48 kHz,

@@ -26,7 +26,8 @@ def executable(path, content):
 
 def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip_gates=False,
                  digital=False, server_uri=None, gio_succeeds=True, initial_mode=None,
-                 server_root=None, allow_digital=False, expected_audio_device=None):
+                 server_root=None, allow_digital=False, expected_audio_device=None,
+                 git_upstream_ahead=0, update_answer='no'):
     """Run preflight.sh in an isolated study directory with fake system commands.
 
     ``debug=False`` makes the fake zenity choose the participant run, and
@@ -35,7 +36,9 @@ def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip
     configures the share to auto-mount; ``gio_succeeds`` says whether the fake
     ``gio`` claims the mount worked (it never actually creates a mount point).
     ``server_root`` gives the machine a configured absolute mount point (the
-    Camp-Lab CIFS share) instead of a gvfs mount.
+    Camp-Lab CIFS share) instead of a gvfs mount. ``git_upstream_ahead`` turns the
+    study copy into a real checkout whose ``origin/main`` has that many extra
+    commits, and ``update_answer`` answers the catch-up offer ('no' never pulls).
     """
     study = tmp_path / 'study'
     study.mkdir()
@@ -65,6 +68,8 @@ import json, sys
 args = sys.argv[1:]
 with open({str(dialogs)!r}, 'a') as output:
     output.write(json.dumps(args) + chr(10))
+if '--ok-label=Yes, update' in args:
+    sys.exit(0 if {update_answer == 'yes'!r} else 1)
 if '--ok-label=Debug run' in args and not {debug!r}:
     sys.exit(1)
 if {skip_gates!r} and '--extra-button=Skip (debug)' in args:
@@ -151,6 +156,27 @@ if args[0].endswith('experiment.py'):
     sys.exit(1)
 os.execv({sys.executable!r}, [{sys.executable!r}] + args)
 ''')
+    if git_upstream_ahead:
+        # A local bare remote keeps the update check offline and instant.
+        def git(*args, cwd):
+            return subprocess.run(
+                ['git', '-c', 'user.email=preflight@test', '-c', 'user.name=Preflight',
+                 *args], cwd=str(cwd), check=True, capture_output=True, text=True,
+            )
+        remote = tmp_path / 'remote.git'
+        git('init', '-q', '--bare', '-b', 'main', str(remote), cwd=tmp_path)
+        git('init', '-q', '-b', 'main', cwd=study)
+        git('add', '-A', cwd=study)
+        git('commit', '-q', '-m', 'installed', cwd=study)
+        git('remote', 'add', 'origin', str(remote), cwd=study)
+        git('push', '-q', '-u', 'origin', 'main', cwd=study)
+        other = tmp_path / 'upstream'
+        git('clone', '-q', str(remote), str(other), cwd=tmp_path)
+        for index in range(git_upstream_ahead):
+            (other / f'upstream_note_{index}.txt').write_text('new code\n', encoding='utf-8')
+            git('add', '-A', cwd=other)
+            git('commit', '-q', '-m', f'upstream {index}', cwd=other)
+            git('push', '-q', 'origin', 'main', cwd=other)
     env = dict(os.environ)
     for name in ('AV_STUDY_SERVER_ROOT', 'AV_STUDY_SERVER_DATA_PATH', 'LD_PRELOAD'):
         env.pop(name, None)
@@ -240,6 +266,32 @@ def test_launcher_uses_final_storage_roots_and_preserves_failure_log(tmp_path, m
         assert claim['host'] and claim['started_utc'] and claim['token']
     else:
         assert not (run.server_data / '.claims').exists()
+
+
+def test_launcher_offers_to_update_a_checkout_that_is_behind(tmp_path):
+    run = run_launcher(tmp_path, git_upstream_ahead=1)
+    offers = [message for message in run.messages if '--ok-label=Yes, update' in message]
+    assert len(offers) == 1, 'the update is offered exactly once'
+    offer = ' '.join(offers[0])
+    assert '1 commit(s) behind origin/main' in offer
+    assert 'No, run this version' in offer
+    # Declining is normal: the session still starts, and the checklist row and the
+    # saved report both say which version ran and that an update was on offer.
+    assert run.recorded is not None
+    assert 'git_update=declined' in run.recorded['report']
+    checklist = ' '.join(next(m for m in run.messages if '--list' in m))
+    assert 'the update was offered and declined' in checklist
+
+
+def test_accepting_the_update_pulls_and_restarts_on_the_new_code(tmp_path):
+    run = run_launcher(tmp_path, git_upstream_ahead=1, update_answer='yes')
+    assert (run.study / 'upstream_note_0.txt').is_file(), 'the pull landed in the study checkout'
+    # One offer only: the restarted preflight sees a checkout that is up to date.
+    assert sum('--ok-label=Yes, update' in message for message in run.messages) == 1
+    assert run.recorded is not None
+    assert 'git_behind=0' in run.recorded['report']
+    checklist = ' '.join(next(m for m in run.messages if '--list' in m))
+    assert 'Up to date with origin/main' in checklist
 
 
 @pytest.mark.parametrize('debug', [True, False])

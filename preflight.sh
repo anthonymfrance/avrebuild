@@ -2,6 +2,8 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Needed for the restart after an update: see the git block below.
+self_path="$script_dir/$(basename -- "${BASH_SOURCE[0]}")"
 source "$script_dir/preflight_config.sh"
 # Machine-local values (name, headphones) live in an untracked file, so a clone
 # on another computer does not inherit this one's identity.
@@ -154,6 +156,7 @@ git_branch=''
 git_upstream=''
 git_behind=''
 git_dirty=''
+git_update='not_checked'
 if command -v git >/dev/null 2>&1 && git -C "$study_dir" rev-parse --git-dir >/dev/null 2>&1; then
   git_state='checked_out'
   git_commit="$(git -C "$study_dir" rev-parse --short HEAD 2>/dev/null || true)"
@@ -173,6 +176,55 @@ if command -v git >/dev/null 2>&1 && git -C "$study_dir" rev-parse --git-dir >/d
     fi
   fi
 fi
+# A checkout behind its upstream runs stale code, and walking to every computer
+# to pull by hand is how machines drift apart. Offer the update here, with an
+# explicit yes and no, before any participant ID is reserved or any file is
+# written: declining is a normal answer, and the session still runs on the
+# version already installed.
+git_update='not_checked'
+if [[ "$git_state" == 'checked_out' && "$git_behind" =~ ^[0-9]+$ ]] && (( git_behind > 0 )); then
+  if [[ -n "$git_dirty" ]]; then
+    # A local modification is a deliberate act too: never merge or stash over it.
+    git_update='skipped_local_changes'
+  elif [[ "${AV_PREFLIGHT_UPDATED:-0}" == 1 ]]; then
+    # Restarted after a pull that still reports commits behind (a tag-only remote,
+    # say): say so once and get on with the session instead of offering in a loop.
+    git_update='skipped_after_update'
+  elif zenity --question --title='AV study preflight' --width=660 \
+      --ok-label='Yes, update' --cancel-label='No, run this version' \
+      --text="This computer is $git_behind commit(s) behind $git_upstream.
+
+It is running ${git_commit:-unknown} on ${git_branch:-detached}.
+
+Update the study code now? The update is a fast-forward only: no merge, and
+no local changes are touched. Preflight then restarts on the new code.
+
+Choose 'No, run this version' to run the session on the code already here." \
+      2>/dev/null; then
+    git_update='updated'
+    pull_output=''
+    if pull_output="$(timeout 180 git -C "$study_dir" pull --ff-only 2>&1)"; then
+      updated_commit="$(git -C "$study_dir" rev-parse --short HEAD 2>/dev/null || true)"
+      gui_info "Study code updated to ${updated_commit:-the latest commit}.
+
+Preflight will start again so every check runs on the new code."
+      # Bash parses this file as it executes, and the pull just rewrote it, so the
+      # only safe move is to restart rather than run a half-old script.
+      export AV_PREFLIGHT_UPDATED=1
+      exec bash "$self_path" ${1+"$@"}
+    else
+      git_update='update_failed'
+      gui_error "Could not update the study code automatically:
+
+$(tail -n 5 <<< "${pull_output:-no output}")
+
+The session can still run on the version already installed."
+    fi
+  else
+    git_update='declined'
+  fi
+fi
+
 # Identity for the multi-device pilot: a human name from the untracked local
 # config, plus values the machine supplies itself, so a changed hostname or a
 # swapped disk cannot silently merge two computers into one row of the data.
@@ -571,7 +623,18 @@ else
     add_row '⚠️' 'Study code updates' "Could not reach $git_upstream; update check skipped"
   elif [[ "$git_behind" =~ ^[0-9]+$ ]]; then
     if (( git_behind > 0 )); then
-      add_row '⚠️' 'Study code updates' "$git_behind commit(s) behind $git_upstream; update deliberately, then re-run preflight"
+      case "$git_update" in
+        declined)
+          add_row '⚠️' 'Study code updates' "$git_behind commit(s) behind $git_upstream; the update was offered and declined, running ${git_commit:-the installed version}" ;;
+        skipped_local_changes)
+          add_row '⚠️' 'Study code updates' "$git_behind commit(s) behind $git_upstream; local modifications present, so no update was offered" ;;
+        update_failed)
+          add_row '⚠️' 'Study code updates' "$git_behind commit(s) behind $git_upstream; the automatic update failed, run git pull by hand" ;;
+        skipped_after_update)
+          add_row '⚠️' 'Study code updates' "Still $git_behind commit(s) behind $git_upstream right after an update; check the remote" ;;
+        *)
+          add_row '⚠️' 'Study code updates' "$git_behind commit(s) behind $git_upstream; update deliberately, then re-run preflight" ;;
+      esac
     else
       add_row '✅' 'Study code updates' "Up to date with $git_upstream"
     fi
@@ -846,7 +909,7 @@ fi
   printf 'audio_route_device=%s\naudio_route_sink=%s\n' "${default_sink_desc:-}" "${default_sink:-}"
   printf 'audio_chain=%s\naudio_headphones=%s\n' "$audio_chain" "$audio_headphones"
   printf 'audio_device_expected=%s\naudio_device_actual=%s\n' "$expected_audio_device" "${default_sink_desc:-}"
-  printf 'git_branch=%s\ngit_commit=%s\ngit_dirty=%s\ngit_behind=%s\ngit_upstream=%s\n' "${git_branch:-}" "${git_commit:-}" "${git_dirty:-}" "${git_behind:-}" "${git_upstream:-}"
+  printf 'git_branch=%s\ngit_commit=%s\ngit_dirty=%s\ngit_behind=%s\ngit_upstream=%s\ngit_update=%s\n' "${git_branch:-}" "${git_commit:-}" "${git_dirty:-}" "${git_behind:-}" "${git_upstream:-}" "${git_update:-not_checked}"
   # Machine identity belongs in the saved report only; the checklist does not show
   # it. glxinfo comes from mesa-utils and is absent on some machines.
   printf 'machine_name=%s\nmachine_room=%s\nmachine_uuid=%s\nmachine_model=%s\nmachine_serial=%s\nmachine_mac=%s\nmachine_host=%s\n' \
