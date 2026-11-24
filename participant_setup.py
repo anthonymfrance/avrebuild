@@ -18,6 +18,7 @@ import config
 from plan_validator import validate_plan
 from session_io import config_snapshot, json_default, server_data_directory, sha256_file
 from slotting_key import build_slotting_key, write_slotting_key
+import stimulus_split
 from stimulus_split import draw_favored_corners, split_pool
 from timeline_key import (
     PlacementFailure,
@@ -32,6 +33,13 @@ PARTICIPANT_PATTERN = re.compile(r"^(?:participant_)?(\d+)$")
 # Not in config, whose values are snapshotted into every plan. About a third of
 # 100-trial seeds draw a trial no schedule can hold; those fail in under a second.
 PLAN_SEED_ATTEMPTS = 20
+# A debug run is a smoke test of the whole apparatus, not a session: one appearance
+# per PT per block, so 2 * PT_COUNT_PER_BLOCK = 4 trials instead of the full plan.
+# Not in config, whose values are snapshotted into every plan and compared on load:
+# the limit is applied by setting config.TRIALS_PER_PT in the running process, so a
+# debug plan's own snapshot records the size it was generated at and that plan still
+# refuses to load without the override.
+DEBUG_TRIALS_PER_PT = 1
 
 
 class PlanGenerationError(RuntimeError):
@@ -47,6 +55,21 @@ def derive_rng(seed: int, label: str) -> random.Random:
     if not label:
         raise ValueError('RNG stream label must not be empty.')
     return random.Random(f'{seed}:{label}')
+
+
+def apply_debug_trial_limit(trials_per_pt=DEBUG_TRIALS_PER_PT):
+    """Shrink this process's plan to a debug-size run; returns the value applied.
+
+    stimulus_split bound TRIALS_PER_PT at import time and plan_validator reads the
+    config value, so both copies are set. Call this before the plan is generated so
+    the plan's config snapshot and the live config agree when it is loaded back.
+    """
+    value = int(trials_per_pt)
+    if value < 1:
+        raise ValueError('A debug plan needs at least one appearance per PT per block.')
+    config.TRIALS_PER_PT = value
+    stimulus_split.TRIALS_PER_PT = value
+    return value
 
 
 def build_plan(seed, block_order, count_ranges=None, diagnostics=None):

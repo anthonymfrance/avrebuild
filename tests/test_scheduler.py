@@ -7,6 +7,7 @@ import pytest
 
 import config
 import participant_setup
+import session_io
 import stimulus_split
 import timeline_key
 from plan_validator import validate_plan
@@ -263,6 +264,38 @@ def test_same_sound_spacing_and_planned_sound_end(plan_100):
             assert all(b['global_onset'] - a['global_onset'] >=
                        config.SOUND_DUR + config.MIN_SAME_SOUND_GAP - 1e-9
                        for a, b in zip(same, same[1:]))
+
+
+def test_debug_run_builds_a_four_trial_plan_and_records_the_limit(monkeypatch):
+    # apply_debug_trial_limit sets two module globals, so both are restored here.
+    monkeypatch.setattr(config, 'TRIALS_PER_PT', config.TRIALS_PER_PT)
+    monkeypatch.setattr(stimulus_split, 'TRIALS_PER_PT', stimulus_split.TRIALS_PER_PT)
+    assert config.TRIALS_PER_PT == 25
+
+    value = participant_setup.apply_debug_trial_limit()
+    assert value == participant_setup.DEBUG_TRIALS_PER_PT == 1
+    assert config.TRIALS_PER_PT == stimulus_split.TRIALS_PER_PT == value
+    # The plan's snapshot is what makes a debug plan refuse to load without the limit.
+    assert session_io.config_snapshot()['TRIALS_PER_PT'] == value
+
+    assignment, slotting, timeline, _, _ = participant_setup.build_plan(7, ORDER)
+    assert validate_plan(assignment, slotting, timeline) == []
+    assert {r['trial'] for r in timeline if r['event_type'] == 'visual'} == {1, 2}
+    # One appearance per PT: each privileged target is the active PT of one trial.
+    active_trials = defaultdict(set)
+    for row in slotting:
+        if row['role'] == 'PT':
+            active_trials[row['item']].add((row['block'], row['trial']))
+    assert len(active_trials) == 2 * config.PT_COUNT_PER_BLOCK
+    assert {len(trials) for trials in active_trials.values()} == {1}
+
+
+def test_debug_trial_limit_refuses_zero(monkeypatch):
+    monkeypatch.setattr(config, 'TRIALS_PER_PT', config.TRIALS_PER_PT)
+    monkeypatch.setattr(stimulus_split, 'TRIALS_PER_PT', stimulus_split.TRIALS_PER_PT)
+    with pytest.raises(ValueError):
+        participant_setup.apply_debug_trial_limit(0)
+    assert config.TRIALS_PER_PT == 25
 
 
 def test_validator_rejects_repeat_sound_gap(plan_100):

@@ -16,7 +16,9 @@ from pathlib import Path
 import config
 from config import BLOCK_LABELS, TARGET_ROLES
 from stimulus_split import ANIMATE, INANIMATE
-from participant_setup import create_participant_plan, derive_rng, git_state, verify_participant_claim
+from participant_setup import (
+    apply_debug_trial_limit, create_participant_plan, derive_rng, git_state, verify_participant_claim,
+)
 import practice
 import screens
 from session_io import (
@@ -110,6 +112,13 @@ def run(args):
         raise ValueError('Participant claim is missing. Start the experiment from preflight.sh.')
     claim = verify_participant_claim(claim_path, args.pid, claim_token)
 
+    # A debug run is a smoke test, so its plan is built at DEBUG_TRIALS_PER_PT
+    # appearances per PT per block (four trials) instead of the full session. This
+    # runs before the plan is generated, so the plan's config snapshot records the
+    # limited size and load_timeline still agrees with the live config.
+    debug_overlay_enabled = os.environ.get('AV_STUDY_DEBUG_OVERLAY', 'false').lower() == 'true'
+    debug_trials_per_pt = apply_debug_trial_limit() if debug_overlay_enabled else None
+
     try:
         import numpy as np
         from PIL import Image
@@ -198,6 +207,15 @@ def run(args):
         'background_source': str(ROOT / config.BG_SOURCE_FILE),
         'background_variants': 20,
         'seed': None,
+        'debug_overlay_enabled': debug_overlay_enabled,
+        'debug_trial_limit_trials_per_pt': debug_trials_per_pt,
+        'debug_trial_limit_note': (
+            f'Debug run: the plan was generated with TRIALS_PER_PT={debug_trials_per_pt} '
+            '(one appearance per PT per block, four trials total) and the plan config '
+            'snapshot records that value; this plan cannot be loaded without the limit.'
+            if debug_trials_per_pt else
+            'Full-length plan; no debug trial limit was applied.'
+        ),
         'sound_check': {'status': 'pending'},
         'clock_strategy': 'session core.Clock; Keyboard on session clock; flip timestamps converted from PsychoPy defaultClock; PTB targets converted from a paired future-flip time.',
     }
@@ -352,7 +370,6 @@ def run(args):
 
         debug_lines, item_details_by_block = screens.plan_summary(
             args.pid, rows, block_order, trials_by_block)
-        debug_overlay_enabled = os.environ.get('AV_STUDY_DEBUG_OVERLAY', 'false').lower() == 'true'
         metadata['debug_overlay_enabled'] = debug_overlay_enabled
         metadata['debug_overlay_note'] = (
             'Operator plan screen and per-frame overlay were shown; an extra stimulus is drawn '

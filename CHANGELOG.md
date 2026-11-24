@@ -472,3 +472,31 @@ No participant-facing behavior changed: `config.py`, `experiment.py`, `trial_run
   that has only the apt list in ENVIRONMENT.md installed.
 - The PID in the first dialog matches the folder created for the session.
 - A debug run can skip every gate; a participant run is offered no skip button.
+
+## 2026-11-24 debug runs generate a four-trial plan
+
+- **A debug run's plan is built at `TRIALS_PER_PT = 1`.** `participant_setup.DEBUG_TRIALS_PER_PT`
+  is the constant and `apply_debug_trial_limit()` sets `config.TRIALS_PER_PT` plus the
+  import-time copy in `stimulus_split`, so each of a block's two PTs appears once: 2 trials
+  per block, 4 trials per debug session instead of 100. `experiment.py` applies it at
+  startup when `AV_STUDY_DEBUG_OVERLAY=true`, before the plan is generated, so the plan's
+  config snapshot records the limited size and `load_timeline` still agrees with the live
+  config.
+- **`config.py` is unchanged**, so no existing participant plan is refused. Because the
+  snapshot records `TRIALS_PER_PT=1`, a debug plan will not load without the override:
+  replaying it is a debug run by definition.
+- **The session metadata says so.** `debug_trial_limit_trials_per_pt` is 1 on a debug run
+  and null on a participant run, with a note naming the value; `debug_overlay_enabled`
+  keeps its meaning.
+- Preflight's start dialog names the debug plan size, read from `DEBUG_TRIALS_PER_PT`, so
+  a four-trial run cannot be mistaken for a session.
+- Pre-existing: `tests/test_scheduler.py::test_one_active_pd_per_trial_with_two_trials_each`
+  and `::test_a_failed_trial_is_retried_alone_and_placed_trials_are_kept` still assert an
+  8-trial plan against the 25-trial config and fail on `main`; not touched here.
+
+### Verify in pilot
+- A debug run reaches the operator screen with 2 trials per block, runs both blocks and the
+  break, and writes `session_metadata.json` with `debug_trial_limit_trials_per_pt: 1`.
+- A participant run still plans 100 trials and records `debug_trial_limit_trials_per_pt: null`.
+- Replaying a debug participant folder without `AV_STUDY_DEBUG_OVERLAY=true` is refused with
+  `TRIALS_PER_PT` listed as a changed value.

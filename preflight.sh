@@ -876,9 +876,19 @@ planned_block_order="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$pyth
   gui_error 'Could not calculate the planned block order.'
   exit 1
 }
+# The runner applies participant_setup.DEBUG_TRIALS_PER_PT to a debug run's plan;
+# the number comes from the same constant so this text cannot drift from it.
+debug_plan_note=''
+if [[ "$debug_overlay" == true ]]; then
+  debug_plan_note="$(PYTHONPATH="$study_dir${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -c 'import config, participant_setup as p; n = 2 * config.PT_COUNT_PER_BLOCK * p.DEBUG_TRIALS_PER_PT; print(f"Debug run: {n} trials total ({p.DEBUG_TRIALS_PER_PT} per PT per block).")')" \
+    || debug_plan_note='Debug run: the plan is limited to a smoke-test length.'
+  debug_plan_note="$debug_plan_note
+"
+fi
 gui_yes "Preflight checks are complete. Start $participant_id?
 
 Planned block order: $planned_block_order
+$debug_plan_note
 The participant plan will be created when the experiment starts." || { rm -f -- "$report"; gui_info 'Preflight passed. The experiment was not started.'; exit 0; }
 export AV_STUDY_PREFLIGHT_REPORT="$report"
 export AV_STUDY_DEBUG_OVERLAY="$debug_overlay"
