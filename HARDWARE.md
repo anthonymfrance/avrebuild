@@ -110,3 +110,75 @@ pw-jack env LD_PRELOAD=$(ls /usr/lib/*/pipewire-0.3/jack/libjack.so | head -1) \
 | Output volume | currently 100%; `preflight.sh` pins it to `config.SYSTEM_VOLUME_PERCENT` (50%) at launch |
 | Session audio device | follows the OS default: preflight exports the validated sink as `AV_STUDY_AUDIO_DEVICE` and the session opens exactly that device; `PREFLIGHT_AUDIO_DEVICE` pins it on this machine |
 | Saved-report identity | `preflight.sh` now also writes `os_release`, `monitor_pnp_id`, `monitor_product_code`, `monitor_model`, `monitor_serial` and `usb_devices` to `preflight_report.txt` (and therefore `session_metadata.json`). Deliberately not shown in the checklist window. |
+
+---
+
+## middle-435-purple
+
+Middle computer in room 435, one of the two machines in that room (the other is
+`leftmost-435-dark-blue` above). Named by position and colour like its sibling; its
+campsite hostname `carpinteria-Aurora-R6` is recorded as the hostname only. A different
+physical computer: different DMI UUID, serial, wired NIC MAC and SSD, so sessions from
+the two cannot merge.
+
+| Field | Value |
+| --- | --- |
+| Study machine name | `middle-435-purple` (`PREFLIGHT_MACHINE_NAME`) |
+| Room | 435 (`PREFLIGHT_MACHINE_ROOM`) |
+| DMI product UUID | `4c4c4544-0057-5210-8031-cac04f4a4b32` (`PREFLIGHT_MACHINE_UUID`) |
+| DMI product serial | `JWR1JK2` (`PREFLIGHT_MACHINE_SERIAL`) |
+| Hostname | `carpinteria-Aurora-R6` |
+| Model | Alienware Aurora R6 (DMI type 3, desktop) |
+| Motherboard | Alienware `07HV66` rev `A01` |
+| BIOS | `1.0.23`, 2020-06-11 |
+| OS / kernel | Ubuntu 24.04.5 LTS, `7.0.0-43-generic` x86_64 |
+| CPU | Intel Core i7-7700 @ 3.60 GHz, 4 cores / 8 threads, 1 socket (auto) |
+| RAM | 15.4 GB (auto) |
+| GPU | NVIDIA GP104 GeForce GTX 1080, driver `580.178.04`, OpenGL renderer `NVIDIA GeForce GTX 1080/PCIe/SSE2` (auto) |
+| Storage | Crucial `CT250MX200SSD1` 250 GB (auto) |
+| Wired NIC (recorded as `machine_mac`) | `enp4s0` `14:b3:1f:1b:c0:79` (auto) |
+| Wireless NIC | `wlp3s0` `f8:34:41:8b:d0:49` (auto, not recorded in sessions) |
+| Session type | X11 (auto) |
+| Monitor | DP-4, 2560×1440 @ 240 Hz, 600×340 mm; also offers 1920×1080 @ 119.98 Hz, which preflight selects (auto) |
+| Monitor make / model | ViewSonic `XG2736-2K` (EDID PNP id `VSC`, product `0x0f41`, EDID serial field `0x01010101` — not programmed; built week 2/2025, 60×34 cm) |
+| Audio device(s) | iFi USB Audio SE UAC1 (USB DAC, card `alsa_card.usb-…iFi_USB_Audio_SE_UAC1…`), onboard Realtek (`alsa_card.pci-0000_00_1f.3`), GP104 HDMI audio (`alsa_card.pci-0000_01_00.1`) (auto) |
+| AMP / DAC make / model | iFi USB DAC/amp, USB `0000:6011` with device description `iFi USB Audio SE UAC1` — identical USB identity to the machine above (auto; physical unit not re-read) |
+| Expected default output (`PREFLIGHT_AUDIO_DEVICE`) | `iFi USB Audio SE UAC1 Digital Stereo (IEC958)` — pinned in `preflight_local.sh`, so preflight fails if any other sink becomes the default |
+| AMP / DAC gain (PowerMatch) | **fill in** — switch position and XBass state not yet read on this machine |
+| Headphones | Sennheiser HD 300 PRO (`PREFLIGHT_AUDIO_HEADPHONES`) |
+| Keyboard | SiGma Micro `AKB-670UB`, USB `1c4f:0043` — same model as the machine above (auto) |
+| Mouse | Logitech G102/G203 LIGHTSYNC, USB `046d:c092` — same model as the machine above (auto) |
+
+Keyboard and mouse are identified here by their USB vendor:product IDs, not by the
+serial numbers printed on their labels. The label serials recorded for
+`leftmost-435-dark-blue` belong to that machine's individual units and must not be copied
+to this row; this machine's own units have not been read off their labels yet.
+
+### Setup state (2026-11-24)
+
+| Item | State |
+| --- | --- |
+| `pipewire-jack` | installed (`pw-jack` at `/usr/bin/pw-jack`, `libjack.so` present) |
+| Study runtime | `.venv` → Python 3.10.22, PsychoPy `2026.1.3`, numpy 2.2.6; imports `psychopy, psychtoolbox, numpy, PIL` |
+| Code revision | `0fca303` (`main`), no tracked modifications |
+| Lab server | `/mnt/camp-lab-server/Anthony` (CIFS, `//psyc-files.ucsc.edu/PSYC-Projects/Camp-Lab`, mounted by the machine's own mount configuration); `Anthony/data` reachable and writable |
+| PTB audio route | default sink is the iFi's IEC958 output; accepted because the route is deliberately digital (`PREFLIGHT_ALLOW_DIGITAL_SINK='1'`) |
+| Headphone L/R balance | centered (`balance 0.00`) |
+| Output volume | currently 100%; `preflight.sh` pins it to `config.SYSTEM_VOLUME_PERCENT` (50%) at launch |
+| Session audio device | pinned to `iFi USB Audio SE UAC1 Digital Stereo (IEC958)` via `PREFLIGHT_AUDIO_DEVICE`; preflight exports the validated sink as `AV_STUDY_AUDIO_DEVICE` |
+| APT | 103 packages upgradable — update deliberately, not the night before a session |
+| Not run | `./preflight.sh` has not been run on this machine, so the GUI checklist is unverified |
+
+### Open items on this machine
+
+- **PowerMatch / XBass are outside software control and currently unknown here.**
+  Read the switch once, set it to the same position as the machine above, and replace
+  **fill in** in the table. The system sink is pinned to 50% and PTB gain stays at 1.0,
+  so any hardware gain the DAC applies is invisible to preflight and to the session
+  metadata.
+- **Kernel differs from the machine above** (`7.0.0-43-generic` vs `6.17.0-14-generic`),
+  so `tools/device_report.py` will list a `kernel` difference between the two devices.
+  Harmless for timing, but it means a timing question cannot be settled by "same kernel".
+- **Name confirmed by the operator as the middle computer, purple.** `PREFLIGHT_MACHINE_NAME`
+  is `middle-435-purple`; the camp-site hostname stays the hostname, matching the
+  convention on the machine above.
