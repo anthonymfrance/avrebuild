@@ -96,8 +96,13 @@ than trusting a model name written in this file.
 
 The experiment runs PTB (PortAudio) through `pw-jack` so audio goes
 PTB → PipeWire JACK → whatever sink the system default points at. The sink is
-resolved at run time, so a different codec, chassis or USB DAC is fine; a
-digital sink (S/PDIF, HDMI) is rejected because it is not the headphone route.
+resolved at run time, so a different codec, chassis or USB DAC is fine.
+
+A digital sink (S/PDIF, HDMI) is rejected by default, because most machines
+should play from the wired headphone output. This lab's route *is* the DAC's
+S/PDIF output, so `preflight_config.sh` sets `PREFLIGHT_ALLOW_DIGITAL_SINK='1'`
+and the row reports an accepted digital route instead of a red one. Leave it at
+`0` on a machine where the route is meant to be analog.
 
 1. Install `pipewire-jack` (see above).
 2. Confirm PipeWire daemons are running: `pgrep -c pipewire` should print ≥ 3

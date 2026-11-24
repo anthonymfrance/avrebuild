@@ -208,8 +208,16 @@ if (( ! pipewire_jack_ready )); then
   add_row '❌' 'PTB audio route' "PipeWire JACK could not expose ${default_sink_desc:-the configured default output (description unavailable)}; check the pipewire-jack package and the selected output"
   fatal=1
 elif (( default_sink_is_digital )); then
-  add_row '❌' 'PTB audio route' "Default output is digital ($default_sink_desc); select the wired headphone output as the default sink"
-  fatal=1
+  # A digital sink is the wrong route on most machines, but this lab runs the DAC's
+  # S/PDIF output deliberately, so PREFLIGHT_ALLOW_DIGITAL_SINK accepts it. The row
+  # still names the output, so the route in use is visible in the checklist and in
+  # the saved report rather than passing silently.
+  if [[ "${PREFLIGHT_ALLOW_DIGITAL_SINK:-0}" == 1 ]]; then
+    add_row '✅' 'PTB audio route' "Digital output accepted (PREFLIGHT_ALLOW_DIGITAL_SINK): $default_sink_desc"
+  else
+    add_row '❌' 'PTB audio route' "Default output is digital ($default_sink_desc); select the wired headphone output as the default sink"
+    fatal=1
+  fi
 else
   add_row '✅' 'PTB audio route' "PipeWire JACK exposes $default_sink_desc"
 fi

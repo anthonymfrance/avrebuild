@@ -75,14 +75,13 @@ lsusb | grep -i ifi
   invisible to it. PowerMatch (the amp's gain switch, `+4.6` to `+10 dB`
   depending on the iFi model) and any bass boost have to be set to one position
   and recorded here, identically on every lab machine.
-- **Audio route is digital, not the headphone route.** The default sink is the
-  iFi DAC's IEC958/S-PDIF profile (`alsa_output.usb-…iFi…-00.iec958-stereo`), and
-  `preflight.sh` rejects any default sink whose description matches
-  `digital|iec958|hdmi` as fatal. The same card exposes
-  `output:analog-stereo` (`available: yes`), so the fix is to switch the card
-  profile to analog stereo and make that sink the default. Deliberately not
-  changed on 2026-11-24: the physical output being used has to be confirmed
-  first, since a receiver on S/PDIF is a different route than headphones.
+- **The audio route is meant to be digital.** The default sink is the iFi uno's
+  IEC958/S-PDIF output (`alsa_output.usb-…iFi…-00.iec958-stereo`), and that is the
+  route the lab was told to prioritise — not the analog profile. `preflight.sh`
+  rejects a `digital|iec958|hdmi` default sink by default, so
+  `preflight_config.sh` now sets `PREFLIGHT_ALLOW_DIGITAL_SINK='1'` and the row
+  reports an accepted digital route. Do **not** switch the card to
+  `output:analog-stereo` on this machine.
 - Do **not** `apt autoremove` on this machine: the orphan list currently offers
   `nvidia-*-535` packages next to the live 580 driver (see ENVIRONMENT.md §1).
 - 47 packages have pending upgrades; update deliberately, not the night before a
@@ -96,7 +95,7 @@ lsusb | grep -i ifi
 | Study runtime | `.venv` built with `uv` → Python 3.10.22, PsychoPy `2026.1.3`, imports `psychopy, psychtoolbox, numpy, PIL` |
 | Code revision | `pilot-2026-11.7` (= `main`), no tracked modifications |
 | Lab server | `/mnt/camp-lab-server/Anthony` (CIFS, `//psyc-files.ucsc.edu/PSYC-Projects/Camp-Lab`), data at `Anthony/data` reachable and writable; the five earlier sessions are archived in `Anthony/data/old data/` |
-| PTB audio route | **fails preflight**: PipeWire JACK only exposes the digital IEC958/HDMI devices (`iFi USB Audio SE UAC1 Digital Stereo (IEC958)`, `Built-in Audio Digital Stereo (IEC958)`, GP104 HDMI), because no analog profile is active |
+| PTB audio route | passes: PipeWire JACK exposes `iFi USB Audio SE UAC1 Digital Stereo (IEC958)` and it is the default sink; accepted because the route is deliberately digital (`PREFLIGHT_ALLOW_DIGITAL_SINK='1'`) |
 | Headphone L/R balance | centered (`balance 0.00`) |
 | Output volume | currently 100%; `preflight.sh` pins it to `config.SYSTEM_VOLUME_PERCENT` (50%) at launch |
 | Saved-report identity | `preflight.sh` now also writes `os_release`, `monitor_pnp_id`, `monitor_product_code`, `monitor_model`, `monitor_serial` and `usb_devices` to `preflight_report.txt` (and therefore `session_metadata.json`). Deliberately not shown in the checklist window. |

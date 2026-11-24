@@ -32,6 +32,13 @@ PREFLIGHT_SERVER_MOUNT_GLOB='smb-share:server=psyc-files.ucsc.edu,share=jamal*'
 PREFLIGHT_MACHINE_NAME=''
 PREFLIGHT_AUDIO_HEADPHONES=''
 
+# Audio route policy. A digital default sink (S/PDIF/IEC958, HDMI) is rejected by
+# default, because most machines should play from the wired headphone output. This
+# lab's route IS the DAC's S/PDIF output, as instructed, so it is accepted here and
+# reported as an accepted digital route instead of a red row. Leave it at 0 on a
+# machine where the route is meant to be analog.
+PREFLIGHT_ALLOW_DIGITAL_SINK='1'
+
 # Browser steps before the experiment starts. Preflight opens the consent form,
 # then the participant log, and waits for the RA to confirm each one before
 # showing the reminder to close the browser. Set either to '' to skip that step

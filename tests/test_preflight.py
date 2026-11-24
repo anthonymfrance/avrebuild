@@ -26,7 +26,7 @@ def executable(path, content):
 
 def run_launcher(tmp_path, *, mounted=True, plan_created=False, debug=True, skip_gates=False,
                  digital=False, server_uri=None, gio_succeeds=True, initial_mode=None,
-                 server_root=None):
+                 server_root=None, allow_digital=False):
     """Run preflight.sh in an isolated study directory with fake system commands.
 
     ``debug=False`` makes the fake zenity choose the participant run, and
@@ -127,7 +127,8 @@ with open({str(browser_log)!r}, 'a') as output:
         f'PREFLIGHT_CONSENT_URL={CONSENT_URL!r}\n'
         f'PREFLIGHT_PARTICIPANT_LOG_URL={PARTICIPANT_LOG_URL!r}\n'
         + (f'PREFLIGHT_SERVER_URI={server_uri!r}\n' if server_uri else '')
-        + (f'PREFLIGHT_SERVER_ROOT={str(server)!r}\n' if server_root is not None else ''),
+        + (f'PREFLIGHT_SERVER_ROOT={str(server)!r}\n' if server_root is not None else '')
+        + ("PREFLIGHT_ALLOW_DIGITAL_SINK='1'\n" if allow_digital else ''),
         encoding='utf-8',
     )
     executable(commands / 'pw-jack', '#!/bin/sh\nexec "$@"\n')
@@ -275,6 +276,22 @@ def test_digital_default_sink_blocks_preflight(tmp_path):
     assert sorted(path.name for path in (run.study / 'data').iterdir()) == ['participant_01']
     error = next(args for args in run.messages if '--error' in args)
     assert any('required preflight checks failed' in arg for arg in error)
+
+
+def test_digital_sink_is_accepted_when_the_lab_opts_in(tmp_path):
+    """This lab's route is the DAC's S/PDIF output, so it may be accepted.
+
+    The default stays fatal (see the test above); PREFLIGHT_ALLOW_DIGITAL_SINK
+    records the deliberate decision so the route is not silently analog-only.
+    """
+    run = run_launcher(tmp_path, digital=True, allow_digital=True)
+    assert run.result.returncode == 1, run.result.stdout + run.result.stderr
+    rows = next(args for args in run.messages if '--list' in args)
+    assert not any('Default output is digital' in arg for arg in rows)
+    assert any('Digital output accepted' in arg for arg in rows)
+    # The audio gate passed, so the run reaches the runner instead of stopping at
+    # the checklist with a fatal-check dialog.
+    assert not any('required preflight checks failed' in ' '.join(args) for args in run.messages)
 
 
 @pytest.mark.parametrize(
