@@ -66,6 +66,12 @@ pactl list cards | grep -A3 'iFi_USB'
 lsusb | grep -i ifi
 
 # Headphones: not detectable — written by hand, then recorded by preflight
+
+# Default output, and the PTB name the session opens (PREFLIGHT_AUDIO_DEVICE)
+pactl get-default-sink
+pactl list sinks | grep -A3 'Description:'
+pw-jack env LD_PRELOAD=$(ls /usr/lib/*/pipewire-0.3/jack/libjack.so | head -1) \
+  .venv/bin/python -c 'import psychtoolbox.audio as a; [print(p["DeviceName"]) for p in a.get_devices() if int(p["NrOutputChannels"]) >= 2]'
 ```
 
 ### Open items on this machine

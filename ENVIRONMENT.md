@@ -116,6 +116,28 @@ A machine records the output it expects with `PREFLIGHT_AUDIO_DEVICE` in
 **Expected audio device** row and fails when the OS default is something else, and
 the session opens that device.
 
+### Finding that value on a new machine
+
+`PREFLIGHT_AUDIO_DEVICE` must match the *description* of the sink the machine
+uses, which is also the name PTB sees through PipeWire JACK. Read both, then copy
+the description:
+
+```bash
+pactl get-default-sink                                  # which sink is the default
+pactl list sinks | grep -A3 'Description:'              # its human name + the others
+
+# the names PTB will actually open (needs pipewire-jack, section 1)
+pw-jack env LD_PRELOAD=$(ls /usr/lib/*/pipewire-0.3/jack/libjack.so | head -1) \
+  .venv/bin/python -c 'import psychtoolbox.audio as a; [print(p["DeviceName"]) for p in a.get_devices() if int(p["NrOutputChannels"]) >= 2]'
+```
+
+If the default is not the output the study should use, change it in **Settings →
+Sound** (or `pactl set-default-sink <sink name>`) before preflight — the launcher
+only reads the default, it never chooses one. A digital output also needs
+`PREFLIGHT_ALLOW_DIGITAL_SINK='1'` on that machine (section 2). Leave
+`PREFLIGHT_AUDIO_DEVICE` empty when any default output is acceptable: the session
+then follows whatever the OS default is.
+
 1. Install `pipewire-jack` (see above).
 2. Confirm PipeWire daemons are running: `pgrep -c pipewire` should print ≥ 3
    (`pipewire`, the `filter-chain.conf` instance, and `pipewire-pulse`).
@@ -297,7 +319,7 @@ machine, and preflight reports each one:
 | `PREFLIGHT_MACHINE_NAME` | `preflight_local.sh` | Machine |
 | `PREFLIGHT_MACHINE_UUID`, `PREFLIGHT_MACHINE_SERIAL` | `preflight_local.sh`, read once with sudo from `/sys/class/dmi/id` | Machine, session metadata |
 | `PREFLIGHT_AUDIO_HEADPHONES` | `preflight_local.sh` | Audio chain |
-| `PREFLIGHT_AUDIO_DEVICE` (exact PTB device name) | `preflight_local.sh` | Expected audio device |
+| `PREFLIGHT_AUDIO_DEVICE` (exact PTB device name; see section 2 for how to read it) | `preflight_local.sh` | Expected audio device |
 | Lab share mount | the machine's mount configuration (`//psyc-files.ucsc.edu/PSYC-Projects/Camp-Lab` on `/mnt/camp-lab-server`) | Lab server |
 | `.venv` from `requirements-lock.txt` | the checkout | Experiment runtime |
 | System packages | apt, section 1 | PTB audio route, Lab server |
