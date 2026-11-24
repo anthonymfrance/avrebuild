@@ -3,6 +3,19 @@
 Timing is PTB software-reported only; there is no microphone, photodiode, or loopback measurement
 (the metadata note "PTB software-reported timing, no physical measurement" is kept).
 
+## Participant wording: comfort control and coverage over caution
+
+- **The volume dial is offered on the Sound Check screen.** Preflight pins the system level so
+  sessions stay comparable, which leaves the dial on the audio box as the participant's own comfort
+  control. The screen now says so, with `R` replaying the tone at the new level, so a participant who
+  finds it uncomfortable can fix it there instead of sitting through the session.
+- **The last scoring page asks for coverage over caution.** After "false alarm" is defined, the page
+  before the practice adds "Do your best, and try to react to every target you see... we would much
+  rather you press too often than miss a target." The page that *defines* a false alarm keeps its
+  "aim to keep these low", so the trade-off is stated once, where the response habit starts. The page
+  stays inside the 70-word budget (62 words). No block-intro line was added: the per-trial recap
+  already carries the reminder.
+
 ## Catch-up offer in the launcher
 
 - **Preflight offers the update instead of requiring a walk to each computer.** When the checkout

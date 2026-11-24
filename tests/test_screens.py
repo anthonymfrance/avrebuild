@@ -372,7 +372,29 @@ def test_scoring_rules_screen_defines_every_outcome_across_pages():
     assert f'{config.RESPONSE_WINDOW:g} seconds' in message
     assert f'{config.TARGET_CORNER_HOLD:g} seconds' in message
     assert 'Press SPACE to start the practice.' in pages[-1]
+    assert 'much rather you press too often than miss a target' in oneline(pages[-1])
     assert all(len(page.split()) <= PAGE_WORD_BUDGET for page in pages)
+
+
+def test_sound_check_offers_the_volume_dial_as_a_comfort_control():
+    class Tone:
+        plays = 0
+
+        def play(self):
+            type(self).plays += 1
+
+        def stop(self):
+            pass
+
+    FakeText.instances.clear()
+    window = FakeWindow()
+    keyboard = FakeKeyboard(['space'])
+    assert screens.sound_check(window, keyboard, FakeVisual(), Tone()) is True
+    message = FakeText.instances[-1].text
+    # The system level is pinned, so the dial is the participant's own control and
+    # the replay key has to sit beside the offer.
+    assert 'turn the volume dial' in oneline(message)
+    assert 'Press R to hear it again at the new level.' in message
 
 
 def test_every_instruction_and_scoring_page_waits_for_space():

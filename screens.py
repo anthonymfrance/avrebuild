@@ -151,11 +151,19 @@ SCORING_PAGES = (
     'Press SPACE to continue.',
 
     'Only 1, 2, 4 and 5 count as responses. Any other key is ignored.\n\n'
-    # "3 short rounds" mirrors practice.TIERS: screens.py cannot import practice
-    # (practice imports screens), and a config value would be frozen into the
-    # participant-plan snapshot.
+    # Coverage over caution: an unpressed target is a miss the participant cannot
+    # recover, while an extra press is a false alarm the scorer already knows how
+    # to count. The page that defines a false alarm keeps its "aim to keep these
+    # low", so this last page carries the trade-off explicitly, right before the
+    # practice that starts the response habit.
+    'Do your best, and try to react to every target you see.\n'
+    'If you are not sure whether a picture is your target, press anyway: we would\n'
+    'much rather you press too often than miss a target.\n\n'
     'Press SPACE to start the practice. There are 3 short rounds.',
 )
+# The rounds count above mirrors practice.TIERS: screens.py cannot import practice
+# (practice imports screens), and a config value would be frozen into the
+# participant-plan snapshot.
 
 
 def _text(window, visual, height=22, **kwargs):
@@ -289,7 +297,13 @@ def sound_check(window, kb, visual, test_tone):
     text.text = (
         'Sound Check\n\n'
         'Listen for a short sound.\n\n'
-        'Press R to hear it again.\n'
+        # The system level is pinned so sessions are comparable, which leaves the
+        # dial on the audio box as the participant's own comfort control. Offering
+        # it here, with R beside it, means they can turn it and hear the new level
+        # immediately instead of sitting through an uncomfortable session.
+        'If the sound is too loud or uncomfortable, turn the volume dial\n'
+        'to a level that is comfortable for you.\n\n'
+        'Press R to hear it again at the new level.\n'
         'Press SPACE if you heard it.\n'
         'Press N if you did not hear it.\n\n'
         # The plan is generated the moment SPACE confirms the sound check, and
