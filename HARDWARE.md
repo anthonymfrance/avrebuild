@@ -247,3 +247,87 @@ serial from the two machines above, so sessions cannot merge.
 - **A slower CPU than its siblings** (i5-6500, 4 threads vs i7-7700, 8 threads).
   Worth watching the first session's dropped-frame counts before trusting its
   timing against the other two.
+
+---
+
+## left-blue-405
+
+A fourth Alienware Aurora R6, a different unit from the two towers above
+(different DMI UUID, serial, wired NIC MAC and SSD), and closer to
+`rightmost-435-white` in one respect: it carries only 8 GB of RAM. Peripheral
+differences matter more than the chassis: a TOSHIBA M.2 SSD instead of the
+SanDisk/Crucial pair above, and an **iFi ZEN Air DAC 2** in place of the older
+iFi USB Audio SE UAC1, so its audio device name and route profile are not
+interchangeable with the machines in 435.
+
+| Field | Value |
+| --- | --- |
+| Study machine name | `left-blue-405` (`PREFLIGHT_MACHINE_NAME`) |
+| Room | 405 (`PREFLIGHT_MACHINE_ROOM`, one-time operator setup) |
+| DMI product UUID | `4c4c4544-0057-5110-805a-cac04f574b32` (`PREFLIGHT_MACHINE_UUID`) |
+| DMI product serial | `JWQZWK2` (`PREFLIGHT_MACHINE_SERIAL`) |
+| Hostname | `point-magu-Aurora-R6` |
+| Model | Alienware Aurora R6 (DMI type 3, desktop) |
+| Motherboard | Alienware `07HV66` rev `A01` |
+| BIOS | `1.0.23`, 2020-06-11 |
+| OS / kernel | Ubuntu 24.04.5 LTS, `7.0.0-43-generic` x86_64 |
+| CPU | Intel Core i7-7700 @ 3.60 GHz, 4 cores / 8 threads, 1 socket (auto) |
+| RAM | 7.5 GB (auto) — about half of the two 435 Aurora towers |
+| GPU | NVIDIA GP104 GeForce GTX 1080, driver `580.178.04` (auto) |
+| Storage | TOSHIBA `KSG60ZMV256G` M.2 2280 256 GB (238.5 GiB), single disk (auto) |
+| Wired NIC (recorded as `machine_mac`) | `enp4s0` `14:b3:1f:1b:c6:ee` (auto) |
+| Wireless NIC | `wlp3s0` `f8:34:41:8b:ce:af` (auto, not recorded in sessions) |
+| Session type | X11 (auto) |
+| Monitor | DP-4, 2560×1440 @ 240.00 Hz active, 600×340 mm; the panel also offers 1920×1080 @ 119.98 Hz, which preflight selects (auto) |
+| Monitor make / model | ViewSonic `XG2736-2K` (EDID PNP id `VSC`, product `0x0f41`, EDID serial `XPH252400377`, built week 24/2025, 60×34 cm) — same model as the three machines above, different unit |
+| Audio device(s) | iFi ZEN Air DAC 2 (USB `2fc6:f082`, card `alsa_card.usb-iFi_ZEN_Air_DAC_2_iFi_USB_Audio_SE-00`, active profile `output:analog-stereo`), onboard Realtek ALC3861 (`alsa_card.pci-0000_00_1f.3`), GP104 HDMI audio (`alsa_card.pci-0000_01_00.1`) (auto) |
+| AMP / DAC make / model | iFi ZEN Air DAC 2 (USB DAC/amp), USB `2fc6:f082` — **not** the UAC1 unit on the two 435 towers |
+| Expected default output (`PREFLIGHT_AUDIO_DEVICE`) | `ZEN Air DAC 2 Analog Stereo` — pinned in `preflight_local.sh`, so preflight fails if another sink becomes the default |
+| AMP / DAC gain (PowerMatch) | **fill in** — switch position and XBass state not yet read on this unit |
+| Headphones | Sennheiser HD 300 PRO (`PREFLIGHT_AUDIO_HEADPHONES`) |
+| Keyboard | SiGma Micro `AKB-670UB`, USB `1c4f:0043` — same model as the other machines (auto) |
+| Mouse | Logitech G102/G203 LIGHTSYNC, USB `046d:c092` (auto) |
+
+Keyboard and mouse are identified by their USB vendor:product IDs; the label
+serials printed on this machine's individual units have not been read.
+
+### Setup state (2026-11-24)
+
+| Item | State |
+| --- | --- |
+| `pipewire-jack` | installed (`pw-jack` at `/usr/bin/pw-jack`, `libjack.so` present) |
+| Study runtime | `.venv` → Python 3.10.22, PsychoPy `2026.1.3`, numpy 2.2.6; imports `psychopy, psychtoolbox, numpy, PIL` |
+| Code revision | `b3497a8` (`main`), no tracked modifications |
+| Lab server | `/mnt/camp-lab-server/Anthony` (CIFS, `//psyc-files.ucsc.edu/PSYC-Projects/Camp-Lab`); `Anthony/data` reachable |
+| PTB audio route | default sink is the ZEN Air DAC 2's **analog** output, exposed through PipeWire JACK as `ZEN Air DAC 2 Analog Stereo`; the route check passes on the analog path |
+| Headphone L/R balance | centered (`balance 0.00`) |
+| Output volume | currently 100%; `preflight.sh` pins it to `config.SYSTEM_VOLUME_PERCENT` (50%) at launch |
+| Session audio device | pinned to `ZEN Air DAC 2 Analog Stereo` via `PREFLIGHT_AUDIO_DEVICE` |
+| APT | 87 packages upgradable — update deliberately, not the night before a session |
+| Not run | `./preflight.sh` has not been run since this section was written, so the GUI checklist is unverified |
+
+### Open items on this machine
+
+- **The DAC differs from the two 435 Aurora towers.** This one's ZEN Air DAC 2
+  runs its **analog** profile (`output:analog-stereo`) and that analog sink is the
+  machine's pinned route, so the tracked `PREFLIGHT_ALLOW_DIGITAL_SINK='1'`
+  (which the UAC1 machines need for their IEC958 route) is irrelevant here and
+  merely harmless. If this card is ever switched to a digital/IEC958 profile that
+  flag would let a digital default through, so the pinned
+  `PREFLIGHT_AUDIO_DEVICE` is what actually keeps the route honest — do not clear
+  it.
+- **PowerMatch / XBass are outside software control.** The system sink is pinned
+  to 50% and PTB gain stays at 1.0, so any hardware gain the ZEN Air DAC 2 applies
+  is invisible to preflight and to session metadata. Read the switch once, set it
+  to the same position as the machines above, and replace **fill in** in the table.
+- **Half the RAM of the 435 towers (7.5 GB).** Watch the first session's
+  dropped-frame counts and check `free -h` before launch; it is the only machine
+  here where a browser left open could matter.
+- **Different kernel** (`7.0.0-43-generic`) from the `6.17.0-14-generic` machine,
+  so `tools/device_report.py` will list a `kernel` difference. Harmless for
+  timing, but a timing question cannot be settled by "same kernel".
+- **A second room.** The operator confirmed room **405**, so this machine is not
+  a fourth computer in 435 and its sessions carry `machine_room=405`. The name was
+  kept as `left-blue-405` rather than reworded to the 435 position/colour
+  convention, so existing local records still match; room is stored separately and
+  is never parsed out of the name (ENVIRONMENT.md §3).
