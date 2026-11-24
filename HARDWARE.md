@@ -182,3 +182,68 @@ to this row; this machine's own units have not been read off their labels yet.
 - **Name confirmed by the operator as the middle computer, purple.** `PREFLIGHT_MACHINE_NAME`
   is `middle-435-purple`; the camp-site hostname stays the hostname, matching the
   convention on the machine above.
+
+---
+
+## rightmost-435-white
+
+Rightmost computer in room 435, named for its white mouse. It is also the
+**older** of the three: a Dell OptiPlex 7040 SFF rather than the Alienware Aurora
+R6 towers. Different DMI UUID, serial, wired NIC MAC, disk and monitor
+serial from the two machines above, so sessions cannot merge.
+
+| Field | Value |
+| --- | --- |
+| Study machine name | `rightmost-435-white` (`PREFLIGHT_MACHINE_NAME`) |
+| Room | 435 (`PREFLIGHT_MACHINE_ROOM`) |
+| DMI product UUID | `4c4c4544-0059-5910-8030-b4c04f4a4232` (`PREFLIGHT_MACHINE_UUID`) |
+| DMI product serial | `4YY0JB2` (`PREFLIGHT_MACHINE_SERIAL`) |
+| Hostname | `dogwood-OptiPlex-7040` |
+| Model | Dell OptiPlex 7040 (DMI type 3, small form factor desktop) |
+| Motherboard | Dell `0HD5W2` rev `A01` |
+| BIOS | `1.24.0`, 2022-07-14 |
+| OS / kernel | Ubuntu 24.04.4 LTS, `7.0.0-42-generic` x86_64 |
+| CPU | Intel Core i5-6500 @ 3.20 GHz, 4 cores / 4 threads, 1 socket, **no hyper-threading** (auto) |
+| RAM | 15 GB (auto) |
+| GPU | Intel HD Graphics 530 only (Skylake GT2), Mesa `25.2.8-0ubuntu0.24.04.2`, OpenGL 4.6; **no discrete NVIDIA card** — `nvidia-smi` cannot reach a driver, which is expected here (auto) |
+| Storage | TOSHIBA `THNSNK256GCS8` 256 GB SATA SSD (238.5 GiB), plus TSSTcorp `DVD+/-RW SU-208GB` (auto) |
+| Wired NIC (recorded as `machine_mac`) | `enp0s31f6` `18:66:da:18:32:98` (`e1000e`) (auto) |
+| Wireless NIC | none present (auto) |
+| Session type | X11 (auto) |
+| Monitor | DP-2, 1920×1080 @ 120.00 Hz active, 597×336 mm; the panel also offers 119.88/119.98/60 Hz (auto) |
+| Monitor make / model | ViewSonic `XG2736-2K` (EDID PNP id `VSC`, product `0x0f41`, EDID serial `XPH252400389`, built week 24/2025, 60×34 cm) — same model as the two machines above, different unit |
+| Audio device(s) | onboard Realtek only (`alsa_card.pci-0000_00_1f.3`); no USB DAC and no GP104 HDMI audio, unlike the two Alienware machines (auto) |
+| AMP / DAC make / model | none — headphones plug into the onboard analog jack (active port `analog-output-headphones`) |
+| Expected default output (`PREFLIGHT_AUDIO_DEVICE`) | **left empty on purpose**: the session follows the OS default, which is `Built-in Audio Analog Stereo`. This machine has no DAC to pin |
+| AMP / DAC gain (PowerMatch) | not applicable — no DAC/amp in the chain |
+| Headphones | Sennheiser HD 300 PRO (`PREFLIGHT_AUDIO_HEADPHONES`) |
+| Keyboard | SiGma Micro `AKB-670UB`, USB `1c4f:0043` — same model as the two machines above (auto) |
+| Mouse | Logitech G102/G203 LIGHTSYNC, USB `046d:c092`, white unit (auto) |
+
+### Setup state (2026-11-24)
+
+| Item | State |
+| --- | --- |
+| `pipewire-jack` | installed (`pw-jack` at `/usr/bin/pw-jack`, `libjack.so` present) |
+| Study runtime | **no `.venv` on this machine.** Preflight falls back to the PsychoPy app runtime at `~/.config/psychopy4/.python/2026.1.3/bin/python3`, which is the documented fallback (ENVIRONMENT.md §3); the pinned `requirements-lock.txt` environment has not been built here |
+| Code revision | `4a85241` (`main`), no tracked modifications; untracked local files only |
+| Lab server | **not mounted yet** — `/mnt/camp-lab-server` does not exist here and this machine is not expected to reach the share for now. Preflight warns and asks you to accept local-only storage; sessions stay in `data/participant_NN/` |
+| PTB audio route | analog default sink `alsa_output.pci-0000_00_1f.3.analog-stereo`, accepted (the tracked `PREFLIGHT_ALLOW_DIGITAL_SINK='1'` is irrelevant here) |
+| Headphone L/R balance | centered (`balance 0.00`) |
+| Output volume | currently 50%, which is `config.SYSTEM_VOLUME_PERCENT`; `preflight.sh` re-pins it at every launch |
+| APT | 2 packages upgradable (`matlab-psychtoolbox-3` 3.0.19.14 → 3.0.22.3); update deliberately, not the night before a session |
+| Not run | `./preflight.sh` has not been run on this machine, so the GUI checklist is unverified |
+
+### Open items on this machine
+
+- **No pinned runtime.** Building `.venv` with `uv venv --python 3.10 .venv` and
+  `requirements-lock.txt` would make its timing/audio stack identical to the other
+  two machines instead of relying on the PsychoPy app runtime.
+- **No lab-server mount.** Every session from this machine is local-only until a
+  mount is added here; add `PREFLIGHT_SERVER_ROOT` to `preflight_local.sh` (not to
+  the tracked config) when that changes.
+- **Intel-only graphics** where the other two have a GTX 1080. Not a timing
+  guarantee either way — `preflight.sh`'s refresh row is the check that matters.
+- **A slower CPU than its siblings** (i5-6500, 4 threads vs i7-7700, 8 threads).
+  Worth watching the first session's dropped-frame counts before trusting its
+  timing against the other two.
