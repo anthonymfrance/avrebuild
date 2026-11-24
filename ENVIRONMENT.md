@@ -287,6 +287,14 @@ the allocating PID, host, and UTC start time, so two lab computers cannot both r
 the same participant number. Abandoned claims expire after
 `config.PARTICIPANT_CLAIM_TTL_HOURS` (12 hours).
 
+A claim whose participant folder is missing from **every** data root is reclaimed
+after `participant_setup.ORPHAN_CLAIM_AGE_HOURS` (2 hours) instead, so a setup that
+died before the plan was generated cannot hold a number for half a day. The window
+is that long on purpose: a session running on another computer keeps its folder on
+that computer and copies nothing to the share until it is saved, so from here a
+live session and a dead claim look the same, and only age tells them apart. Nothing
+but the reservation file is deleted — participant folders are never touched.
+
 `/mnt/camp-lab-server/Anthony/data/old data/` holds the five sessions collected
 before this machine moved to the Camp-Lab share (`participant_01`..`participant_05`).
 Those folders do not match `participant_NN`, so allocation in `data/` restarts at

@@ -101,6 +101,14 @@ def build_plan(seed, block_order, count_ranges=None, diagnostics=None):
 CLAIM_DIR_NAME = '.claims'
 CLAIM_SUFFIX = '.lock'
 CLAIM_WRITE_GRACE_SECONDS = 60
+# A claim whose participant folder is missing from every data root has nothing to
+# show for itself, so it is reclaimed on this age instead of the full claim TTL:
+# a setup that died before the plan was generated must not burn a participant
+# number for the rest of the day. Two hours is far longer than claiming, the hand
+# and numpad checks, the sound check and plan generation take together, which is
+# what keeps this safe. Deliberately not in config.py, whose values are frozen
+# into every plan snapshot.
+ORPHAN_CLAIM_AGE_HOURS = 2
 
 
 def data_directories(data_dir):
@@ -151,15 +159,48 @@ def _claim_is_expired(claim, path):
     )
 
 
+def _claim_is_orphaned(claim, path):
+    """True when a folder-less claim has outlived the setup window.
+
+    The caller has already established that no participant folder exists for this
+    claim in any visible data root. That alone is not proof of abandonment: a
+    session running on another computer keeps its folder on that computer and
+    copies nothing to the share until it is saved, so a live session and a claim
+    left by a crashed setup look identical from here. Age is the only evidence
+    available, hence the deliberately generous window.
+    """
+    started_utc = (claim or {}).get('started_utc')
+    if not started_utc:
+        # No start time to judge: _claim_is_expired applies the write grace instead.
+        return False
+    try:
+        started_at = datetime.fromisoformat(str(started_utc))
+    except ValueError:
+        return True
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - started_at > timedelta(
+        hours=ORPHAN_CLAIM_AGE_HOURS
+    )
+
+
 def _occupied_participant_numbers(data_dirs):
-    """Participant folders plus live claims in every visible data root."""
-    numbers = set()
-    for root in map(Path, data_dirs):
+    """Participant folders plus live claims in every visible data root.
+
+    Folders are collected from every root before any claim is judged: whether a
+    claim is an orphan depends on the absence of a folder in all of them, not on
+    whichever root happened to be scanned first.
+    """
+    roots = [Path(root) for root in data_dirs]
+    folder_numbers = set()
+    for root in roots:
         if root.is_dir():
             for entry in root.iterdir():
                 match = PARTICIPANT_PATTERN.fullmatch(entry.name)
                 if match:
-                    numbers.add(int(match.group(1)))
+                    folder_numbers.add(int(match.group(1)))
+    numbers = set(folder_numbers)
+    for root in roots:
         claim_dir = root / CLAIM_DIR_NAME
         if not claim_dir.is_dir():
             continue
@@ -167,7 +208,12 @@ def _occupied_participant_numbers(data_dirs):
             number = _claim_number(claim_path)
             if number is None:
                 continue
-            if _claim_is_expired(_read_claim(claim_path), claim_path):
+            claim = _read_claim(claim_path)
+            # Expired claims are abandoned, and so are folder-less claims past the
+            # orphan window; both are reclaimed by deleting the reservation only.
+            if _claim_is_expired(claim, claim_path) or (
+                number not in folder_numbers and _claim_is_orphaned(claim, claim_path)
+            ):
                 try:
                     claim_path.unlink()
                 except OSError:

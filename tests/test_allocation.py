@@ -249,6 +249,64 @@ def test_expired_claim_is_reclaimed_without_skipping_numbers(tmp_path, monkeypat
     assert not (claim_dir / 'participant_01.lock').exists()
 
 
+def write_aged_claim(claim_dir, participant_id, hours):
+    """A claim left by another machine, started the given number of hours ago."""
+    claim_dir.mkdir(parents=True, exist_ok=True)
+    started = datetime.now(timezone.utc) - timedelta(hours=hours)
+    (claim_dir / f'{participant_id}.lock').write_text(json.dumps({
+        'participant_id': participant_id, 'pid': 1, 'host': 'other-machine',
+        'started_utc': started.isoformat(), 'token': 'stale',
+    }))
+
+
+def test_folderless_claim_is_reclaimed_after_the_orphan_window(tmp_path, monkeypatch):
+    monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
+    monkeypatch.delenv('AV_STUDY_SERVER_DATA_PATH', raising=False)
+    claim_dir = tmp_path / '.claims'
+    write_aged_claim(claim_dir, 'participant_01', hours=3)
+    assert participant_setup.ORPHAN_CLAIM_AGE_HOURS < config.PARTICIPANT_CLAIM_TTL_HOURS
+    assert next_participant_id(tmp_path) == 'participant_01'
+    assert not (claim_dir / 'participant_01.lock').exists()
+
+
+def test_folderless_claim_inside_the_orphan_window_is_kept(tmp_path, monkeypatch):
+    monkeypatch.delenv('AV_STUDY_SERVER_ROOT', raising=False)
+    monkeypatch.delenv('AV_STUDY_SERVER_DATA_PATH', raising=False)
+    claim_dir = tmp_path / '.claims'
+    write_aged_claim(claim_dir, 'participant_01', hours=1)
+    assert next_participant_id(tmp_path) == 'participant_02'
+    assert (claim_dir / 'participant_01.lock').exists()
+
+
+def test_a_long_session_keeps_its_claim_through_its_own_folder(tmp_path, monkeypatch):
+    """A session that outlives the orphan window must not lose its number: it is
+    still running, and its folder only exists on its own computer."""
+    local = tmp_path / 'local' / 'data'
+    server = tmp_path / 'server_data'
+    server.mkdir()
+    monkeypatch.setenv('AV_STUDY_SERVER_ROOT', str(tmp_path / 'share'))
+    monkeypatch.setenv('AV_STUDY_SERVER_DATA_PATH', str(server))
+    claim_dir = server / '.claims'
+    write_aged_claim(claim_dir, 'participant_01', hours=5)
+    (local / 'participant_01').mkdir(parents=True)
+    assert next_participant_id(local) == 'participant_02'
+    assert (claim_dir / 'participant_01.lock').exists()
+
+
+def test_a_folder_on_the_server_keeps_a_claim_alive(tmp_path, monkeypatch):
+    """The folder check spans every root, so the share counts too."""
+    local = tmp_path / 'local' / 'data'
+    server = tmp_path / 'server_data'
+    server.mkdir()
+    monkeypatch.setenv('AV_STUDY_SERVER_ROOT', str(tmp_path / 'share'))
+    monkeypatch.setenv('AV_STUDY_SERVER_DATA_PATH', str(server))
+    claim_dir = server / '.claims'
+    write_aged_claim(claim_dir, 'participant_01', hours=5)
+    (server / 'participant_01').mkdir(parents=True)
+    assert next_participant_id(local) == 'participant_02'
+    assert (claim_dir / 'participant_01.lock').exists()
+
+
 def test_claim_refuses_participant_folder_already_on_server(tmp_path, monkeypatch):
     local = tmp_path / 'local' / 'data'
     server = tmp_path / 'server_data'

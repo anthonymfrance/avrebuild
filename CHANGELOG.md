@@ -3,6 +3,19 @@
 Timing is PTB software-reported only; there is no microphone, photodiode, or loopback measurement
 (the metadata note "PTB software-reported timing, no physical measurement" is kept).
 
+## Folder-less participant claims expire after two hours
+
+- **A claim with no participant folder anywhere is reclaimed after 2 h**, not the 12 h
+  `PARTICIPANT_CLAIM_TTL_HOURS`. A setup that dies between reserving an ID and generating the plan
+  (the plan folder is only created after the sound check) used to burn that number for the rest of
+  the day; the first real session on this machine would have been `participant_02` for exactly that
+  reason. `participant_setup._claim_is_orphaned()` judges only the age, because a session running on
+  another computer is invisible from here: it keeps its folder locally and copies nothing to the
+  share until it is saved. Folders are now collected from every data root before any claim is
+  judged, so a folder on the share keeps its local claim alive. Only the reservation file is
+  removed, never a participant folder. `ORPHAN_CLAIM_AGE_HOURS` lives in `participant_setup.py`, not
+  `config.py`, so no plan snapshot changes.
+
 ## Participant wording: comfort control and coverage over caution
 
 - **The volume dial is offered on the Sound Check screen.** Preflight pins the system level so
